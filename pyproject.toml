@@ -1,0 +1,24 @@
+[project]
+name = "ai-banking-agent"
+version = "0.1.0"
+description = "2026 FinTechathon AI Banking Agent（模拟环境）"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "pydantic>=2.7",
+    "fastapi>=0.111",
+    "uvicorn>=0.30",
+    "streamlit>=1.36",
+    "openai>=1.40",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --tb=short"
