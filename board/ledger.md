@@ -11,7 +11,7 @@
 | card-01 | e2c1046 | 未审（审核机制建于其后） | 数据层建库；我事后独立复验：pytest exit 0、schema 10 表与规格一致 |
 | card-02 | 0c60abc | PASS（board/reviews/card-02.md，无 MUST_FIX） | 12 个月合成数据；verify 绿。原 5561965 被 reset 重做为干净提交（仅 seed.py + test_seed.py） |
 | infra | fb40cbb | 人工 | 三人小组编排器 v2 + 角色定义 + 账本；.gitignore 补 board/.tmp/ |
-| card-03 | （待提交） | PASS（board/reviews/card-03.md，无 MUST_FIX） | DAO 层 14 函数 + 119 测试；verify 绿（183 passed）。交付 data/dao.py + tests/test_dao.py 尚未 commit，存档点待补 |
+| card-03 | 166f39d | PASS（card-03.md 无 MUST_FIX + delta review PASS） | DAO 层 14 函数 + 121 测试；verify 绿（185 passed）。审核后增量（volatile 幂等豁免 + 2 测试）经 delta review 确认无幂等漏洞、变异抽查有效 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -19,8 +19,14 @@
 |---|---|---|---|
 | card-01 | `data/db.py` 的 `transaction()` 不可嵌套 | 卡 05 写多步事务时会抛 "cannot start a transaction within a transaction" | 待卡 05 验证（不影响卡 03/04 单条读写） |
 | card-02 | `git add -A` 把编排器脚手架混进卡 commit | 提交历史污染 | 已解决：5561965 已 reset 重做为 0c60abc；fb40cbb 已给 .gitignore 补 board/.tmp/，`git check-ignore` 验证生效 |
-| card-03 | data/dao.py(371)/tests/test_dao.py(388) 单文件超 300 行，靠"顶层函数空 1 行"硬挤破坏 PEP8 | 评审逐条对代码规范可扣分 | 非阻塞（第 1 次）。建议后续卡抽 data/_dao_core.py；不阻塞卡 04 |
+| card-03 | data/dao.py(371)/tests/test_dao.py(388) 单文件超 300 行，靠"顶层函数空 1 行"硬挤破坏 PEP8 | 评审逐条对代码规范可扣分 | **第 2 次出现（delta review 再报 dao.py 368→371 / test_dao.py 388→425）→ 升级为阻塞**：card-03b 先抽 data/_dao_core.py 恢复 PEP8 2 空行，再进工具层 |
 | card-03 | DAO 读接口（get_card/get_subscription/get_product）不按 user 圈定 | 属正确分层，但 tools/（卡 04-07）若不做资源归属断言则出现越权读他人卡/订阅 | 传导卡 04-07：每个资源查询带 user 归属断言 + 越权单测（规格 L2） |
+| card-03 | 审核 PASS 后代码又被改（+volatile 幂等豁免 3 行 + 2 条测试）才提交 166f39d | 审核结论覆盖的是 183passed 版，最终提交是 185passed 版，差额未经审核师复核 | **已闭环**：审核师 delta review = PASS（无 MUST_FIX，变异抽查 2 处均真报警） |
+| card-03（delta） | `test_retry_...` 里 txn 段用显式 STAMP 而非 None，insert_txn 自生成 ts 的豁免路径未被直接覆盖（仅 risk_event/audit 覆盖） | 若未来单独改坏 insert_txn 的 ts is None 分支，该测试不红 | 传导卡 04：补 insert_txn(ACCOUNT, None, ...) 连续两次的幂等用例 |
+| card-03（delta） | 「自生成 ts + 异内容 → 冲突」无直接用例 | 缺一条显式回归钉住该组合 | 传导卡 04：加 ts=None、同 id、异 amount 必须 ValueError 的用例 |
+| card-03（delta） | 幂等比对用 `existing[name] != value` 直接比较，依赖列类型读回后与写入端一致 | 若将来扩表写入类型与 DDL 存储类型错位，会恒判「不同」误报冲突 | 传导卡 04 后：扩表时留意列类型一致性 |
+| card-03（delta） | `_insert` 的 volatile 是通用列名元组，当前仅被 ts 用；未来误把业务列（amount）写进 volatile 会静默漏比对 | 同 id 异金额被当同一条吞掉（幂等静默失效） | **card-03b 收窄**：改成布尔 skip_ts，或断言 volatile ⊆ {"ts"} |
+| card-03（delta） | retry 测试 `monkeypatch.setattr(dao, "datetime", Clock)` 绑定「DAO 用模块级 now() 取时间」的实现细节 | 改时间来源（sqlite CURRENT_TIMESTAMP / time.time()）后该测试假绿/假红 | 传导：将来动时间来源时同步改该测试 |
 
 ## 人类批示
 
@@ -64,3 +70,63 @@ MODEL: deepseek-v4-pro
 ACTION: fix_first
 REASON: card-03 已 PASS 但存档点缺失（交付文件未提交）。先精准提交 card-03：`git add data/dao.py tests/test_dao.py`（禁止 -A）→ commit，board/ 单独记账提交，再跑 card-04。card-04 是工具层首卡，含 detect_anomalies 风控规则 + generate_bill_report 的 facts/markdown 数字一致性（幻觉校验）→ 必须 v4-pro。
 NEXT_CARD_WARNING: card-04 每个数字必须进 facts 包、generate_bill_report 的 markdown 数字与 facts 逐字一致；DAO 读接口不按 user 圈定，工具层给资源查询带 user 归属断言并配越权单测（规格 L2）；阈值常量注明来源（近90天均值3倍 / 23:00-06:00 / 同商户1小时≥3笔）。
+
+## 决策记录 2026-09-12 18:53
+
+事实（自己查到的）：
+  - 最新存档点：a3e25e7 board: card-03 记账（HEAD）；其下 166f39d card-03 / fb40cbb infra / 0c60abc card-02
+  - 工作区：clean（nothing to commit）
+  - verify：绿。185 passed；用例/冒烟/红线三处 SKIP（卡 11/09/12-13 未实现，预期非回退）
+  - 最近审核：card-03 = PASS（board/reviews/card-03.md，无 MUST_FIX，3 条非阻塞 RISK）
+  - ⚠ 进程可信度发现：审核师审的版本是 183 passed / 119 条 DAO 测试 / dao.py 368 行，但最终提交 166f39d 是 185 passed / 121 条 / 371 行。差额 = 审核 PASS 后代码又被改：dao.py 的 `_insert` 加了 `volatile` 参数（幂等比对豁免自生成的 ts，3 行）+ 2 条测试（test_retry_across_a_second_boundary_is_still_idempotent / test_explicitly_different_ts_still_conflicts，共 37 行）。这个改动落在审核师重点审过的"幂等"语义上，且未经复核。
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03（均已 commit）
+  - 卡在哪：card-03 代码与测试已提交，但存在"审核后增量未复核"的缝隙——审核结论与最终提交物不对版
+  - 风险累积：新增"审核后改动未复核"第 1 次，但性质严重（改了幂等核心语义 + 审核结论失配），升级为阻塞：先 delta review 再推进
+
+NEXT_CARD: 04
+MODEL: deepseek-v4-pro
+ACTION: fix_first
+REASON: card-03 存档点已落（166f39d），但审核 PASS 后代码又动了 3 行幂等逻辑 + 2 条测试才提交，审核结论覆盖的是旧版。这个增量恰在审核师重点审的幂等语义上，不能默认 PASS 依然成立。先让审核师对 166f39d 相对审核版的增量做 delta review，闭环后再跑 card-04（工具层首卡，含风控规则 + facts/markdown 幻觉校验，必须 v4-pro）。
+NEXT_CARD_WARNING: 同上一卡：card-04 数字全部进 facts、generate_bill_report 数字与 facts 逐字一致、资源查询带 user 归属断言 + 越权单测（L2）、阈值常量注明来源；另注意 card-03 的 volatile 幂等豁免若被 delta review 判 FAIL，则 card-04 的写路径（虽然 T1-T5 是只读）也要等它闭环。
+
+## 决策记录 2026-09-12 19:01
+
+事实（自己查到的）：
+  - 最新存档点：a3e25e7 board: card-03 记账（HEAD）
+  - 工作区：有未提交改动 —— 仅 M board/ledger.md（本次记账）
+  - verify：绿。185 passed（审核师 delta review 独立复跑 185 passed in 6.78s）
+  - delta review 结论：card-03 审核后增量（volatile 幂等豁免 + 2 测试）= PASS，无 MUST_FIX。变异抽查 2 处（dao.py:342 改 volatile 为恒真、dao.py:180 删 name not in volatile）均 1 failed 真报警，已还原。3 条 RISK 均为非阻塞覆盖增强建议（见台账）。
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03（均 commit，审核均闭环）
+  - 卡在哪：数据层全部完成；工具层首卡 card-04（T1-T5 只读工具）尚未开始
+  - 风险累积：上次阻塞（审核后改动未复核）已闭环归零；delta review 新出 3 条非阻塞建议传导卡 04；R1（transaction 不可嵌套）仍待卡 05；R3（单文件超行）第 1 次非阻塞
+
+NEXT_CARD: 04
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 阻塞已解除（delta review PASS、无 MUST_FIX），工作区只剩账本改动。card-04 是工具层首卡，含 detect_anomalies 风控规则 + generate_bill_report 的 facts/markdown 数字一致性（幻觉校验）+ user 归属断言（越权防护），必须 v4-pro。直接跑。
+NEXT_CARD_WARNING: card-04 每个数字必须进 facts 包；generate_bill_report 的 markdown 数字与 facts 逐字一致；资源查询（get_card/get_subscription/get_product）带 user 归属断言 + 越权单测（L2）；阈值常量注明来源（近90天均值3倍 / 23:00-06:00 / 同商户1小时≥3笔）；顺手补 3 条 delta review 建议的幂等覆盖用例。
+
+## 决策记录 2026-09-12 19:07
+
+事实（自己查到的）：
+  - 最新存档点：a3e25e7 board: card-03 记账（HEAD）；其下 166f39d card-03
+  - 工作区：仅 M board/ledger.md（本次记账）；data/dao.py mtime 19:01 是审核师变异抽查 edit+revert 的残留，内容与 166f39d 逐字节一致（git status 无 data/ 改动）
+  - verify：绿。185 passed（审核师 delta review 独立复跑 185 passed）
+  - delta review：card-03 审核后增量（volatile 幂等豁免 + 2 测试）= PASS，无 MUST_FIX，变异抽查 2 处均真报警。过程责任已由 @worker 认领，无需回滚
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03（均 commit + 审核闭环）
+  - 卡在哪：数据层闭环；进入工具层前先做一次 DAO 硬化收尾（card-03b）
+  - 风险累积：审核后改动未复核（R5）已闭环归零；300 行超限第 2 次出现 → 升级为阻塞；volatile 通用机制误用面 + retry 测试绑定时间来源，两条 delta RISK 一并进 card-03b 收口
+
+NEXT_CARD: 03b
+MODEL: deepseek-v4-pro
+ACTION: human
+REASON: 300 行超限已第 2 次出现（升级为阻塞）+ volatile 误用面是幂等静默失效隐患，收口这两条会改幂等比对语义、且是行为保持型重构，必须 v4-pro。card-03b 是张新卡，卡文件（docs/cards/card-03b.md）是人的地盘，需 @user 建卡后 worker 按正常流程做、审核师审。
+NEXT_CARD_WARNING: （card-03b 范围）data/dao.py + data/_dao_core.py（新）+ tests/test_dao.py；把 _insert 的 volatile 收窄为布尔 skip_ts（或断言 volatile ⊆ {"ts"}），私有 helper（_text/_cents/_choice/_iso_date/_stamp/_period_range/_json_text 等）抽到 _dao_core.py 恢复 PEP8 2 空行；**行为保持——185 测试必须原样绿**；顺手补 delta review 的幂等覆盖用例（insert_txn 自生成 ts 连续两次、ts=None 同 id 异 amount 冲突）。
+
+
