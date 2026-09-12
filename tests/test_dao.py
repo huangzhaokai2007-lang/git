@@ -423,3 +423,43 @@ def test_explicitly_different_ts_still_conflicts(seeded: Path) -> None:
     dao.insert_txn(ACCOUNT, STAMP, -100, "out", 1, id="txn_ts_conflict")
     with pytest.raises(ValueError, match="幂等键冲突"):
         dao.insert_txn(ACCOUNT, "2026-08-31T23:58:00", -100, "out", 1, id="txn_ts_conflict")
+
+
+@pytest.fixture()
+def ticking_clock(monkeypatch: pytest.MonkeyPatch) -> None:
+    """把 dao 模块里的时钟换成每次调用前进 1 秒的假时钟：幂等用例不靠真实秒边界的巧合。"""
+    ticks = itertools.count()
+
+    class Clock(datetime):                     # 只替换 dao 模块里的 datetime 名字
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 9, 12, 11, 0, next(ticks))
+
+    monkeypatch.setattr(dao, "datetime", Clock)
+
+
+def test_insert_txn_with_self_generated_ts_is_idempotent(seeded: Path, ticking_clock: None) -> None:
+    """ts=None 即自生成：同 id 同内容连续两次 → 第二次返回既有行、不产生第二行。
+
+    假时钟每次调用前进 1 秒，所以"两次生成的 ts 恰好相同"不可能靠巧合成立：豁免路径一旦失效，
+    第二次调用就会因 ts 不同而误报冲突。末尾的断言证明补丁确实生效（防空补丁假绿）。
+    """
+    before = count(seeded, "txn")
+    first = dao.insert_txn(ACCOUNT, None, -12_345, "out", 100, id="txn_auto")
+    assert first["ts"] == "2026-09-12T11:00:00"
+    assert dao.insert_txn(ACCOUNT, None, -12_345, "out", 100, id="txn_auto") == first
+    assert count(seeded, "txn") == before + 1
+    assert raw(seeded, "SELECT COUNT(*) AS n FROM txn WHERE id = 'txn_auto'")[0]["n"] == 1
+    later = dao.insert_txn(ACCOUNT, None, -12_345, "out", 100, id="txn_auto_2")   # 别 id，看时钟在走
+    assert datetime.fromisoformat(later["ts"]) > datetime.fromisoformat(first["ts"])
+
+
+def test_self_generated_ts_never_exempts_amount(seeded: Path, ticking_clock: None) -> None:
+    """豁免只针对自生成的 ts：ts=None、同 id、异 amount 必须 ValueError（金额永远参与比对）。"""
+    first = dao.insert_txn(ACCOUNT, None, -12_345, "out", 100, id="txn_auto_amt")
+    before = count(seeded, "txn")
+    with pytest.raises(ValueError, match="幂等键冲突"):
+        dao.insert_txn(ACCOUNT, None, -99_999, "out", 100, id="txn_auto_amt")
+    assert count(seeded, "txn") == before                    # 冲突不留半行
+    assert raw(seeded, "SELECT amount FROM txn WHERE id = 'txn_auto_amt'")[0]["amount"] == -12_345
+    assert first["amount"] == -12_345

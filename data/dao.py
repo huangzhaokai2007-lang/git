@@ -170,14 +170,17 @@ def _json_text(value: object, name: str) -> str | None:
 
 
 def _insert(table: str, columns: tuple[str, ...], values: tuple, row_id: str,
-            volatile: tuple[str, ...] = ()) -> dict:
+            skip_ts: bool = False) -> dict:
     # 按主键幂等：同 id 同内容 → 既有行；同 id 异内容 → ValueError
-    # `volatile`：DAO 自己生成的值（调用方没给 ts）不参与比对 —— 否则同一业务内容的**重试**
-    # 只要跨过一个秒边界就会被误判成"内容不同"，幂等键形同虚设。
+    # `skip_ts`：仅当 ts 是 DAO 自己生成的（调用方没给）才为 True —— 该 ts 不参与比对，
+    # 否则同一业务内容的重试只要跨过一个秒边界就会被误判成"内容不同"，幂等键形同虚设。
+    # 刻意收窄成布尔、而不是接受任意列名集合：除了这个自生成的时间戳，**所有**业务字段
+    # （尤其 amount）永远参与比对，杜绝"误把金额放进豁免集 → 同 id 异金额被静默吞掉"的幂等失效。
     with _writing() as conn:
         existing = _one(f'SELECT * FROM "{table}" WHERE id = ?', (row_id,))
         if existing is not None:
-            if any(existing[name] != value for name, value in zip(columns, values) if name not in volatile):
+            if any(existing[name] != value for name, value in zip(columns, values)
+                   if not (skip_ts and name == "ts")):
                 raise ValueError(f"{table}.id={row_id} 已存在且内容不同（幂等键冲突）")
             return existing
         holes = ", ".join("?" * len(columns))
@@ -339,7 +342,7 @@ def insert_txn(account_id: str, ts: str, amount: int, direction: str, balance_af
               _text(category, "category", allow_none=True),
               _text(channel, "channel", allow_none=True),
               _text(memo, "memo", allow_none=True), _cents(balance_after, "balance_after"))
-    return _insert("txn", _TXN_COLUMNS, values, str(values[0]), ("ts",) if ts is None else ())
+    return _insert("txn", _TXN_COLUMNS, values, str(values[0]), skip_ts=ts is None)
 
 
 def insert_audit(trace_id: str, session_id: str, *, ts: str | None = None, actor: str = "agent",
@@ -356,7 +359,7 @@ def insert_audit(trace_id: str, session_id: str, *, ts: str | None = None, actor
               _choice(permission_tier, "permission_tier", TIERS, allow_none=True),
               _choice(result, "result", AUDIT_RESULTS, allow_none=True),
               _text(error_code, "error_code", allow_none=True))
-    return _insert("audit_log", _AUDIT_COLUMNS, values, str(values[0]), ("ts",) if ts is None else ())
+    return _insert("audit_log", _AUDIT_COLUMNS, values, str(values[0]), skip_ts=ts is None)
 
 
 def insert_risk_event(user_id: str, factor: str, *, trace_id: str | None = None, ts: str | None = None,
@@ -368,4 +371,4 @@ def insert_risk_event(user_id: str, factor: str, *, trace_id: str | None = None,
               _choice(factor, "factor", RISK_FACTORS),
               _text(detail, "detail", allow_none=True),
               _choice(action_taken, "action_taken", RISK_ACTIONS, allow_none=True))
-    return _insert("risk_event", _RISK_COLUMNS, values, str(values[0]), ("ts",) if ts is None else ())
+    return _insert("risk_event", _RISK_COLUMNS, values, str(values[0]), skip_ts=ts is None)
