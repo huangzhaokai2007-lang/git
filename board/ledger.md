@@ -12,7 +12,7 @@
 | card-02 | 0c60abc | PASS（board/reviews/card-02.md，无 MUST_FIX） | 12 个月合成数据；verify 绿。原 5561965 被 reset 重做为干净提交（仅 seed.py + test_seed.py） |
 | infra | fb40cbb | 人工 | 三人小组编排器 v2 + 角色定义 + 账本；.gitignore 补 board/.tmp/ |
 | card-03 | 166f39d | PASS（card-03.md 无 MUST_FIX + delta review PASS） | DAO 层 14 函数 + 121 测试；verify 绿（185 passed）。审核后增量（volatile 幂等豁免 + 2 测试）经 delta review 确认无幂等漏洞、变异抽查有效 |
-| card-04 | （待提交） | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 工具层 T1–T5 只读工具；verify 绿（283 passed）。4 条红线变异抽查全真报警；3 文件指纹零漂移 |
+| card-04 | 745d960 | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 工具层 T1–T5 只读工具；verify 绿（283 passed）。4 条红线变异抽查全真报警；3 文件指纹零漂移 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
