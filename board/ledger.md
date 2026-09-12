@@ -27,6 +27,9 @@
 | card-03（delta） | 幂等比对用 `existing[name] != value` 直接比较，依赖列类型读回后与写入端一致 | 若将来扩表写入类型与 DDL 存储类型错位，会恒判「不同」误报冲突 | 待办：后续扩表时留意列类型一致性（非阻塞） |
 | card-03（delta） | `_insert` 的 volatile 是通用列名元组，当前仅被 ts 用；未来误把业务列（amount）写进 volatile 会静默漏比对 | 同 id 异金额被当同一条吞掉（幂等静默失效） | **fix_first 先拆**：改成布尔 skip_ts（或断言 volatile ⊆ {"ts"}），行为保持 185 测试原样绿 |
 | card-03（delta） | retry 测试 `monkeypatch.setattr(dao, "datetime", Clock)` 绑定「DAO 用模块级 now() 取时间」的实现细节 | 改时间来源（sqlite CURRENT_TIMESTAMP / time.time()）后该测试假绿/假红 | 传导：将来动时间来源时同步改该测试 |
+| card-04 | 规格 §5 `amount_jump(>历史均值5倍)` 与卡 04「金额偏离 >近90天均值3倍」数字打架 | 评审/答辩时口径不一致被扣分 | 已闭环（SPEC-CHANGE e4e847a）：标注 §5=写操作降级因子、T4=只读检测阈值，场景不同非冲突 |
+| card-04 | 规格 T4 备注列「陌生商户」但卡 04 未给口径 | T4 只做 3 条规则、少 1 条，评审对照规格会发现缺项 | 待办：与 §5 new_payee 语义重叠，后续卡统一口径后补（SPEC-CHANGE 已标注待定） |
+| card-04 | query.py(497)/test_tools_query.py(651) 单文件超 300 行 | 评审对代码规范可扣分（同类风险第 2 次，但纯风格） | 待办不阻塞：建议 04b 抽 tools/_query_common.py + 拆测试文件（范围只许改 3 文件，本卡拆不了） |
 
 ## 人类批示
 
@@ -186,6 +189,27 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: fix_first delta review PASS、无 MUST_FIX，审核师明确放行精准提交。精准提交 dao.py + test_dao.py 后开 card-04（工具层首卡，风控规则 + facts/markdown 幻觉校验 + 越权防护，v4-pro）。
 NEXT_CARD_WARNING: card-04 数字全进 facts、generate_bill_report 数字与 facts 逐字一致、资源查询带 user 归属断言 + 越权单测（L2）、阈值常量注明来源；审核师 3 条 RISK（假时钟样板抽共享 fixture、"ts" 列名勿偏离 DDL、新金额列表复刻守卫用例）留作后续顺手补。
+
+## 决策记录 2026-09-12 20:05
+
+事实（自己查到的）：
+  - 最新存档点：e4e847a SPEC-CHANGE: card-04 口径补全（HEAD）；其下 94de153 board 记账 / ac11268 fix_first
+  - 工作区：?? tools/query.py、tools/schemas.py、tests/test_tools_query.py（card-04 交付，未提交）
+  - verify：绿。283 passed（187 原有 + 96 新增工具层测试，实测 283、worker 报 282，以实测为准）；用例/冒烟/红线三处 SKIP（预期）
+  - worker 报 DONE_WITH_CAVEAT，抛 5 条口径问题；我逐条对照规格原文核实，4 条属实（error_code 未封闭 / 当前 user 未定义 / 3倍vs5倍打架 / 陌生商户缺口径），1 条纯风格（300 行超限）
+  - 人类决策（用户拍板）：5 条全部按我的建议批准 → 已改规格并提交 SPEC-CHANGE e4e847a
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03（均 commit + 审核闭环）；card-04 代码+测试已交付、verify 绿，规格口径已由人拍板补齐
+  - 卡在哪：card-04 待审核（代码未提交，等审核师审完再精准提交）
+  - 风险累积：3倍vs5倍已闭环（SPEC-CHANGE 标注）；陌生商户待办（后续卡补）；300行超限待办（04b 拆）；error_code/当前user 已入册认可
+
+NEXT_CARD: 04
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 规格口径已由人拍板并提交 SPEC-CHANGE（e4e847a），worker 的 5 条 CAVEAT 全部有了落点（3 条入册/认可、2 条待办）。代码 verify 绿、范围干净，可以派审核师审 card-04，审完精准提交。
+NEXT_CARD_WARNING: 审核师会重点看 facts/markdown 数字一致性 + L2 越权断言 + 阈值常量来源；card-04 代码未提交，审核通过后只 `git add tools/query.py tools/schemas.py tests/test_tools_query.py` 精准提交（禁 -A）。陌生商户、300行超限为待办，本卡不要求补。
+
 
 
 
