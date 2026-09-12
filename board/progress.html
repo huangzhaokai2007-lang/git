@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<style>
+  :root { --done:#22c55e; --current:#f59e0b; --todo:#64748b; }
+  * { box-sizing:border-box; }
+  body { font-family:-apple-system,"Segoe UI","Microsoft YaHei",sans-serif; color:var(--foreground); line-height:1.5; padding:16px 0 4px; }
+  h1 { font-size:15px; margin:0 0 2px; }
+  .sub { font-size:12px; color:var(--muted-foreground); margin:0 0 14px; }
+  .legend { display:flex; gap:16px; font-size:12px; margin-bottom:14px; }
+  .legend span { display:flex; align-items:center; gap:6px; }
+  .dot { width:11px; height:11px; border-radius:3px; display:inline-block; }
+  .lane { margin-bottom:14px; }
+  .lane-title { font-size:11px; font-weight:600; color:var(--muted-foreground); letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px; }
+  .cards { display:flex; flex-wrap:wrap; gap:8px; align-items:stretch; }
+  .card { border:1px solid var(--border); border-radius:10px; padding:9px 11px; min-width:118px; flex:0 1 auto; background:var(--card); position:relative; }
+  .card .num { font-size:10px; font-weight:700; opacity:.75; letter-spacing:.02em; }
+  .card .name { font-size:12.5px; font-weight:600; margin-top:1px; }
+  .card .files { font-size:10.5px; color:var(--muted-foreground); margin-top:3px; word-break:break-all; }
+  .card.done { border-color:var(--done); box-shadow:inset 3px 0 0 var(--done); }
+  .card.done .num::after { content:" ✓"; color:var(--done); }
+  .card.current { border-color:var(--current); box-shadow:inset 3px 0 0 var(--current); background:linear-gradient(0deg, rgba(245,158,11,.10), rgba(245,158,11,.10)), var(--card); }
+  .card.current .num::after { content:" ▶ 下一步"; color:var(--current); }
+  .card.todo { opacity:.82; }
+  .card.todo .num::after { content:" ○"; color:var(--todo); }
+  .arrow { align-self:center; color:var(--muted-foreground); font-size:14px; padding:0 2px; }
+  .foot { font-size:11px; color:var(--muted-foreground); margin-top:12px; }
+</style>
+</head>
+<body>
+  <h1>AI Banking Agent · 施工进度</h1>
+  <p class="sub">20 张任务卡 · 已完成 5 / 当前卡 04 · 仓库绿（183 passed）· card-03 待提交存档点</p>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--done)"></i>已完成</span>
+    <span><i class="dot" style="background:var(--current)"></i>当前卡</span>
+    <span><i class="dot" style="background:var(--todo)"></i>未开始</span>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">⓪ 地基</div>
+    <div class="cards">
+      <div class="card done"><div class="num">00</div><div class="name">骨架与施工包</div><div class="files">CLAUDE.md / 规格 / verify.sh</div></div>
+      <div class="card done"><div class="num">00b</div><div class="name">Hermes 施工设施</div><div class="files">.hermes.md / cards×20 / run-card.sh</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">① 数据层 data/</div>
+    <div class="cards">
+      <div class="card done"><div class="num">01</div><div class="name">建库与 DDL</div><div class="files">db.py · schema.sql</div></div>
+      <span class="arrow">→</span>
+      <div class="card done"><div class="num">02</div><div class="name">合成数据生成器</div><div class="files">seed.py · 600 流水</div></div>
+      <span class="arrow">→</span>
+      <div class="card done"><div class="num">03</div><div class="name">DAO 层</div><div class="files">dao.py · 14 个函数</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">② 工具层 tools/</div>
+    <div class="cards">
+      <div class="card current"><div class="num">04</div><div class="name">查询 T1–T5</div><div class="files">schemas.py · query.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">05</div><div class="name">转账 T6–T9</div><div class="files">transfer.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">06</div><div class="name">订阅/卡 T10–T12</div><div class="files">subscription.py · card.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">07</div><div class="name">理财/跨场景 T13–T16</div><div class="files">wealth.py · cross_scene.py</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">③ 编排层 agent/</div>
+    <div class="cards">
+      <div class="card todo"><div class="num">08</div><div class="name">LLM 客户端 + 意图分类</div><div class="files">llm.py · classifier.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">09</div><div class="name">状态机主循环（只读）</div><div class="files">orchestrator.py · templates.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">10</div><div class="name">确认卡 + OTP 写入闭环</div><div class="files">confirm_card.py · permission.py</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">④ 护栏 guard/</div>
+    <div class="cards">
+      <div class="card todo"><div class="num">12</div><div class="name">注入检测</div><div class="files">injection.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">13</div><div class="name">数字校验器 + 模板降级</div><div class="files">facts_check.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">14</div><div class="name">工具层加固</div><div class="files">tool_guard.py</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">⑤ 测试与评测</div>
+    <div class="cards">
+      <div class="card todo"><div class="num">11</div><div class="name">YAML 用例回归</div><div class="files">cases/ · test_cases.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">15</div><div class="name">红队用例 + 测试页</div><div class="files">attacks.yaml · redteam.py</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">⑥ 交互层 interfaces/</div>
+    <div class="cards">
+      <div class="card todo"><div class="num">16</div><div class="name">Streamlit 聊天界面</div><div class="files">app.py · components.py</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">17</div><div class="name">IM 通道</div><div class="files">im/</div></div>
+    </div>
+  </div>
+
+  <div class="lane">
+    <div class="lane-title">⑦ 交付</div>
+    <div class="cards">
+      <div class="card todo"><div class="num">18</div><div class="name">一键启动与工程交付</div><div class="files">Dockerfile · bootstrap.sh</div></div>
+      <span class="arrow">→</span>
+      <div class="card todo"><div class="num">19</div><div class="name">演示与答辩材料</div><div class="files">演示脚本 · 答辩提纲</div></div>
+    </div>
+  </div>
+
+  <p class="foot">注：卡 08 编排层依赖卡 04–07 工具层；卡 11/12–15 是评分主战场。下一张卡 04 = 只读工具 T1–T5（deepseek-v4-pro）。</p>
+</body>
+</html>
