@@ -12,6 +12,7 @@
 | card-02 | 0c60abc | PASS（board/reviews/card-02.md，无 MUST_FIX） | 12 个月合成数据；verify 绿。原 5561965 被 reset 重做为干净提交（仅 seed.py + test_seed.py） |
 | infra | fb40cbb | 人工 | 三人小组编排器 v2 + 角色定义 + 账本；.gitignore 补 board/.tmp/ |
 | card-03 | 166f39d | PASS（card-03.md 无 MUST_FIX + delta review PASS） | DAO 层 14 函数 + 121 测试；verify 绿（185 passed）。审核后增量（volatile 幂等豁免 + 2 测试）经 delta review 确认无幂等漏洞、变异抽查有效 |
+| card-04 | （待提交） | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 工具层 T1–T5 只读工具；verify 绿（283 passed）。4 条红线变异抽查全真报警；3 文件指纹零漂移 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -30,6 +31,10 @@
 | card-04 | 规格 §5 `amount_jump(>历史均值5倍)` 与卡 04「金额偏离 >近90天均值3倍」数字打架 | 评审/答辩时口径不一致被扣分 | 已闭环（SPEC-CHANGE e4e847a）：标注 §5=写操作降级因子、T4=只读检测阈值，场景不同非冲突 |
 | card-04 | 规格 T4 备注列「陌生商户」但卡 04 未给口径 | T4 只做 3 条规则、少 1 条，评审对照规格会发现缺项 | 待办：与 §5 new_payee 语义重叠，后续卡统一口径后补（SPEC-CHANGE 已标注待定） |
 | card-04 | query.py(497)/test_tools_query.py(651) 单文件超 300 行 | 评审对代码规范可扣分（同类风险第 2 次，但纯风格） | 待办不阻塞：建议 04b 抽 tools/_query_common.py + 拆测试文件（范围只许改 3 文件，本卡拆不了） |
+| card-04 | 2 处注释/docstring 过时：query.py:32 来源写「§5 amount_jump」应改「§2 T4 备注」；schemas.py:24 还写「... 未封闭、待人类决定」现已入册 | 零行为影响，但审核师查「来源标注与规格一致」会碰到 | 待修（审核闭环后一口价修，审核期间不动以免结论失配）；已同步给 worker |
+| card-04 | 交付版本指纹（防审核后改动失配） | — | schemas.py `3350d7c9…` / query.py `e72fa8a0…` / test_tools_query.py `bc214f99…`；行数 142/497/678，我实测 sha256 逐一匹配 |
+| card-04 | 审核 RISK-1：facts 归一化弱于「逐字一致」（numbers() 剥小数点/千分位），挡不住量级错 | markdown 机械生成无硬编码，残余风险低，但卡 13 数字校验器若复用此归一化会漏量级错误 | 传导卡 13 前：补逐字断言（卡 13 做 facts_check 时收口） |
+| card-04 | 审核 RISK-2：T2 fail-closed 时 total_count 会小于真实值（他人账户 id 更小遮蔽本人） | 单用户 demo 不触发；多用户场景下 total_count 偏低 | 待办：多用户/越权场景扩展时复核 total_count 口径 |
 
 ## 人类批示
 
@@ -209,6 +214,27 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: 规格口径已由人拍板并提交 SPEC-CHANGE（e4e847a），worker 的 5 条 CAVEAT 全部有了落点（3 条入册/认可、2 条待办）。代码 verify 绿、范围干净，可以派审核师审 card-04，审完精准提交。
 NEXT_CARD_WARNING: 审核师会重点看 facts/markdown 数字一致性 + L2 越权断言 + 阈值常量来源；card-04 代码未提交，审核通过后只 `git add tools/query.py tools/schemas.py tests/test_tools_query.py` 精准提交（禁 -A）。陌生商户、300行超限为待办，本卡不要求补。
+
+## 决策记录 2026-09-12 20:41
+
+事实（自己查到的）：
+  - 最新存档点：bb4ae39 board: card-04 口径拍板（HEAD）；其下 e4e847a SPEC-CHANGE
+  - 工作区：?? tools/query.py、tools/schemas.py、tests/test_tools_query.py（card-04 交付，未提交）+ M board/ledger.md（记账）
+  - verify：绿。283 passed；用例/冒烟/红线三处 SKIP（预期）
+  - 审核师 card-04 = PASS，无 MUST_FIX。四条红线变异抽查全真报警（facts 塞 9999 / require_owned 置空 / _owned_account_ids 放行他人 / _vs_prev_pct 改 float）。3 文件指纹 e72fa8a0 / bc214f99 / 3350d7c9 与我实测一致，零漂移。
+  - 审核师 2 条非阻塞 RISK：① facts 归一化弱于逐字一致（numbers() 剥小数点/千分位），挡不住量级错，卡13前补逐字断言；② T2 fail-closed 时 total_count 会小于真实值（他人账户 id 更小遮蔽本人），单用户 demo 不触发。
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03（均 commit + 审核闭环）；card-04 = PASS，待精准提交
+  - 卡在哪：card-04 审核 PASS，精准提交后进工具层第二卡 card-05
+  - 风险累积：新增 2 条审核 RISK（facts 逐字断言待补、T2 total_count 遮蔽）均为非阻塞；陌生商户/300行超限/2处注释仍待办
+
+NEXT_CARD: 05
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: card-04 审核 PASS、无 MUST_FIX、零漂移，先精准提交（只 add tools/ 3 文件，禁 -A）+ 记账。下一张 card-05（转账工具 T6–T9）涉及写操作 + 幂等 + 权限档 + 多步事务（会撞 card-01 的 transaction 不可嵌套风险），必须 v4-pro。
+NEXT_CARD_WARNING: card-05 提交只 `git add tools/transfer.py tests/test_tools_transfer.py`；写操作必须走 preview→权限档→确认→幂等执行，且写 audit_log；多步事务注意 card-01 的 transaction() 不可嵌套（别在卡 05 强行嵌套）。2 处注释待修（query.py:32、schemas.py:24）留待审核闭环后一口价，不阻塞卡 05。
+
 
 
 
