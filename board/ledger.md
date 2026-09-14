@@ -14,6 +14,7 @@
 | card-03 | 166f39d | PASS（card-03.md 无 MUST_FIX + delta review PASS） | DAO 层 14 函数 + 121 测试；verify 绿（185 passed）。审核后增量（volatile 幂等豁免 + 2 测试）经 delta review 确认无幂等漏洞、变异抽查有效 |
 | card-04 | 745d960 | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 工具层 T1–T5 只读工具；verify 绿（283 passed）。4 条红线变异抽查全真报警；3 文件指纹零漂移 |
 | card-05 | 155804b | PASS（无 MUST_FIX，5 条 RISK，其中 3 条待 @user 口径） | 工具层 T6–T9 转账三段式（preview/execute 幂等 + AA 拆分，71 测试）；verify 绿（354 passed）。4 条变异抽查全真报警。前置 SPEC-CHANGE 0ff148d 删「备注」 |
+| card-04b | 7d86b8d | PASS（无 MUST_FIX，4 条 RISK） | 工具层清理：共享 helpers 单份化 + 拆测试 ≤300 + DAO get_payee/update_account_balance + TOCTOU 锁；verify 绿（377 passed）。2 条变异抽查真报警、拆分零丢用例（旧 96→新 102） |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -43,7 +44,11 @@
 | card-05 | `_payee_by_id`/`_debit` 直查 `dao.connection()` 绕过 DAO 原语（TODO dao-05b） | ⑤ 层绕过 DAO 原语，层级味道；但参数化查询无注入、卡范围只许改 2 文件 | 建议 05b 补 DAO `get_payee(id)` + `update_account_balance` |
 | card-05 | 规格 §5 自相矛盾：`new_payee` 既在 L2 基础条件、又在降级因子清单 | 非白名单收款人可能永远到不了 L2+OTP（被误判 L3） | **待 @user**：确认「基础档已体现的因子不再升档」折中口径，或修规格 §5 |
 | card-05 | `_money` 硬编码 `100`（query.py 用 `PCT_TOTAL`） | 跨模块微小不一致 | 非阻塞：跨模块一致测试 `test_money_and_ownership_helpers_agree_with_query_module` 钉住 |
-| card-05 | transfer.py(480)/test_tools_transfer.py(604) 单文件超 300 行 | 300 行超限**第 3 次**（card-03 dao / card-04 query / card-05 transfer），且 transfer/query 薄封装重复（_ok/_fail/_invalid/_money/_owned_account_ids） | **升级信号**：建议 04b/05b 抽 tools/_query_common.py + 拆测试文件，收口这条系统性债务 |
+| card-05 | transfer.py(480)/test_tools_transfer.py(604) 单文件超 300 行 | 300 行超限**第 3 次**（card-03 dao / card-04 query / card-05 transfer），且 transfer/query 薄封装重复（_ok/_fail/_invalid/_money/_owned_account_ids） | **部分收口**：04b 已拆测试文件 ≤300 + 抽共享；但**源文件仍超 300**（见 card-04b RISK-1），待 05b 拆源文件 |
+| card-04b | 源文件 300 行没治本：query.py 418 / transfer.py 452 / dao.py 393 / test_dao.py 525 仍超（抽共享只降 30–80 行） | card-06 是 L2/L3 高危写，带 4 个超限文件进场，评审逐条对规范可扣分 | **待 05b**：拆 tools/_query_analysis.py + tools/_transfer_risk.py + data/_dao_core.py + 再拆 test_dao.py |
+| card-04b | 真并发用例靠 monkeypatch `data.db.connect`（生产连接 check_same_thread=True 默认，进程内单连接） | TOCTOU 锁本身已变异证真，但 demo 若真多线程，第二个线程会 ProgrammingError | **待 @user**：demo 是否多线程；是则 data/db.py 开 check_same_thread=False |
+| card-04b | `VELOCITY_WINDOW_MINUTES` 同名不同义：query.py=60（T4 只读）/ transfer.py=10（§5 写降级），未合并（正确） | 同义不同名易误改其一 | 建议 05b 拆两个名字（如 VELOCITY_MINUTES_T4 / VELOCITY_MINUTES_WRITE） |
+| card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | 待 @user 追认（避免下张卡被范围门禁卡住） |
 
 ## 人类批示
 
@@ -314,6 +319,25 @@ MODEL: deepseek-v4-pro
 ACTION: human
 REASON: 用户批准 04b 清理先做。需 @user 建 docs/cards/card-04b.md（范围见下）+ 2 处 SPEC-CHANGE（fee=0 备注、new_payee §5 去重）落地。行为保持重构 + 幂等锁 + DAO 原语，必须 v4-pro。
 NEXT_CARD_WARNING: （04b 范围）tools/_query_common.py（新）抽 _ok/_fail/_invalid/_money/_owned_account_ids/require_owned/PCT_TOTAL；query.py/transfer.py 改引用共享删本地副本；拆 test_tools_query.py(651)/test_tools_transfer.py(604)；data/dao.py 补 get_payee(id)+update_account_balance（替 transfer.py 直查）；transfer.py _TOKENS 加 threading.Lock + state 翻转挪进事务；行为保持 354 测试原样绿。另 2 处 SPEC-CHANGE：规格 fee 备注「demo 期 0」+ §5 降级因子删 new_payee。
+
+## 决策记录 2026-09-14 14:05
+
+事实（自己查到的）：
+  - 最新存档点：7d86b8d card-04b（HEAD）；其下 f5f24d7 card-04b.md / bd8fa64 + 61711f7 SPEC-CHANGE
+  - 工作区：clean；verify 绿 377 passed（354 原样 + 23 新增）
+  - card-04b = PASS（无 MUST_FIX，4 条 RISK）；2 条变异抽查真报警；拆分零丢用例（旧 96 → 新 102，+6）
+  - 13 文件精准提交（6 改 + 7 新，未用 -A）
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b（均 commit + 审核闭环）
+  - 卡在哪：04b 收口了测试拆分 + 共享 helpers + DAO 原语 + TOCTOU；但源文件 300 行未治本（query 418/transfer 452/dao 393/test_dao 525），待 05b 拆源文件后再进 card-06
+  - 风险累积：300 行超限第 4 次（dao/query/transfer/test_dao）→ 05b 必须收口；3 条 RISK 传导（并发连接 check_same_thread / 同义不同名常量 / 5 新文件追认）
+
+NEXT_CARD: 05b
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: card-04b PASS 无 MUST_FIX，但源文件 300 行只治了测试没治本体（query 418 / transfer 452 / dao 393 / test_dao 525）。card-06 是 L2/L3 高危写，不能带着 4 个超限文件 + 同义不同名常量进场。05b 拆 tools/_query_analysis.py + tools/_transfer_risk.py + data/_dao_core.py + 再拆 test_dao.py，一次收口后再 card-06。行为保持重构，v4-pro。
+NEXT_CARD_WARNING: （05b 范围）拆 3 个源文件 + 再拆 test_dao.py ≤300；VELOCITY_WINDOW_MINUTES 拆两个名字（T4 只读 60 vs §5 写降级 10）；行为保持 377 测试原样绿。3 条 @user 口径待拍：① 05b 做不做（我建议做）② demo 是否多线程（决定 data/db.py 要不要 check_same_thread=False）③ 5 个新文件追认。
 
 
 
