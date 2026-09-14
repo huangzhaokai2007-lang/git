@@ -21,8 +21,8 @@ MAX_LIMIT = 500   # 单次翻页上限；来源：data/dao.py 的 MAX_LIMIT（�
 
 
 class ErrorCode(StrEnum):
-    """规格第 2 节列出的 error_code。该清单在规格里以 "..." 结尾（未封闭），
-    本卡新增 INVALID_ARGUMENT / TOO_MANY_ROWS 两个取值 —— 已记入"需要人类决定"。"""
+    """规格第 2 节列出的 error_code（已入册：SPEC-CHANGE e4e847a/c05562c），
+    与本枚举一一对应，不得增删。"""
 
     INSUFFICIENT_FUNDS = "INSUFFICIENT_FUNDS"
     OVER_LIMIT = "OVER_LIMIT"
@@ -31,6 +31,9 @@ class ErrorCode(StrEnum):
     FORBIDDEN = "FORBIDDEN"
     INVALID_ARGUMENT = "INVALID_ARGUMENT"
     TOO_MANY_ROWS = "TOO_MANY_ROWS"
+    TOKEN_EXPIRED = "TOKEN_EXPIRED"
+    INVALID_STATE = "INVALID_STATE"
+    HALLUCINATION_BLOCKED = "HALLUCINATION_BLOCKED"
 
 
 class ToolResult(BaseModel):
