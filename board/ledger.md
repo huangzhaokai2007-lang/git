@@ -35,6 +35,8 @@
 | card-04 | 交付版本指纹（防审核后改动失配） | — | schemas.py `3350d7c9…` / query.py `e72fa8a0…` / test_tools_query.py `bc214f99…`；行数 142/497/678，我实测 sha256 逐一匹配 |
 | card-04 | 审核 RISK-1：facts 归一化弱于「逐字一致」（numbers() 剥小数点/千分位），挡不住量级错 | markdown 机械生成无硬编码，残余风险低，但卡 13 数字校验器若复用此归一化会漏量级错误 | 传导卡 13 前：补逐字断言（卡 13 做 facts_check 时收口） |
 | card-04 | 审核 RISK-2：T2 fail-closed 时 total_count 会小于真实值（他人账户 id 更小遮蔽本人） | 单用户 demo 不触发；多用户场景下 total_count 偏低 | 待办：多用户/越权场景扩展时复核 total_count 口径 |
+| card-05 | T6 要求「按备注匹配」但 payee 表无 memo 列（规格自相矛盾） | resolve_payee 无法落「备注」，且 memo 是不可信文本（txn 表） | **已拍板删**：T6 只按 name/phone 匹配；待 SPEC-CHANGE 删规格 T6 行 + 剧本源 + 重生成 card-05.md |
+| card-04 | 账本记「审核 PASS」但 board/reviews/ 无 card-04.md（零日志零 prompt 零 review 文件） | 11 月评审翻裁决时 card-04 空、PASS 无可核对实物 | **已拍板补记**：reviewer 事后复验 745d960 + 写 board/reviews/card-04.md 标「事后复验补记」 |
 
 ## 人类批示
 
@@ -234,6 +236,32 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: card-04 审核 PASS、无 MUST_FIX、零漂移，先精准提交（只 add tools/ 3 文件，禁 -A）+ 记账。下一张 card-05（转账工具 T6–T9）涉及写操作 + 幂等 + 权限档 + 多步事务（会撞 card-01 的 transaction 不可嵌套风险），必须 v4-pro。
 NEXT_CARD_WARNING: card-05 提交只 `git add tools/transfer.py tests/test_tools_transfer.py`；写操作必须走 preview→权限档→确认→幂等执行，且写 audit_log；多步事务注意 card-01 的 transaction() 不可嵌套（别在卡 05 强行嵌套）。2 处注释待修（query.py:32、schemas.py:24）留待审核闭环后一口价，不阻塞卡 05。
+
+## 决策记录 2026-09-14 13:04
+
+事实（自己查到的）：
+  - 最新存档点：21f8344 docs 注释修正（HEAD）；其下 633da2d SPEC-CHANGE(c05562c 代码侧落地 ErrorCode +3) / f950723 board 补正 / c05562c SPEC-CHANGE
+  - 工作区：仅 ?? tools/transfer.py(479) + ?? tests/test_tools_transfer.py(604)（card-05 交付，未提交）；schemas.py/query.py 的改动已由 633da2d + 21f8344 提交干净
+  - verify：绿。354 passed（187 + 96 工具层 + 71 转账）
+  - (A) 顺序第 1、2 步已落地：633da2d（ErrorCode 补 3 码，前置 card-05）+ 21f8344（query.py 注释修正，纯注释零行为）
+  - 备注状态：transfer.py:278 已按 name/phone/bank 匹配、注释明写「payee 无备注列，待确认」；但规格 T6（第 94 行）与 card-05.md 要求 #1 仍写「备注」待删
+  - card-04 缺口仍在：board/reviews/ 只有 card-02/card-03，无 card-04.md
+
+人类决策（用户拍板，2026-09-14）：
+  - ①「备注」删（我 + worker + reviewer 三人一致建议）：T6 只按 name/phone 匹配
+  - ② 批 card-04 事后复验补记：reviewer 亲自复验 745d960 + 写 board/reviews/card-04.md 标「事后复验补记」
+  - ③ 单进程化：每角色只留一个进程（本会话 @analyst 即唯一 analyst）
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04（均 commit + 审核闭环；card-04 待补落盘裁决物）
+  - 卡在哪：card-05 代码就绪（verify 绿），差 3 件收尾：备注 doc 删（SPEC-CHANGE）、card-04 补记、单进程
+  - 风险累积：备注冲突（规格自相矛盾）已拍板删；card-04 无落盘裁决物已拍板补记；并行进程已拍板单进程化
+
+NEXT_CARD: 05
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 三件拍板齐了，card-05 代码已交付且 verify 绿。执行顺序：(1) SPEC-CHANGE 删「备注」（规格 T6 第 94 行 + docs/02-AI指令剧本.md 源 + 重生成 card-05.md）→ (2) reviewer 补记 card-04 → (3) 提交 card-05（只 add tools/transfer.py tests/test_tools_transfer.py）→ reviewer 审 card-05。写操作 + 幂等 + 权限档 + 多步事务，必须 v4-pro。
+NEXT_CARD_WARNING: card-05 提交只 `git add tools/transfer.py tests/test_tools_transfer.py`；resolve_payee 只按 name/phone 匹配（备注已删，勿再碰）；execute_transfer 幂等只扣一次款、金额纯整数分、多步事务不嵌套（card-01 的 transaction 坑）、TOKEN_EXPIRED 走 ErrorCode 枚举不硬编码；reviewer 重点核这四条 + T6 越权断言。
 
 
 
