@@ -6,7 +6,7 @@
 【任务卡 #05】实现 T6–T9（收款人解析与转账，含预览-确认-执行三段式）
 范围：tools/transfer.py、tests/test_tools_transfer.py
 要求：
-1. resolve_payee：支持按姓名/手机号/备注模糊匹配；同名多个返回 ambiguous=True 并给出候选，不得擅自选一个
+1. resolve_payee：支持按姓名/手机号模糊匹配；同名多个返回 ambiguous=True 并给出候选，不得擅自选一个
 2. preview_transfer：只算不执行。生成 preview_token（存内存，TTL 300 秒，**绑定 payee_id+amount**）；
    返回 fee、tier（按规格第 5 节权限矩阵算）、requires_otp、剩余限额；不写任何流水
 3. execute_transfer：校验 token 未过期且参数一致 → 校验 OTP（L2 时）→ 事务内扣款+写流水+写审计 → 返回 txn_id
