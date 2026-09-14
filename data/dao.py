@@ -256,6 +256,11 @@ def find_payee(query: str) -> list[dict]:
                  " OR bank LIKE ? ESCAPE '\\' ORDER BY name, id", (like, like, like))
 
 
+def get_payee(payee_id: str) -> dict | None:
+    """按 id 取单个收款人；不存在 → `None`。**不做归属判断**（越权判定是 `tools/guard` 的活）。"""
+    return _one("SELECT * FROM payee WHERE id = ?", (_text(payee_id, "payee_id"),))
+
+
 def get_card(card_id: str) -> dict | None:
     """取卡片行（含状态与各限额，整数分）；不存在 → `None`。"""
     return _one("SELECT * FROM card WHERE id = ?", (_text(card_id, "card_id"),))
@@ -274,6 +279,20 @@ def update_card(card_id: str, **fields: object) -> dict | None:
         if name in fields:
             fields[name] = _cents(fields[name], name, allow_none=True)
     return _apply_update("card", str(_text(card_id, "card_id")), dict(fields))
+
+
+def update_account_balance(account_id: str, delta: int) -> dict | None:
+    """按**增量**改账户余额（整数分，负=扣款）：`balance` 与 `available` 同步加减，返回更新后整行。
+
+    不做业务判断（够不够扣、限额、状态机都是调用方/`guard/` 的事）；账户不存在 → `None`。
+    与 `insert_txn` 一样只提供原语：**余额变动与流水写入的原子性由调用方的事务保证**。
+    """
+    change = _cents(delta, "delta")
+    account = str(_text(account_id, "account_id"))
+    with _writing() as conn:
+        conn.execute("UPDATE account SET balance = balance + ?, available = available + ? WHERE id = ?",
+                     (change, change, account))
+    return _one("SELECT * FROM account WHERE id = ?", (account,))
 
 
 def list_subscriptions(user_id: str, status: str) -> list[dict]:

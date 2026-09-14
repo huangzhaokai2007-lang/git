@@ -17,11 +17,11 @@ import re
 from bisect import bisect_left
 from datetime import date, datetime, timedelta
 
-from pydantic import ValidationError
-
 from data import dao
-from data.seed import USER_ID as DEMO_USER_ID
-from tools.schemas import (ACCOUNT_TYPES, MAX_LIMIT, AnalyzeSpendingReq, AnomaliesData, AnomalyItem,
+from tools._query_common import (PCT_TOTAL, ToolError, _dao_reject, _fail, _invalid, _money,
+                                 _money_facts, _ok, _owned_account_ids, current_user_id,
+                                 require_owned, set_current_user)
+from tools.schemas import (MAX_LIMIT, AnalyzeSpendingReq, AnomaliesData, AnomalyItem,
                            BalanceData, BillReportData, DetectAnomaliesReq, ErrorCode,
                            GenerateBillReportReq, GetBalanceReq, ListTxnData, ListTxnReq,
                            SpendingData, SpendingGroup, ToolResult, TxnItem)
@@ -34,7 +34,6 @@ BASELINE_DAYS = 90                  # 来源：卡 04 第 3 条「近 90 天」�
 NIGHT_START_HOUR, NIGHT_END_HOUR = 23, 6   # 来源：规格 §5「night(23:00-06:00)」
 VELOCITY_WINDOW_MINUTES = 60        # 来源：卡 04 第 3 条「同商户 1 小时内」
 VELOCITY_MIN_TXNS = 3               # 来源：卡 04 第 3 条「≥3 笔」
-PCT_TOTAL = 100                     # 百分数归一化基数（整数百分比）
 ACCOUNT_LABELS = {"savings": "储蓄账户", "credit": "信用账户"}
 CYCLE_LABELS = {"monthly": "每月", "yearly": "每年"}
 KIND_LABELS = {"monthly": "月度", "yearly": "年度"}
@@ -45,73 +44,9 @@ _SESSION_USER: str | None = None
 _PERIOD_RE = re.compile(r"^(\d{4})(?:-(\d{2}))?$")
 
 
-class ToolError(Exception):
-    """工具内部的受控失败：由公开函数转成 `ToolResult(ok=False)`，绝不冒泡给编排层（卡 05–07 也用它）。"""
-
-    def __init__(self, code: ErrorCode, message: str) -> None:
-        super().__init__(message)
-        self.code, self.message = code, message
-
-
-def set_current_user(user_id: str | None) -> None:
-    """编排层（卡 09/10）在每个会话开始时设置当前用户；传 `None` 回到 demo 默认用户。"""
-    global _SESSION_USER
-    _SESSION_USER = user_id
-
-
-def current_user_id() -> str:
-    """当前会话用户 id：未显式设置时取合成数据的唯一用户（`data.seed.USER_ID`）。"""
-    return _SESSION_USER or DEMO_USER_ID
-
-
-def require_owned(resource: str, owner_id: str | None, resource_id: str) -> None:
-    """L2 归属断言（规格第 6 节）：资源不属于当前用户 → `FORBIDDEN`。
-
-    卡 06/07 的 get_card / get_subscription / get_product 等资源查询必须调用本函数。
-    """
-    if owner_id != current_user_id():
-        logger.warning("越权访问被拦：resource=%s id=%s owner=%s user=%s",
-                       resource, resource_id, owner_id, current_user_id())
-        raise ToolError(ErrorCode.FORBIDDEN, f"{resource}不属于当前用户")
-
-
-# ---------------- 通用工具函数 ----------------
-
-def _fail(code: ErrorCode, message: str) -> ToolResult:
-    return ToolResult(ok=False, data=None, error_code=code, message=message, facts={})
-
-
-def _ok(data: dict, facts: dict, message: str) -> ToolResult:
-    return ToolResult(ok=True, data=data, error_code=None, message=message, facts=facts)
-
-
-def _invalid(model: type, **kwargs: object) -> ToolResult | None:
-    """入参模型严格校验；不合法 → INVALID_ARGUMENT（消息不含数字，明细进 logging）。"""
-    try:
-        model(**kwargs)
-    except ValidationError as exc:
-        logger.warning("参数不合法：%s", exc.errors())
-        first = exc.errors()[0]
-        field = ".".join(str(part) for part in first["loc"]) or "参数"
-        return _fail(ErrorCode.INVALID_ARGUMENT, f"参数不合法：{field}")
-    return None
-
-
-def _dao_reject(exc: ValueError) -> ToolResult:
-    """DAO 的参数校验失败 → INVALID_ARGUMENT（DAO 的消息含数字，只写日志不给用户）。"""
-    logger.warning("DAO 拒绝参数：%s", exc)
-    return _fail(ErrorCode.INVALID_ARGUMENT, "参数不合法")
-
-
-def _money(cents: int) -> str:
-    """分 → 元字符串（纯整数运算，禁用浮点）：`-123456` → `-1,234.56`。"""
-    whole, frac = divmod(abs(cents), PCT_TOTAL)
-    return f"{'-' if cents < 0 else ''}{whole:,}.{frac:02d}"
-
-
-def _money_facts(cents: int, name: str) -> dict:
-    """金额进事实包：整数分本体 + 展示形态（供数字校验器比对"元"写法）。"""
-    return {name: cents, f"{name}_yuan": _money(cents)}
+# ToolError / set_current_user / current_user_id / require_owned 与会话用户上下文，
+# 以及 _ok/_fail/_invalid/_dao_reject/_money/_money_facts 已收敛到 tools/_query_common.py
+# （卡 04b：单份实现，禁复制；本模块只 import 复用）。
 
 
 def _stamp() -> str:
@@ -153,20 +88,6 @@ def _month_windows(start: date, end: date) -> list[tuple[str, str]]:
         windows.append((cursor.isoformat(), last.isoformat()))
         cursor = last + timedelta(days=1)
     return windows
-
-
-def _owned_account_ids() -> set[str]:
-    """当前用户拥有的账户 id 集合（归属过滤；DAO 不按 user 圈定 → 这里 fail-closed）。
-
-    已知后果：若同名类型下有他人的账户且 id 更小，DAO 会优先返回他人的行，本用户该类型账户
-    即取不到 → 结果收窄为"只能确认归属的账户"（宁少勿漏），此风险已在账本台账登记。
-    """
-    owned = set()
-    for kind in ACCOUNT_TYPES:
-        row = dao.get_balance(kind)
-        if row is not None and row["user_id"] == current_user_id():
-            owned.add(row["id"])
-    return owned
 
 
 def _owned_txns(date_from: str, date_to: str) -> list[dict]:

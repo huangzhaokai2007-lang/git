@@ -5,36 +5,39 @@
   扣款 + 写流水 + 写审计（复用 DAO `_writing()` 的 `in_transaction` 检测，绝不嵌套 `BEGIN` —— 台账 R1）。
 - 金额一律整数分（无浮点）；**OTP 明文绝不进日志、facts 或回执**；`execute` 里不调用任何 LLM。
 - 幂等：`preview_token` 是**一次性**的；执行后把结果快照写回 token，同 token 重复调用返回同一结果、
-  绝不重复扣款（并发为线程级时另见下方限制说明）。
-- 归属：收款人 / 账户必须属于当前用户（越权 → `FORBIDDEN`），会话用户沿用 `tools.query.set_current_user`。
+  绝不重复扣款。**并发**：token 状态检查 + 翻转 + 扣款事务同处 `_TOKENS_LOCK` 临界区（卡 04b 修复
+  线程级 TOCTOU）；`state` 翻转在事务内完成，事务回滚时状态一并回退。
+- 归属：收款人 / 账户必须属于当前用户（越权 → `FORBIDDEN`），会话用户沿用 `tools._query_common.set_current_user`。
 
-口径与已知缺口（逐条见交付说明"需要人类决定"）：
-- `fee` 恒为 **0**：规格未定义手续费口径，未自行编造费率。
+口径与已知缺口（逐条写在交付说明的「需要人类决定」里）：
+- `fee` 恒为 **0**：规格 §5 T7 备注已定「无费率口径，demo 期恒 0」，未自行编造费率。
 - `tier` 按规格 §5：基础档（白名单且 ≤50000 分 → L1，否则 L2）+ 降级因子（命中任一升一档、≥2 → 转人工=L3）。
+  `new_payee` 不再参与升档（规格 §5 已去重：它已是 L2 基础条件），否则非白名单收款人永远到不了「L2 + OTP」。
   因子 `device_change` / `geo_change` 在合成数据里没有数据源（DDL 无设备/地理列）→ 本卡不实现。
 - L2 的「金额 > 500元」分支被硬约束「单笔上限 5 万分（500元）」遮蔽：>500元 直接 `OVER_LIMIT`。
 - 扣款账户 = 当前用户**储蓄账户**（T7 无账户入参）。
 - L3 只拒绝自动执行（`INVALID_STATE`）：60s 延迟生效/可撤销窗口属编排层 `PENDING_REVIEW`（卡 10）。
-- **DAO（卡 03）缺两个原语**：按 id 取收款人、更新账户余额。本卡范围只许改两个文件，故用
-  `dao.connection()`（DAO 文档明确「工具层组合多步事务时用它」）执行参数化语句，均标 `TODO(dao-05b)`。
+- DAO 原语已补齐（卡 04b）：`dao.get_payee(payee_id)` / `dao.update_account_balance(account_id, delta)`，
+  本模块不再经 `dao.connection()` 直查（TODO(dao-05b) 已闭环）。
+- 薄封装 `_ok/_fail/_invalid/_dao_reject/_money/_money_facts/_owned_account_ids` 已收敛到
+  `tools/_query_common.py`（卡 04b：单份实现），本模块只 import 复用。
 - 本模块的出参模型按卡 05 的范围限制放在本文件（CLAUDE.md 说模型放 `tools/schemas.py`，两者冲突时服从硬范围）。
-- 与 `tools/query.py` 同形的薄封装（`_ok/_fail/_invalid/_dao_reject/_money`、`_owned_account_ids`）为重复实现，
-  已在测试里钉住同口径；`04b/05b` 抽 `tools/_query_common.py` 时应合并。
 """
 
 from __future__ import annotations
 
 import logging
-import sqlite3
+import threading
 import uuid
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field
 
 from data import dao
 from data.db import transaction
-from tools.query import ToolError, current_user_id, require_owned
+from tools._query_common import (ToolError, _dao_reject, _fail, _invalid, _money, _money_facts,
+                                 _ok, _owned_account_ids, current_user_id, require_owned)
 from tools.schemas import MAX_LIMIT, ErrorCode, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -57,6 +60,10 @@ STRICT = ConfigDict(strict=True, extra="forbid")
 
 _SESSION_ID: str | None = None
 _TOKENS: dict[str, dict] = {}
+#: 幂等临界区（卡 04b）：token 状态检查 → 翻转 → 扣款事务必须整体串行。
+#: 旧实现把 `state == "executed"` 检查放在事务外，两线程可同时通过 → 双重扣款（线程级 TOCTOU）。
+#: 另注：DAO 是进程内**单个** SQLite 连接，并发写本来也必须串行，一把锁同时解决这两个问题。
+_TOKENS_LOCK = threading.Lock()
 
 
 class ResolvePayeeReq(BaseModel):
@@ -137,62 +144,9 @@ def _now() -> datetime:
     return datetime.now()
 
 
-# ---------------- 薄封装（与 tools/query.py 同形；见文件头"重复实现"说明） ----------------
-
-def _fail(code: ErrorCode, message: str) -> ToolResult:
-    return ToolResult(ok=False, data=None, error_code=code, message=message, facts={})
-
-
-def _ok(data: dict, facts: dict, message: str) -> ToolResult:
-    return ToolResult(ok=True, data=data, error_code=None, message=message, facts=facts)
-
-
-def _invalid(model: type[BaseModel], **kwargs: object) -> ToolResult | None:
-    try:
-        model(**kwargs)
-    except ValidationError as exc:
-        logger.warning("参数不合法：%s", exc.errors())
-        first = exc.errors()[0]
-        field = ".".join(str(part) for part in first["loc"]) or "参数"
-        return _fail(ErrorCode.INVALID_ARGUMENT, f"参数不合法：{field}")
-    return None
-
-
-def _dao_reject(exc: ValueError) -> ToolResult:
-    logger.warning("DAO 拒绝参数：%s", exc)
-    return _fail(ErrorCode.INVALID_ARGUMENT, "参数不合法")
-
-
-def _money(cents: int) -> str:
-    """分 → 元字符串（纯整数运算）；与 `tools/query._money` 同口径（测试钉住）。"""
-    whole, frac = divmod(abs(cents), 100)
-    return f"{'-' if cents < 0 else ''}{whole:,}.{frac:02d}"
-
-
-def _money_facts(cents: int, name: str) -> dict:
-    return {name: cents, f"{name}_yuan": _money(cents)}
-
-
-def _owned_account_ids() -> set[str]:
-    """当前用户的账户 id 集合（与 `tools/query._owned_account_ids` 同口径；DAO 不按 user 圈定 → fail-closed）。"""
-    return {row["id"] for kind in ("savings", "credit")
-            if (row := dao.get_balance(kind)) is not None and row["user_id"] == current_user_id()}
-
-
-# ---------------- TODO(dao-05b)：DAO 缺的两个原语 ----------------
-
-def _payee_by_id(payee_id: str) -> dict | None:
-    """按 id 取收款人行。TODO(dao-05b)：`data/dao.py` 没有 get_payee(id)，暂用 DAO 的公开连接。"""
-    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
-    return dict(row) if row is not None else None
-
-
-def _debit(conn: sqlite3.Connection, account_id: str, cents: int) -> int | None:
-    """从账户扣 `cents` 分，返回扣后余额。TODO(dao-05b)：DAO 没有 update_account_balance。"""
-    conn.execute("UPDATE account SET balance = balance - ?, available = available - ? WHERE id = ?",
-                 (cents, cents, account_id))
-    row = conn.execute("SELECT balance FROM account WHERE id = ?", (account_id,)).fetchone()
-    return None if row is None else row["balance"]
+# 薄封装 _ok/_fail/_invalid/_dao_reject/_money/_money_facts/_owned_account_ids 已收敛到
+# tools/_query_common.py；DAO 直查的两个替代品改为原语 dao.get_payee / dao.update_account_balance
+# （卡 04b：单份实现 + 消掉 TODO(dao-05b) 的层级绕过）。
 
 
 # ---------------- 权限档与限额（规格 §5） ----------------
@@ -316,7 +270,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         logger.warning("本卡未实现定时/拆分转账：schedule=%r split_with=%r", schedule, split_with)
         return _fail(ErrorCode.INVALID_ARGUMENT, "本卡还不支持定时转账或拆分转账")
     try:
-        payee = _payee_by_id(payee_id)
+        payee = dao.get_payee(payee_id)
         if payee is None:
             return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
         require_owned("收款人", payee["user_id"], payee["id"])
@@ -375,10 +329,19 @@ def execute_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
     """T8 转账执行（L1–L3）。data: `txn_id` / `amount` / `payee_name` / `balance_after`。
 
     顺序：token 存在 → 归属 → 未过期 → OTP（L2/L3）→ 已执行则返回快照（**幂等**）→ L3 拒绝自动执行
-    → 事务内（扣款 + 写流水 + 写审计）→ 把结果快照写回 token。本函数不调用任何 LLM。
+    → 事务内（扣款 + 写流水 + 写审计 + 状态翻转）→ 返回快照。本函数不调用任何 LLM。
+
+    **并发**：整段执行在 `_TOKENS_LOCK` 临界区内 —— 两线程同时执行同一 token 时，后到者必然看到
+    已翻转的状态并走幂等分支，绝不会第二次扣款（卡 04b 修复线程级 TOCTOU）。
     """
     if (bad := _invalid(ExecuteTransferReq, preview_token=preview_token, otp=otp)) is not None:
         return bad
+    with _TOKENS_LOCK:                                          # 临界区：检查 → 扣款 → 翻转，整体串行
+        return _execute_locked(preview_token, otp)
+
+
+def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
+    """`execute_transfer` 的临界区主体；调用方必须已持有 `_TOKENS_LOCK`。"""
     token = _TOKENS.get(preview_token)
     if token is None:
         return _fail(ErrorCode.TOKEN_EXPIRED, "预览不存在或已失效，请重新预览")
@@ -406,10 +369,11 @@ def execute_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
         if account["balance"] < amount + token["fee"]:
             return _fail(ErrorCode.INSUFFICIENT_FUNDS, "储蓄账户余额不足")
         conn = dao.connection()
-        with transaction(conn):                                 # 单一事务：扣款 + 流水 + 审计（不嵌套 BEGIN）
-            balance_after = _debit(conn, account_id, amount)
-            if balance_after is None:                           # 防御性兜底，正常走不到
+        with transaction(conn):                                 # 单一事务：扣款 + 流水 + 审计 + 状态翻转（不嵌套 BEGIN）
+            updated = dao.update_account_balance(account_id, -amount)
+            if updated is None:                                 # 防御性兜底，正常走不到
                 raise ToolError(ErrorCode.NOT_FOUND, "储蓄账户不存在")
+            balance_after = updated["balance"]
             txn = dao.insert_txn(account_id, _now().isoformat(timespec="seconds"), -amount, "out",
                                  balance_after, counterparty=token["payee_name"], category="转账",
                                  channel="转账", memo=f"转账给{token['payee_name']}")
@@ -418,21 +382,29 @@ def execute_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
                              params_json={"payee_id": token["payee_id"], "amount": amount,
                                           "tier": token["tier"], "factors": token.get("factors", [])},
                              risk_level=token["tier"], permission_tier=token["tier"], result="success")
+            facts = {"txn_id": txn["id"], "payee_id": token["payee_id"], "payee_name": token["payee_name"],
+                     "tier": token["tier"], "requires_otp": token["requires_otp"], "status": "executed",
+                     **_money_facts(amount, "amount"), **_money_facts(token["fee"], "fee"),
+                     **_money_facts(balance_after, "balance_after")}
+            data = ExecuteData(txn_id=txn["id"], amount=amount, payee_name=token["payee_name"],
+                               balance_after=balance_after)
+            message = (f"已向 {data.payee_name} 转账 {facts['amount_yuan']} 元，"
+                       f"账户余额 {facts['balance_after_yuan']} 元。")
+            # 状态翻转与扣款**同事务**：失败时由 _rollback_token 一起回退，
+            # 绝不出现「状态说 executed、库里却没有这笔流水」的假成功。
+            token.update({"state": "executed", "data": data.model_dump(), "facts": facts, "message": message})
     except ToolError as exc:
+        _rollback_token(token)
         return _fail(exc.code, exc.message)
     except ValueError as exc:
+        _rollback_token(token)
         return _dao_reject(exc)
+    return _ok(token["data"], token["facts"], token["message"])
 
-    facts = {"txn_id": txn["id"], "payee_id": token["payee_id"], "payee_name": token["payee_name"],
-             "tier": token["tier"], "requires_otp": token["requires_otp"], "status": "executed",
-             **_money_facts(amount, "amount"), **_money_facts(token["fee"], "fee"),
-             **_money_facts(balance_after, "balance_after")}
-    data = ExecuteData(txn_id=txn["id"], amount=amount, payee_name=token["payee_name"],
-                       balance_after=balance_after)
-    message = (f"已向 {data.payee_name} 转账 {facts['amount_yuan']} 元，"
-               f"账户余额 {facts['balance_after_yuan']} 元。")
-    token.update({"state": "executed", "data": data.model_dump(), "facts": facts, "message": message})
-    return _ok(data.model_dump(), facts, message)
+
+def _rollback_token(token: dict) -> None:
+    """事务失败 → token 状态与快照一并回退，保证 executed 状态必然对应已提交的流水。"""
+    token.update({"state": "preview", "data": None, "facts": None, "message": None})
 
 
 # ---------------- T9 create_aa_request ----------------
@@ -453,7 +425,7 @@ def create_aa_request(payee_ids: list[str], amount: int) -> ToolResult:
     try:
         payees = []
         for payee_id in payee_ids:
-            row = _payee_by_id(payee_id)
+            row = dao.get_payee(payee_id)
             if row is None:
                 return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
             require_owned("收款人", row["user_id"], row["id"])

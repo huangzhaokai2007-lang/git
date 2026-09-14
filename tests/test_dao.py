@@ -425,6 +425,66 @@ def test_explicitly_different_ts_still_conflicts(seeded: Path) -> None:
         dao.insert_txn(ACCOUNT, "2026-08-31T23:58:00", -100, "out", 1, id="txn_ts_conflict")
 
 
+# ---------- 卡 04b 新增原语：get_payee / update_account_balance ----------
+
+def test_get_payee_returns_the_whole_row(seeded: Path) -> None:
+    row = dao.get_payee("payee_0001")
+    assert row == raw(seeded, "SELECT * FROM payee WHERE id = ?", ("payee_0001",))[0]
+    assert row is not None and row["user_id"] == USER_ID and isinstance(row["is_whitelist"], int)
+
+
+def test_get_payee_unknown_id_is_none(seeded: Path) -> None:
+    assert dao.get_payee("payee_nope") is None
+
+
+@pytest.mark.parametrize("bad", ["", "   ", None, 7, ["payee_0001"]])
+def test_get_payee_rejects_illegal_arguments(seeded: Path, bad: object) -> None:
+    with pytest.raises(ValueError):
+        dao.get_payee(bad)                                       # type: ignore[arg-type]
+
+
+def test_update_account_balance_moves_both_columns(seeded: Path) -> None:
+    """扣款式增量：`balance` 与 `available` 同步，返回值与库内一致，全程整数分。"""
+    before = raw(seeded, "SELECT * FROM account WHERE id = ?", (ACCOUNT,))[0]
+    row = dao.update_account_balance(ACCOUNT, -25_000)
+    assert row == raw(seeded, "SELECT * FROM account WHERE id = ?", (ACCOUNT,))[0]
+    assert (row["balance"], row["available"]) == (before["balance"] - 25_000, before["available"] - 25_000)
+    assert isinstance(row["balance"], int) and not isinstance(row["balance"], bool)
+
+
+def test_update_account_balance_accepts_zero_and_symmetric_deltas(seeded: Path) -> None:
+    """边界：0 是合法增量（重放场景）；正负对称（退款回冲）。"""
+    start = dao.get_balance("savings")["balance"]
+    assert dao.update_account_balance(ACCOUNT, 0)["balance"] == start
+    assert dao.update_account_balance(ACCOUNT, 1)["balance"] == start + 1
+    assert dao.update_account_balance(ACCOUNT, -1)["balance"] == start
+
+
+def test_update_account_balance_unknown_account_is_none_and_harmless(seeded: Path) -> None:
+    before = raw(seeded, "SELECT id, balance FROM account ORDER BY id")
+    assert dao.update_account_balance("acc_nope", 100) is None
+    assert raw(seeded, "SELECT id, balance FROM account ORDER BY id") == before
+
+
+@pytest.mark.parametrize("bad", [1.5, True, False, "100", None, [100]])
+def test_update_account_balance_rejects_illegal_delta(seeded: Path, bad: object) -> None:
+    """金额必须整数分：float / bool / 字符串 / None 一律拒，且库内余额分毫不动。"""
+    before = raw(seeded, "SELECT balance FROM account WHERE id = ?", (ACCOUNT,))[0]["balance"]
+    with pytest.raises(ValueError):
+        dao.update_account_balance(ACCOUNT, bad)                 # type: ignore[arg-type]
+    assert raw(seeded, "SELECT balance FROM account WHERE id = ?", (ACCOUNT,))[0]["balance"] == before
+
+
+def test_update_account_balance_joins_an_outer_transaction(seeded: Path) -> None:
+    """外层事务回滚 → 余额一并回退（与 insert_txn 同事务的原子性前提；卡 01 的 transaction 不可嵌套）。"""
+    before = raw(seeded, "SELECT balance FROM account WHERE id = ?", (ACCOUNT,))[0]["balance"]
+    with pytest.raises(RuntimeError):
+        with transaction(dao.connection()):
+            dao.update_account_balance(ACCOUNT, -1_000)
+            raise RuntimeError("模拟编排层中途失败")
+    assert raw(seeded, "SELECT balance FROM account WHERE id = ?", (ACCOUNT,))[0]["balance"] == before
+
+
 @pytest.fixture()
 def ticking_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     """把 dao 模块里的时钟换成每次调用前进 1 秒的假时钟：幂等用例不靠真实秒边界的巧合。"""
