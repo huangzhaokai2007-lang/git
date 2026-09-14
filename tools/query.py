@@ -29,7 +29,7 @@ from tools.schemas import (ACCOUNT_TYPES, MAX_LIMIT, AnalyzeSpendingReq, Anomali
 logger = logging.getLogger(__name__)
 
 # ---------------- 阈值常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
-AMOUNT_RATIO_THRESHOLD = 3          # 来源：卡 04 第 3 条「金额 > 该用户近 90 天均值 3 倍」（规格 §5 amount_jump 因子）
+AMOUNT_RATIO_THRESHOLD = 3          # 来源：规格 §2 T4 备注（>近 90 天支出均值 3 倍）；§5 的 amount_jump 5 倍=写操作降级因子，场景不同
 BASELINE_DAYS = 90                  # 来源：卡 04 第 3 条「近 90 天」；基准只取**支出**流水（见 _baseline_series）
 NIGHT_START_HOUR, NIGHT_END_HOUR = 23, 6   # 来源：规格 §5「night(23:00-06:00)」
 VELOCITY_WINDOW_MINUTES = 60        # 来源：卡 04 第 3 条「同商户 1 小时内」
