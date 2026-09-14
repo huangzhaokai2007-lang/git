@@ -9,6 +9,7 @@
 | 04 | 查询类工具 T1–T5 | `docs/cards/card-04.md` |
 | 04b | 工具层清理（共享 helpers + 拆测试 + DAO 写原语 + 幂等并发修复） | `docs/cards/card-04b.md` |
 | 05 | 转账类工具 T6–T9 | `docs/cards/card-05.md` |
+| 05b | 拆源文件收口 300 行 + 常量改名（最后一张清理卡） | `docs/cards/card-05b.md` |
 | 06 | 订阅与卡管理 T10–T12 | `docs/cards/card-06.md` |
 | 07 | 理财与跨场景 T13–T16 | `docs/cards/card-07.md` |
 | 08 | LLM 客户端与意图分类器 | `docs/cards/card-08.md` |
