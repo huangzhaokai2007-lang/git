@@ -7,6 +7,7 @@
 | 02 | 合成数据生成器 | `docs/cards/card-02.md` |
 | 03 | DAO 层 | `docs/cards/card-03.md` |
 | 04 | 查询类工具 T1–T5 | `docs/cards/card-04.md` |
+| 04b | 工具层清理（共享 helpers + 拆测试 + DAO 写原语 + 幂等并发修复） | `docs/cards/card-04b.md` |
 | 05 | 转账类工具 T6–T9 | `docs/cards/card-05.md` |
 | 06 | 订阅与卡管理 T10–T12 | `docs/cards/card-06.md` |
 | 07 | 理财与跨场景 T13–T16 | `docs/cards/card-07.md` |
