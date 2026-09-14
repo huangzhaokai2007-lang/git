@@ -291,6 +291,30 @@ ACTION: run
 REASON: card-05 PASS 无 MUST_FIX，工具层剩 card-06（T10-T12 订阅/卡）。订阅取消/卡挂失属 L2/L3 高危写操作 + confirm_ref 确认卡闭环 + 越权 + 写审计，必须 v4-pro。3 条 @user 口径（TOCTOU/fee/new_payee）不阻塞 card-06（订阅/卡与转账无耦合），边做边等拍板。
 NEXT_CARD_WARNING: card-06 高危写操作（cancel_subscription/manage_card）走 confirm_ref 确认卡闭环、越权断言、写 audit_log；金额整数分；L2/L3 权限档按规格 §5 矩阵；提交只 add 卡范围文件禁 -A。顺手留意 300 行（新文件尽量复用 helpers 或拆小，别让第 4 次超限滚雪球）。
 
+## 决策记录 2026-09-14 13:43
+
+事实（自己查到的）：
+  - 最新存档点：6cceba3 board: card-05 记账（HEAD）；其下 155804b card-05 / 0ff148d SPEC-CHANGE 删备注
+  - 工作区：clean；verify 绿 354 passed
+  - 上轮 4 项待拍（TOCTOU / fee / new_payee / 300 行清理）——用户拍板：按 reviewer 建议批准
+
+人类决策（用户拍板，2026-09-14）：
+  - ① 04b 清理卡先做、再进 card-06（reviewer 翻转成功：高危写路径上第 4 份 helper 副本 = 正确性风险，非风格债）
+  - ② TOCTOU → 04b 修（threading.Lock + state 翻转挪进事务）
+  - ③ fee → demo 期 fee=0 写进规格备注（不编费率，避免 float 撞禁浮点金额）
+  - ④ new_payee → 修 §5 去重（降级因子清单删 new_payee，保留 L2 基础条件）
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05（均 commit + 审核闭环）
+  - 卡在哪：工具层 04/05 完成；先 04b 清理（抽 _query_common + 拆测试 + DAO get_payee/update_account_balance + TOCTOU 锁），再 card-06
+  - 风险累积：300 行超限（第 3 次）由 04b 收口；TOCTOU/fee/new_payee 三条口径已拍板待落地
+
+NEXT_CARD: 04b
+MODEL: deepseek-v4-pro
+ACTION: human
+REASON: 用户批准 04b 清理先做。需 @user 建 docs/cards/card-04b.md（范围见下）+ 2 处 SPEC-CHANGE（fee=0 备注、new_payee §5 去重）落地。行为保持重构 + 幂等锁 + DAO 原语，必须 v4-pro。
+NEXT_CARD_WARNING: （04b 范围）tools/_query_common.py（新）抽 _ok/_fail/_invalid/_money/_owned_account_ids/require_owned/PCT_TOTAL；query.py/transfer.py 改引用共享删本地副本；拆 test_tools_query.py(651)/test_tools_transfer.py(604)；data/dao.py 补 get_payee(id)+update_account_balance（替 transfer.py 直查）；transfer.py _TOKENS 加 threading.Lock + state 翻转挪进事务；行为保持 354 测试原样绿。另 2 处 SPEC-CHANGE：规格 fee 备注「demo 期 0」+ §5 降级因子删 new_payee。
+
 
 
 
