@@ -13,6 +13,7 @@
 | infra | fb40cbb | 人工 | 三人小组编排器 v2 + 角色定义 + 账本；.gitignore 补 board/.tmp/ |
 | card-03 | 166f39d | PASS（card-03.md 无 MUST_FIX + delta review PASS） | DAO 层 14 函数 + 121 测试；verify 绿（185 passed）。审核后增量（volatile 幂等豁免 + 2 测试）经 delta review 确认无幂等漏洞、变异抽查有效 |
 | card-04 | 745d960 | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 工具层 T1–T5 只读工具；verify 绿（283 passed）。4 条红线变异抽查全真报警；3 文件指纹零漂移 |
+| card-05 | 155804b | PASS（无 MUST_FIX，5 条 RISK，其中 3 条待 @user 口径） | 工具层 T6–T9 转账三段式（preview/execute 幂等 + AA 拆分，71 测试）；verify 绿（354 passed）。4 条变异抽查全真报警。前置 SPEC-CHANGE 0ff148d 删「备注」 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -35,8 +36,14 @@
 | card-04 | 交付版本指纹（防审核后改动失配） | — | schemas.py `3350d7c9…` / query.py `e72fa8a0…` / test_tools_query.py `bc214f99…`；行数 142/497/678，我实测 sha256 逐一匹配 |
 | card-04 | 审核 RISK-1：facts 归一化弱于「逐字一致」（numbers() 剥小数点/千分位），挡不住量级错 | markdown 机械生成无硬编码，残余风险低，但卡 13 数字校验器若复用此归一化会漏量级错误 | 传导卡 13 前：补逐字断言（卡 13 做 facts_check 时收口） |
 | card-04 | 审核 RISK-2：T2 fail-closed 时 total_count 会小于真实值（他人账户 id 更小遮蔽本人） | 单用户 demo 不触发；多用户场景下 total_count 偏低 | 待办：多用户/越权场景扩展时复核 total_count 口径 |
-| card-05 | T6 要求「按备注匹配」但 payee 表无 memo 列（规格自相矛盾） | resolve_payee 无法落「备注」，且 memo 是不可信文本（txn 表） | **已拍板删**：T6 只按 name/phone 匹配；待 SPEC-CHANGE 删规格 T6 行 + 剧本源 + 重生成 card-05.md |
-| card-04 | 账本记「审核 PASS」但 board/reviews/ 无 card-04.md（零日志零 prompt 零 review 文件） | 11 月评审翻裁决时 card-04 空、PASS 无可核对实物 | **已拍板补记**：reviewer 事后复验 745d960 + 写 board/reviews/card-04.md 标「事后复验补记」 |
+| card-05 | T6 要求「按备注匹配」但 payee 表无 memo 列（规格自相矛盾） | resolve_payee 无法落「备注」，且 memo 是不可信文本（txn 表） | **已落地**：SPEC-CHANGE 0ff148d 删规格 §2 T6 + 剧本源 + card-05.md 重生成（3 files，逐字一致自查） |
+| card-04 | 账本记「审核 PASS」但 board/reviews/ 无 card-04.md（零日志零 prompt 零 review 文件） | 11 月评审翻裁决时 card-04 空、PASS 无可核对实物 | **已补记**：reviewer 复验 745d960（96 passed + 4 条红线变异全真报警）→ 写 board/reviews/card-04.md 标「事后复验补记」 |
+| card-05 | 并发幂等 TOCTOU：execute 的 `token["state"]=="executed"` 检查在事务外、`_TOKENS` 模块级 dict，两线程同时 execute 同 token 会双重扣款 | 单线程 demo（Streamlit）不触发；11 月评审若上线程压测会翻车 | **待 @user 口径**：并发=顺序重复（单线程）或加 threading.Lock + state 翻转挪进事务 |
+| card-05 | `fee` 恒为 0：规格 §2 T7 要求返 fee 但未定义费率，worker 未编造费率（正确） | 评审对照规格会问「fee 字段恒 0 的意义」 | **待 @user**：给手续费费率口径（或确认 demo 期 fee=0） |
+| card-05 | `_payee_by_id`/`_debit` 直查 `dao.connection()` 绕过 DAO 原语（TODO dao-05b） | ⑤ 层绕过 DAO 原语，层级味道；但参数化查询无注入、卡范围只许改 2 文件 | 建议 05b 补 DAO `get_payee(id)` + `update_account_balance` |
+| card-05 | 规格 §5 自相矛盾：`new_payee` 既在 L2 基础条件、又在降级因子清单 | 非白名单收款人可能永远到不了 L2+OTP（被误判 L3） | **待 @user**：确认「基础档已体现的因子不再升档」折中口径，或修规格 §5 |
+| card-05 | `_money` 硬编码 `100`（query.py 用 `PCT_TOTAL`） | 跨模块微小不一致 | 非阻塞：跨模块一致测试 `test_money_and_ownership_helpers_agree_with_query_module` 钉住 |
+| card-05 | transfer.py(480)/test_tools_transfer.py(604) 单文件超 300 行 | 300 行超限**第 3 次**（card-03 dao / card-04 query / card-05 transfer），且 transfer/query 薄封装重复（_ok/_fail/_invalid/_money/_owned_account_ids） | **升级信号**：建议 04b/05b 抽 tools/_query_common.py + 拆测试文件，收口这条系统性债务 |
 
 ## 人类批示
 
@@ -262,6 +269,27 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: 三件拍板齐了，card-05 代码已交付且 verify 绿。执行顺序：(1) SPEC-CHANGE 删「备注」（规格 T6 第 94 行 + docs/02-AI指令剧本.md 源 + 重生成 card-05.md）→ (2) reviewer 补记 card-04 → (3) 提交 card-05（只 add tools/transfer.py tests/test_tools_transfer.py）→ reviewer 审 card-05。写操作 + 幂等 + 权限档 + 多步事务，必须 v4-pro。
 NEXT_CARD_WARNING: card-05 提交只 `git add tools/transfer.py tests/test_tools_transfer.py`；resolve_payee 只按 name/phone 匹配（备注已删，勿再碰）；execute_transfer 幂等只扣一次款、金额纯整数分、多步事务不嵌套（card-01 的 transaction 坑）、TOKEN_EXPIRED 走 ErrorCode 枚举不硬编码；reviewer 重点核这四条 + T6 越权断言。
+
+## 决策记录 2026-09-14 13:22
+
+事实（自己查到的）：
+  - 最新存档点：155804b card-05（HEAD）；其下 0ff148d SPEC-CHANGE 删备注 / 1a082ba board 拍板 / 21f8344 docs / 633da2d SPEC-CHANGE
+  - 工作区：仅 ?? board/reviews/card-04.md（reviewer 补记，待本次记账提交）
+  - verify：绿。354 passed（187 + 96 工具层 + 71 转账）
+  - card-05 = PASS（无 MUST_FIX，5 条 RISK，其中 3 条待 @user 口径）；4 条变异抽查全真报警
+  - 备注已删（0ff148d 三处：规格 §2 T6 + 剧本源 + card-05.md 重生成，逐字一致自查通过）
+  - card-04 补记已落盘（board/reviews/card-04.md，VERDICT PASS，事后复验补记，96 passed + 4 条红线变异全真报警）
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05（均 commit + 审核闭环）
+  - 卡在哪：工具层 04/05 完成；下一张 card-06（T10-T12 订阅/卡）；card-04 补记文件随本次记账一并提交
+  - 风险累积：3 条新 @user 口径（TOCTOU 并发 / fee 费率 / new_payee 规格矛盾）非阻塞但挂 11 月评审；300 行超限第 3 次（dao/query/transfer）→ 升级信号，建议 04b/05b 抽 tools/_query_common.py 收口
+
+NEXT_CARD: 06
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: card-05 PASS 无 MUST_FIX，工具层剩 card-06（T10-T12 订阅/卡）。订阅取消/卡挂失属 L2/L3 高危写操作 + confirm_ref 确认卡闭环 + 越权 + 写审计，必须 v4-pro。3 条 @user 口径（TOCTOU/fee/new_payee）不阻塞 card-06（订阅/卡与转账无耦合），边做边等拍板。
+NEXT_CARD_WARNING: card-06 高危写操作（cancel_subscription/manage_card）走 confirm_ref 确认卡闭环、越权断言、写 audit_log；金额整数分；L2/L3 权限档按规格 §5 矩阵；提交只 add 卡范围文件禁 -A。顺手留意 300 行（新文件尽量复用 helpers 或拆小，别让第 4 次超限滚雪球）。
 
 
 
