@@ -375,7 +375,7 @@ NEXT_CARD_WARNING: card-06 高危写操作走 confirm_ref 确认卡闭环、越�
 
 人类决策（我拍板，worker 按此执行）：
   - ① 范围不扩到 schemas.py：T10–T12 出入参模型先放 subscription.py/card.py 内（严格在范围内、零越界），06b 机械搬到 schemas.py（与 confirm_ref 归位一起做）
-  - ② confirm_ref 口径按 reviewer 定稿：自包含 ref（本层签发/校验/TTL 300s/绑定 action+target_id+用户/一次性消费+结果快照写回=幂等），不接受任意字符串；真·确认卡绑定留卡 09/10；T12 的 L3 60s 延迟可撤销 = 工具层只给 facts（l3_delay_seconds=60/revocable=True）+ 双因子 + 标记人工复核，PENDING_REVIEW 属卡 10
+  - ② confirm_ref 口径按 reviewer 定稿：自包含 ref（本层签发/校验/TTL 300s/绑定 action+target_id+用户/一次性消费+结果快照写回=幂等），不接受任意字符串；真·确认卡绑定留卡 09/10；T12 的 L3 60s 窗口 = 工具层只给 facts（l3_window_seconds=60 / l3_window_phase=pre_execution_by_orchestrator / to_human=True）+ 双因子；**不给 revocable=True**（窗口在编排层 pre_execution、执行后 lost 不可逆，与卡06第4条一致），PENDING_REVIEW 属卡 10
 
 进度判断：
   - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b（均 commit + 审核闭环）
