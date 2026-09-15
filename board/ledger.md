@@ -16,6 +16,7 @@
 | card-05 | 155804b | PASS（无 MUST_FIX，5 条 RISK，其中 3 条待 @user 口径） | 工具层 T6–T9 转账三段式（preview/execute 幂等 + AA 拆分，71 测试）；verify 绿（354 passed）。4 条变异抽查全真报警。前置 SPEC-CHANGE 0ff148d 删「备注」 |
 | card-04b | 7d86b8d | PASS（无 MUST_FIX，4 条 RISK） | 工具层清理：共享 helpers 单份化 + 拆测试 ≤300 + DAO get_payee/update_account_balance + TOCTOU 锁；verify 绿（377 passed）。2 条变异抽查真报警、拆分零丢用例（旧 96→新 102） |
 | card-05b | ad156c9 | PASS（无 MUST_FIX，3 条 RISK） | 拆源文件收口 300 行 + VELOCITY 常量改名；verify 绿（389 passed）。全部源/测试文件首次 ≤300、依赖单向禁反向、零丢用例（178→190，+12） |
+| card-06 | d7fa98e | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T10–T12 订阅/卡管理（confirm_ref 确认闭环 + L2/L3 双因子）；verify 绿（520 passed）。18/18 变异抽查真报警；8 文件指纹零漂移 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -55,6 +56,9 @@
 | card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | 待 @user 追认（避免下张卡被范围门禁卡住） |
 | card-06（预） | tools/transfer.py 第 65、70 行 `_now()` 重复定义（内容相同，05b 拆文件遗留） | 行为无影响（后者覆盖前者），但属重复代码 | 待办：06b 顺手删一行 |
 | card-06（预） | confirm_ref 机制落在 subscription.py/card.py（本卡范围），不碰共享层 | 与 05b「helper 归共享层」先例不一致，confirm_ref 后续卡可能复用 | 待办：06b 抽 tools/_confirm.py 归位 |
+| card-06 | RISK-1：subscription.py:236 cancel_subscription docstring 过时，仍写「不存在/过期→TOKEN_EXPIRED」，与代码「不存在→FORBIDDEN、仅超时→TOKEN_EXPIRED」矛盾 | 安全边界文档自相矛盾 | 待办：06b 一行修 docstring |
+| card-06 | RISK-2：apply 的 data 形状偏离「card 快照」（11 键，含 id=None/card_no_mask=None/status='pending_review' 非 DDL） | 铁律 4 边界 | 待 SPEC-CHANGE 定 apply 返回口径，或补 DAO 建卡原语 |
+| card-06 | RISK-3：_zombie_ids 全量取 3 个月窗口无 category 过滤、无 TOO_MANY_ROWS 兜底（窗口>500 条会静默截断漏判） | 种子数据不触发，量大时漏判僵尸订阅 | 待办：多用户/大窗口场景复核 |
 
 ## 人类批示
 
