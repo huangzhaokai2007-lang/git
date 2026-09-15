@@ -33,7 +33,7 @@
 | card-03（delta） | `_insert` 的 volatile 是通用列名元组，当前仅被 ts 用；未来误把业务列（amount）写进 volatile 会静默漏比对 | 同 id 异金额被当同一条吞掉（幂等静默失效） | **fix_first 先拆**：改成布尔 skip_ts（或断言 volatile ⊆ {"ts"}），行为保持 185 测试原样绿 |
 | card-03（delta） | retry 测试 `monkeypatch.setattr(dao, "datetime", Clock)` 绑定「DAO 用模块级 now() 取时间」的实现细节 | 改时间来源（sqlite CURRENT_TIMESTAMP / time.time()）后该测试假绿/假红 | 传导：将来动时间来源时同步改该测试 |
 | card-04 | 规格 §5 `amount_jump(>历史均值5倍)` 与卡 04「金额偏离 >近90天均值3倍」数字打架 | 评审/答辩时口径不一致被扣分 | 已闭环（SPEC-CHANGE e4e847a）：标注 §5=写操作降级因子、T4=只读检测阈值，场景不同非冲突 |
-| card-04 | 规格 T4 备注列「陌生商户」但卡 04 未给口径 | T4 只做 3 条规则、少 1 条，评审对照规格会发现缺项 | 待办：与 §5 new_payee 语义重叠，后续卡统一口径后补（SPEC-CHANGE 已标注待定） |
+| card-04 | 规格 T4 备注列「陌生商户」但卡 04 未给口径 | T4 只做 3 条规则、少 1 条，评审对照规格会发现缺项 | **口径已定**（SPEC-CHANGE b84ac38）：陌生商户 = 过去90天该 user 无交易的 counterparty；实现待卡 07 后补 |
 | card-04 | query.py(497)/test_tools_query.py(651) 单文件超 300 行 | 评审对代码规范可扣分（同类风险第 2 次，但纯风格） | 待办不阻塞：建议 04b 抽 tools/_query_common.py + 拆测试文件（范围只许改 3 文件，本卡拆不了） |
 | card-04 | 2 处注释/docstring 过时：query.py:32 来源写「§5 amount_jump」应改「§2 T4 备注」；schemas.py:24 还写「... 未封闭、待人类决定」现已入册 | 零行为影响，但审核师查「来源标注与规格一致」会碰到 | 待修（审核闭环后一口价修，审核期间不动以免结论失配）；已同步给 worker |
 | card-04 | 交付版本指纹（防审核后改动失配） | — | schemas.py `3350d7c9…` / query.py `e72fa8a0…` / test_tools_query.py `bc214f99…`；行数 142/497/678，我实测 sha256 逐一匹配 |
@@ -41,23 +41,23 @@
 | card-04 | 审核 RISK-2：T2 fail-closed 时 total_count 会小于真实值（他人账户 id 更小遮蔽本人） | 单用户 demo 不触发；多用户场景下 total_count 偏低 | 待办：多用户/越权场景扩展时复核 total_count 口径 |
 | card-05 | T6 要求「按备注匹配」但 payee 表无 memo 列（规格自相矛盾） | resolve_payee 无法落「备注」，且 memo 是不可信文本（txn 表） | **已落地**：SPEC-CHANGE 0ff148d 删规格 §2 T6 + 剧本源 + card-05.md 重生成（3 files，逐字一致自查） |
 | card-04 | 账本记「审核 PASS」但 board/reviews/ 无 card-04.md（零日志零 prompt 零 review 文件） | 11 月评审翻裁决时 card-04 空、PASS 无可核对实物 | **已补记**：reviewer 复验 745d960（96 passed + 4 条红线变异全真报警）→ 写 board/reviews/card-04.md 标「事后复验补记」 |
-| card-05 | 并发幂等 TOCTOU：execute 的 `token["state"]=="executed"` 检查在事务外、`_TOKENS` 模块级 dict，两线程同时 execute 同 token 会双重扣款 | 单线程 demo（Streamlit）不触发；11 月评审若上线程压测会翻车 | **待 @user 口径**：并发=顺序重复（单线程）或加 threading.Lock + state 翻转挪进事务 |
-| card-05 | `fee` 恒为 0：规格 §2 T7 要求返 fee 但未定义费率，worker 未编造费率（正确） | 评审对照规格会问「fee 字段恒 0 的意义」 | **待 @user**：给手续费费率口径（或确认 demo 期 fee=0） |
-| card-05 | `_payee_by_id`/`_debit` 直查 `dao.connection()` 绕过 DAO 原语（TODO dao-05b） | ⑤ 层绕过 DAO 原语，层级味道；但参数化查询无注入、卡范围只许改 2 文件 | 建议 05b 补 DAO `get_payee(id)` + `update_account_balance` |
-| card-05 | 规格 §5 自相矛盾：`new_payee` 既在 L2 基础条件、又在降级因子清单 | 非白名单收款人可能永远到不了 L2+OTP（被误判 L3） | **待 @user**：确认「基础档已体现的因子不再升档」折中口径，或修规格 §5 |
+| card-05 | 并发幂等 TOCTOU：execute 的 `token["state"]=="executed"` 检查在事务外、`_TOKENS` 模块级 dict，两线程同时 execute 同 token 会双重扣款 | 单线程 demo（Streamlit）不触发；11 月评审若上线程压测会翻车 | **已闭环**：04b 加 threading.Lock + state 翻转挪进事务 |
+| card-05 | `fee` 恒为 0：规格 §2 T7 要求返 fee 但未定义费率，worker 未编造费率（正确） | 评审对照规格会问「fee 字段恒 0 的意义」 | **已闭环**：SPEC-CHANGE 61711f7 定 demo 期 fee=0 |
+| card-05 | `_payee_by_id`/`_debit` 直查 `dao.connection()` 绕过 DAO 原语（TODO dao-05b） | ⑤ 层绕过 DAO 原语，层级味道；但参数化查询无注入、卡范围只许改 2 文件 | **已闭环**：04b 补 DAO get_payee(id) + update_account_balance |
+| card-05 | 规格 §5 自相矛盾：`new_payee` 既在 L2 基础条件、又在降级因子清单 | 非白名单收款人可能永远到不了 L2+OTP（被误判 L3） | **已闭环**：SPEC-CHANGE bd8fa64 删降级因子里的 new_payee（保留 L2 基础条件） |
 | card-05 | `_money` 硬编码 `100`（query.py 用 `PCT_TOTAL`） | 跨模块微小不一致 | 非阻塞：跨模块一致测试 `test_money_and_ownership_helpers_agree_with_query_module` 钉住 |
 | card-05 | transfer.py(480)/test_tools_transfer.py(604) 单文件超 300 行 | 300 行超限**第 3 次**（card-03 dao / card-04 query / card-05 transfer），且 transfer/query 薄封装重复（_ok/_fail/_invalid/_money/_owned_account_ids） | **已收口**：04b 抽共享 + 拆测试，05b 拆源文件——全仓首次 ≤300（query 219/transfer 287/dao 239） |
 | card-04b | 源文件 300 行没治本：query.py 418 / transfer.py 452 / dao.py 393 / test_dao.py 525 仍超（抽共享只降 30–80 行） | card-06 是 L2/L3 高危写，带 4 个超限文件进场，评审逐条对规范可扣分 | **已收口**：05b 拆 _query_analysis/_transfer_risk/_dao_core + 再拆 test_dao，全仓 ≤300 |
 | card-05b | 新增 12 条测试集中在 test_transfer_risk.py / test_dao_core.py，只抽验了 TOCTOU 锁 + update_account_balance 两条关键变异，未逐一变异 | 377 原样绿 + 0 丢用例已保证行为保持，残余风险低 | 非阻塞（第 1 次）：后续卡对风控/DAO 新逻辑重点变异 |
 | card-05b | `seed.py` 恰好 300 行（压线 ≤300） | 下张卡若加种子数据会立刻破线 | 提醒 card-06：加种子数据时留意，或顺带拆 seed 测试 |
 | card-06（预） | T11 `confirm_ref` / T12 L3「60s 延迟撤销」依赖编排层 `CONFIRM_CARD`/`PENDING_REVIEW` 状态机（卡 09/10 未建） | 硬造不存在的确认卡、或「任意字符串即确认」= 越权/绕过口子 | **口径已定**：card-06 先做**自包含 ref**（仿 card-05 `preview_token`：本层生成/校验/TTL 绑定参数），真·确认卡绑定留卡 09/10 收口 |
-| card-04b | 真并发用例靠 monkeypatch `data.db.connect`（生产连接 check_same_thread=True 默认，进程内单连接） | TOCTOU 锁本身已变异证真，但 demo 若真多线程，第二个线程会 ProgrammingError | **待 @user**：demo 是否多线程；是则 data/db.py 开 check_same_thread=False |
+| card-04b | 真并发用例靠 monkeypatch `data.db.connect`（生产连接 check_same_thread=True 默认，进程内单连接） | TOCTOU 锁本身已变异证真，但 demo 若真多线程，第二个线程会 ProgrammingError | **已拍板**：demo 单线程（Streamlit 单线程即可），不改 db.py，风险最小 |
 | card-04b | `VELOCITY_WINDOW_MINUTES` 同名不同义：query.py=60（T4 只读）/ transfer.py=10（§5 写降级），未合并（正确） | 同义不同名易误改其一 | 建议 05b 拆两个名字（如 VELOCITY_MINUTES_T4 / VELOCITY_MINUTES_WRITE） |
-| card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | 待 @user 追认（避免下张卡被范围门禁卡住） |
+| card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | **已追认**：5 新文件均已提交入库（04b/05b 落地） |
 | card-06（预） | tools/transfer.py 第 65、70 行 `_now()` 重复定义（内容相同，05b 拆文件遗留） | 行为无影响（后者覆盖前者），但属重复代码 | 待办：06b 顺手删一行 |
 | card-06（预） | confirm_ref 机制落在 subscription.py/card.py（本卡范围），不碰共享层 | 与 05b「helper 归共享层」先例不一致，confirm_ref 后续卡可能复用 | 待办：06b 抽 tools/_confirm.py 归位 |
 | card-06 | RISK-1：subscription.py:236 cancel_subscription docstring 过时，仍写「不存在/过期→TOKEN_EXPIRED」，与代码「不存在→FORBIDDEN、仅超时→TOKEN_EXPIRED」矛盾 | 安全边界文档自相矛盾 | 待办：06b 一行修 docstring |
-| card-06 | RISK-2：apply 的 data 形状偏离「card 快照」（11 键，含 id=None/card_no_mask=None/status='pending_review' 非 DDL） | 铁律 4 边界 | 待 SPEC-CHANGE 定 apply 返回口径，或补 DAO 建卡原语 |
+| card-06 | RISK-2：apply 的 data 形状偏离「card 快照」（11 键，含 id=None/card_no_mask=None/status='pending_review' 非 DDL） | 铁律 4 边界 | **口径已定**（SPEC-CHANGE b84ac38）：apply 不落库，返回申请快照（request_id + status=pending_review），审计 pending_confirm，demo 期 mock |
 | card-06 | RISK-3：_zombie_ids 全量取 3 个月窗口无 category 过滤、无 TOO_MANY_ROWS 兜底（窗口>500 条会静默截断漏判） | 种子数据不触发，量大时漏判僵尸订阅 | 待办：多用户/大窗口场景复核 |
 
 ## 人类批示
@@ -416,6 +416,31 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: reviewer 已钉死键名与 FORBIDDEN/僵尸订阅口径，worker 照做并重出自证（520 passed、18/18 变异）。派审核师出正式 card-06 报告落盘，再精准提交 8 文件。
 NEXT_CARD_WARNING: 精准提交 8 文件（subscription.py/card.py + 5 测试 + conftest.py），禁 -A；2 条待拍口径（apply mock、权限档归类）不阻塞提交，随审核入台账。
+
+## 决策记录 2026-09-15 22:40
+
+事实（自己查到的）：
+  - 最新存档点：b84ac38 SPEC-CHANGE（HEAD）；其下 94177d9 board
+  - 工作区：clean；verify 绿 520 passed
+  - 清理积累的「待 @user」口径——先核实哪些已闭环（fee/new_payee/TOCTOU/300行/5新文件追认均早已落地），仅 4 条真待拍
+
+人类决策（用户拍板「按建议」）：
+  - P1 陌生商户口径 = 过去90天该 user 无交易的 counterparty；实现待卡 07 后补 → SPEC-CHANGE b84ac38
+  - P2 demo 单线程（Streamlit 单线程即可），不改 db.py check_same_thread
+  - P3 apply 不落库 = mock 申请快照（request_id + status=pending_review），审计 pending_confirm → SPEC-CHANGE b84ac38
+  - P4 权限档归类（adjust/set/lock=L2、unlock=L3）确认与 §5 一致，无需改
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b/06（工具层 T1–T12 全部完成）
+  - 卡在哪：待拍口径已清理完毕；下一张 card-07（T13–T16 理财 + 跨场景，工具层最后一卡）
+  - 风险累积：4 条待拍全部落定（2 条 SPEC-CHANGE + 2 条确认）；技术待办归 06b（删重复 _now / confirm_ref 抽 _confirm.py / docstring 一行 / 僵尸订阅兜底 / 陌生商户实现 / facts 逐字断言 / total_count）
+
+NEXT_CARD: 07
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 待拍口径清理完毕，进工具层最后一卡 card-07（T13–T16 理财/跨场景：风险评估 + 推荐 + 申购赎回 + 送礼计划）。涉及 T15 申购赎回 L2 写 + confirm_ref + 跨场景锁资金，v4-pro。
+NEXT_CARD_WARNING: card-07 范围 tools/wealth.py + tools/cross_scene.py + tests/；T13 风险评级由代码算（R1-R5 规则）；T15 申购赎回走 confirm_ref 确认卡 + 写审计 + 金额整数分；T16 锁资金 + mock 预订；陌生商户实现（T4 补第4条）若本卡顺路做，注意范围与 seed 数据。
+
 
 
 
