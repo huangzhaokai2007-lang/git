@@ -49,6 +49,7 @@
 | card-04b | 源文件 300 行没治本：query.py 418 / transfer.py 452 / dao.py 393 / test_dao.py 525 仍超（抽共享只降 30–80 行） | card-06 是 L2/L3 高危写，带 4 个超限文件进场，评审逐条对规范可扣分 | **已收口**：05b 拆 _query_analysis/_transfer_risk/_dao_core + 再拆 test_dao，全仓 ≤300 |
 | card-05b | 新增 12 条测试集中在 test_transfer_risk.py / test_dao_core.py，只抽验了 TOCTOU 锁 + update_account_balance 两条关键变异，未逐一变异 | 377 原样绿 + 0 丢用例已保证行为保持，残余风险低 | 非阻塞（第 1 次）：后续卡对风控/DAO 新逻辑重点变异 |
 | card-05b | `seed.py` 恰好 300 行（压线 ≤300） | 下张卡若加种子数据会立刻破线 | 提醒 card-06：加种子数据时留意，或顺带拆 seed 测试 |
+| card-06（预） | T11 `confirm_ref` / T12 L3「60s 延迟撤销」依赖编排层 `CONFIRM_CARD`/`PENDING_REVIEW` 状态机（卡 09/10 未建） | 硬造不存在的确认卡、或「任意字符串即确认」= 越权/绕过口子 | **口径已定**：card-06 先做**自包含 ref**（仿 card-05 `preview_token`：本层生成/校验/TTL 绑定参数），真·确认卡绑定留卡 09/10 收口 |
 | card-04b | 真并发用例靠 monkeypatch `data.db.connect`（生产连接 check_same_thread=True 默认，进程内单连接） | TOCTOU 锁本身已变异证真，但 demo 若真多线程，第二个线程会 ProgrammingError | **待 @user**：demo 是否多线程；是则 data/db.py 开 check_same_thread=False |
 | card-04b | `VELOCITY_WINDOW_MINUTES` 同名不同义：query.py=60（T4 只读）/ transfer.py=10（§5 写降级），未合并（正确） | 同义不同名易误改其一 | 建议 05b 拆两个名字（如 VELOCITY_MINUTES_T4 / VELOCITY_MINUTES_WRITE） |
 | card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | 待 @user 追认（避免下张卡被范围门禁卡住） |
