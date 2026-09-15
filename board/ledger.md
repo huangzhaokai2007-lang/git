@@ -15,6 +15,7 @@
 | card-04 | 745d960 | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 工具层 T1–T5 只读工具；verify 绿（283 passed）。4 条红线变异抽查全真报警；3 文件指纹零漂移 |
 | card-05 | 155804b | PASS（无 MUST_FIX，5 条 RISK，其中 3 条待 @user 口径） | 工具层 T6–T9 转账三段式（preview/execute 幂等 + AA 拆分，71 测试）；verify 绿（354 passed）。4 条变异抽查全真报警。前置 SPEC-CHANGE 0ff148d 删「备注」 |
 | card-04b | 7d86b8d | PASS（无 MUST_FIX，4 条 RISK） | 工具层清理：共享 helpers 单份化 + 拆测试 ≤300 + DAO get_payee/update_account_balance + TOCTOU 锁；verify 绿（377 passed）。2 条变异抽查真报警、拆分零丢用例（旧 96→新 102） |
+| card-05b | ad156c9 | PASS（无 MUST_FIX，3 条 RISK） | 拆源文件收口 300 行 + VELOCITY 常量改名；verify 绿（389 passed）。全部源/测试文件首次 ≤300、依赖单向禁反向、零丢用例（178→190，+12） |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -44,8 +45,10 @@
 | card-05 | `_payee_by_id`/`_debit` 直查 `dao.connection()` 绕过 DAO 原语（TODO dao-05b） | ⑤ 层绕过 DAO 原语，层级味道；但参数化查询无注入、卡范围只许改 2 文件 | 建议 05b 补 DAO `get_payee(id)` + `update_account_balance` |
 | card-05 | 规格 §5 自相矛盾：`new_payee` 既在 L2 基础条件、又在降级因子清单 | 非白名单收款人可能永远到不了 L2+OTP（被误判 L3） | **待 @user**：确认「基础档已体现的因子不再升档」折中口径，或修规格 §5 |
 | card-05 | `_money` 硬编码 `100`（query.py 用 `PCT_TOTAL`） | 跨模块微小不一致 | 非阻塞：跨模块一致测试 `test_money_and_ownership_helpers_agree_with_query_module` 钉住 |
-| card-05 | transfer.py(480)/test_tools_transfer.py(604) 单文件超 300 行 | 300 行超限**第 3 次**（card-03 dao / card-04 query / card-05 transfer），且 transfer/query 薄封装重复（_ok/_fail/_invalid/_money/_owned_account_ids） | **部分收口**：04b 已拆测试文件 ≤300 + 抽共享；但**源文件仍超 300**（见 card-04b RISK-1），待 05b 拆源文件 |
-| card-04b | 源文件 300 行没治本：query.py 418 / transfer.py 452 / dao.py 393 / test_dao.py 525 仍超（抽共享只降 30–80 行） | card-06 是 L2/L3 高危写，带 4 个超限文件进场，评审逐条对规范可扣分 | **待 05b**：拆 tools/_query_analysis.py + tools/_transfer_risk.py + data/_dao_core.py + 再拆 test_dao.py |
+| card-05 | transfer.py(480)/test_tools_transfer.py(604) 单文件超 300 行 | 300 行超限**第 3 次**（card-03 dao / card-04 query / card-05 transfer），且 transfer/query 薄封装重复（_ok/_fail/_invalid/_money/_owned_account_ids） | **已收口**：04b 抽共享 + 拆测试，05b 拆源文件——全仓首次 ≤300（query 219/transfer 287/dao 239） |
+| card-04b | 源文件 300 行没治本：query.py 418 / transfer.py 452 / dao.py 393 / test_dao.py 525 仍超（抽共享只降 30–80 行） | card-06 是 L2/L3 高危写，带 4 个超限文件进场，评审逐条对规范可扣分 | **已收口**：05b 拆 _query_analysis/_transfer_risk/_dao_core + 再拆 test_dao，全仓 ≤300 |
+| card-05b | 新增 12 条测试集中在 test_transfer_risk.py / test_dao_core.py，只抽验了 TOCTOU 锁 + update_account_balance 两条关键变异，未逐一变异 | 377 原样绿 + 0 丢用例已保证行为保持，残余风险低 | 非阻塞（第 1 次）：后续卡对风控/DAO 新逻辑重点变异 |
+| card-05b | `seed.py` 恰好 300 行（压线 ≤300） | 下张卡若加种子数据会立刻破线 | 提醒 card-06：加种子数据时留意，或顺带拆 seed 测试 |
 | card-04b | 真并发用例靠 monkeypatch `data.db.connect`（生产连接 check_same_thread=True 默认，进程内单连接） | TOCTOU 锁本身已变异证真，但 demo 若真多线程，第二个线程会 ProgrammingError | **待 @user**：demo 是否多线程；是则 data/db.py 开 check_same_thread=False |
 | card-04b | `VELOCITY_WINDOW_MINUTES` 同名不同义：query.py=60（T4 只读）/ transfer.py=10（§5 写降级），未合并（正确） | 同义不同名易误改其一 | 建议 05b 拆两个名字（如 VELOCITY_MINUTES_T4 / VELOCITY_MINUTES_WRITE） |
 | card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | 待 @user 追认（避免下张卡被范围门禁卡住） |
@@ -338,6 +341,26 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: card-04b PASS 无 MUST_FIX，但源文件 300 行只治了测试没治本体（query 418 / transfer 452 / dao 393 / test_dao 525）。card-06 是 L2/L3 高危写，不能带着 4 个超限文件 + 同义不同名常量进场。05b 拆 tools/_query_analysis.py + tools/_transfer_risk.py + data/_dao_core.py + 再拆 test_dao.py，一次收口后再 card-06。行为保持重构，v4-pro。
 NEXT_CARD_WARNING: （05b 范围）拆 3 个源文件 + 再拆 test_dao.py ≤300；VELOCITY_WINDOW_MINUTES 拆两个名字（T4 只读 60 vs §5 写降级 10）；行为保持 377 测试原样绿。3 条 @user 口径待拍：① 05b 做不做（我建议做）② demo 是否多线程（决定 data/db.py 要不要 check_same_thread=False）③ 5 个新文件追认。
+
+## 决策记录 2026-09-15 19:20
+
+事实（自己查到的）：
+  - 最新存档点：ad156c9 card-05b（HEAD）；其下 663edbc / ee3b6a6 card-05b.md / 7216c7d board
+  - 工作区：clean；verify 绿 389 passed（377 原样 + 12 新增）
+  - card-05b = PASS（无 MUST_FIX，3 条 RISK）；4 条验收门全过、2 条变异抽查真报警、零丢用例（178→190，+12）
+  - 全部源/测试文件首次 ≤300（query 219 / transfer 287 / dao 239 / _dao_core 209 / _query_analysis 209 / _transfer_risk 106 / schemas 198 / _query_common 130 / seed 300 压线）
+  - 13 文件精准提交（8 改 + 5 新，未用 -A）
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b（均 commit + 审核闭环）
+  - 卡在哪：**工具层（04/05/04b/05b）全部收口**；下一张 card-06（订阅/卡 T10-T12，L2/L3 高危写）
+  - 风险累积：300 行超限已彻底收口（全仓 ≤300）；VELOCITY 同名不同义已拆名；2 条新 RISK（seed.py 300 压线、12 新测试未逐一变异）非阻塞传导 card-06
+
+NEXT_CARD: 06
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 工具层收口，进 card-06（订阅/卡 T10-T12）。订阅取消/卡挂失/调额属 L2/L3 高危写 + confirm_ref 确认卡闭环 + 越权 + 写审计，必须 v4-pro。这是评分主战场的开始。
+NEXT_CARD_WARNING: card-06 高危写操作走 confirm_ref 确认卡闭环、越权断言、写 audit_log；cancel_subscription 幂等；manage_card 的 report_lost = L3 路径；金额整数分；L2/L3 权限档按规格 §5 矩阵；提交只 add 卡范围文件禁 -A；注意 seed.py 已 300 压线，加种子数据会破线。
 
 
 
