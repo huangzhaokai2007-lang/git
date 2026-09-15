@@ -1,16 +1,18 @@
-"""任务卡 04 单测（拆分后）：T3–T4 账单分析与异常检测（`tools/query.py`）。
+"""任务卡 04 单测（拆分后）：T3–T4 账单分析与异常检测（`tools/query.py` + `tools/_query_analysis.py`）。
 
-异常规则的口径常量与独立复算见用例注释；共享脚手架在 conftest.py（卡 04b 拆分）。"""
+异常规则的口径常量与独立复算见用例注释；共享脚手架在 conftest.py（卡 04b 拆分）。
+卡 05b 把分析内核拆到 `tools/_query_analysis.py` 后，内核用例（账期换算 / 占比 / 环比）直接打内核。"""
 
 from __future__ import annotations
 
 import re
+from datetime import date
 from pathlib import Path
 
 import pytest
 
 from data import dao
-from tools import query
+from tools import _query_analysis, query
 
 from tests.conftest import (ACCOUNT, raw, money, assert_covered, baseline_raw)
 
@@ -85,15 +87,31 @@ def test_analyze_spending_rejects_illegal_arguments(seeded: Path, period: object
 def test_pct_split_always_sums_to_100_even_for_awkward_weights() -> None:
     cases = [[1, 1, 1], [1, 0, 0], [5, 3, 2, 1], [100000, 1, 1, 1, 1, 1, 1], [7] * 13]
     for weights in cases:
-        split = query._split_pct(weights, sum(weights))
-        assert sum(split) == 100 and all(isinstance(value, int) and value >= 0 for value in split)
-    assert query._split_pct([1, 1], 0) == [0, 0]
+        split = _query_analysis._split_pct(weights, sum(weights))
+        assert sum(split) == _query_analysis.PCT_TOTAL
+        assert all(isinstance(value, int) and value >= 0 for value in split)
+    assert _query_analysis._split_pct([1, 1], 0) == [0, 0]
 
 
 def test_previous_period_walks_month_and_year_boundaries() -> None:
-    assert query._previous_period("2026-01") == "2025-12"
-    assert query._previous_period("2026-09") == "2026-08"
-    assert query._previous_period("2026") == "2025"
+    assert _query_analysis._previous_period("2026-01") == "2025-12"
+    assert _query_analysis._previous_period("2026-09") == "2026-08"
+    assert _query_analysis._previous_period("2026") == "2025"
+
+
+def test_period_bounds_reject_illegal_periods() -> None:
+    """账期换算在分析内核里：非法账期 → `ToolError(INVALID_ARGUMENT)`。"""
+    for bad in ("2026-13", "2026-00", "去年", ""):
+        with pytest.raises(_query_analysis.ToolError):
+            _query_analysis._period_bounds(bad)
+    assert _query_analysis._period_bounds("2026-02") == (date(2026, 2, 1), date(2026, 2, 28))
+
+
+def test_weekly_window_splits_across_months() -> None:
+    """`_month_windows` 按月切窗（DAO 单次翻页 500 行上限，靠分窗绕开截断）。"""
+    windows = _query_analysis._month_windows(date(2025, 12, 20), date(2026, 2, 3))
+    assert windows == [("2025-12-20", "2025-12-31"), ("2026-01-01", "2026-01-31"),
+                       ("2026-02-01", "2026-02-03")]
 
 
 def test_all_six_planted_anomalies_are_detected(seeded: Path) -> None:

@@ -1,27 +1,26 @@
-"""工具层 T6–T9（任务卡 05）：收款人解析 + 转账三段式（preview → 权限档 → 确认 → 幂等执行）。
+"""工具层 T6–T9（任务卡 05；卡 05b 拆分后）：收款人解析 + 转账三段式（preview → 权限档 → 确认 → 幂等执行）。
 
 依据 `docs/01-接口规格.md` 第 2 节 T6–T9、第 4 节状态机、第 5 节权限矩阵 + `CLAUDE.md` 铁律：
 - **只算不执行**：`preview_transfer` 不写任何流水；只有 `execute_transfer` 在**一个事务**里
-  扣款 + 写流水 + 写审计（复用 DAO `_writing()` 的 `in_transaction` 检测，绝不嵌套 `BEGIN` —— 台账 R1）。
+  扣款 + 写流水 + 写审计 + 状态翻转（复用 DAO `_writing()` 的 `in_transaction` 检测，绝不嵌套 `BEGIN` —— 台账 R1）。
 - 金额一律整数分（无浮点）；**OTP 明文绝不进日志、facts 或回执**；`execute` 里不调用任何 LLM。
 - 幂等：`preview_token` 是**一次性**的；执行后把结果快照写回 token，同 token 重复调用返回同一结果、
   绝不重复扣款。**并发**：token 状态检查 + 翻转 + 扣款事务同处 `_TOKENS_LOCK` 临界区（卡 04b 修复
   线程级 TOCTOU）；`state` 翻转在事务内完成，事务回滚时状态一并回退。
 - 归属：收款人 / 账户必须属于当前用户（越权 → `FORBIDDEN`），会话用户沿用 `tools._query_common.set_current_user`。
 
+模块分工（卡 05b 拆分后，依赖单向 `transfer → {_transfer_risk, _query_common, schemas}`）：
+- §5 权限档 / 降级因子 / 剩余限额 → `tools/_transfer_risk.py`（时间由参数注入）；
+- 薄封装与会话上下文 → `tools/_query_common.py`；出入参模型 → `tools/schemas.py`；
+- 本模块只留 T6–T9 公开函数 + token 表/锁 + `_now`（测试用假时钟钉的就是它）。
+
 口径与已知缺口（逐条写在交付说明的「需要人类决定」里）：
 - `fee` 恒为 **0**：规格 §5 T7 备注已定「无费率口径，demo 期恒 0」，未自行编造费率。
-- `tier` 按规格 §5：基础档（白名单且 ≤50000 分 → L1，否则 L2）+ 降级因子（命中任一升一档、≥2 → 转人工=L3）。
-  `new_payee` 不再参与升档（规格 §5 已去重：它已是 L2 基础条件），否则非白名单收款人永远到不了「L2 + OTP」。
-  因子 `device_change` / `geo_change` 在合成数据里没有数据源（DDL 无设备/地理列）→ 本卡不实现。
+- `new_payee` 不再参与升档（规格 §5 已去重：它已是 L2 基础条件），`device_change` / `geo_change` 无数据源 → 不实现。
 - L2 的「金额 > 500元」分支被硬约束「单笔上限 5 万分（500元）」遮蔽：>500元 直接 `OVER_LIMIT`。
 - 扣款账户 = 当前用户**储蓄账户**（T7 无账户入参）。
 - L3 只拒绝自动执行（`INVALID_STATE`）：60s 延迟生效/可撤销窗口属编排层 `PENDING_REVIEW`（卡 10）。
-- DAO 原语已补齐（卡 04b）：`dao.get_payee(payee_id)` / `dao.update_account_balance(account_id, delta)`，
-  本模块不再经 `dao.connection()` 直查（TODO(dao-05b) 已闭环）。
-- 薄封装 `_ok/_fail/_invalid/_dao_reject/_money/_money_facts/_owned_account_ids` 已收敛到
-  `tools/_query_common.py`（卡 04b：单份实现），本模块只 import 复用。
-- 本模块的出参模型按卡 05 的范围限制放在本文件（CLAUDE.md 说模型放 `tools/schemas.py`，两者冲突时服从硬范围）。
+- DAO 原语已补齐：`dao.get_payee(payee_id)` / `dao.update_account_balance(account_id, delta)`。
 """
 
 from __future__ import annotations
@@ -30,35 +29,32 @@ import logging
 import threading
 import uuid
 from datetime import datetime, timedelta
-from typing import Literal
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from data import dao
 from data.db import transaction
-from tools._query_common import (ToolError, _dao_reject, _fail, _invalid, _money, _money_facts,
-                                 _ok, _owned_account_ids, current_user_id, require_owned)
-from tools.schemas import MAX_LIMIT, ErrorCode, ToolResult
+from tools._query_common import (
+    ToolError, _dao_reject, _fail, _invalid, _money, _money_facts, _ok, _owned_account_ids, current_user_id,
+    require_owned, set_current_user, set_session_id, current_session_id,
+)
+from tools._transfer_risk import (
+    L1_MAX_CENTS, SINGLE_TX_MAX_CENTS, DAILY_MAX_CENTS, NIGHT_START_HOUR, VELOCITY_MINUTES_WRITE,
+    VELOCITY_MIN_WRITES, AMOUNT_JUMP_RATIO, HISTORY_DAYS, TIER_ORDER, OTP_TIERS, _today_out_flows,
+    _history_mean_cents, _factors, _assess, _limits, NIGHT_END_HOUR,
+)
+from tools.schemas import (
+    ResolvePayeeReq, PayeeCandidate, PayeeData, PreviewTransferReq, PreviewData, ExecuteTransferReq,
+    ExecuteData, AaRequestReq, AaData, ErrorCode, ToolResult,
+)
 
 logger = logging.getLogger(__name__)
 
-# ---------------- 阈值常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
-PREVIEW_TTL_SECONDS = 300           # 来源：规格 §2 T7「preview_token 有 TTL 300s 且绑定参数」
-L1_MAX_CENTS = 50_000               # 来源：规格 §5 L1「白名单收款人 且 金额 ≤ 50000 分（500元）」
-SINGLE_TX_MAX_CENTS = 50_000        # 来源：规格 §5 硬约束「单笔上限 5 万分/笔」
-DAILY_MAX_CENTS = 200_000           # 来源：规格 §5 硬约束「单日累计 20 万分」
-NIGHT_START_HOUR, NIGHT_END_HOUR = 23, 6   # 来源：规格 §5「night(23:00-06:00)」
-VELOCITY_WINDOW_MINUTES = 10        # 来源：规格 §5「velocity(10分钟内≥3笔写操作)」
-VELOCITY_MIN_WRITES = 3             # 来源：同上「≥3笔」
-AMOUNT_JUMP_RATIO = 5               # 来源：规格 §5「amount_jump(>历史均值5倍)」——**写操作降级因子**，
-                                    # 与卡 04 T4 的只读检测阈值 3 倍不是一回事（见规格口径区分注释）
-HISTORY_DAYS = 90                   # 来源：历史均值窗口；§5 未定义窗口，沿用卡 04 已确立的「近 90 天」
-OTP_CODE = "123456"                 # 来源：规格 §5 L2「demo 中固定 123456」；**绝不写日志/facts/回执**
-TIER_ORDER: tuple[str, ...] = ("L0", "L1", "L2", "L3")
-OTP_TIERS = ("L2", "L3")
-STRICT = ConfigDict(strict=True, extra="forbid")
+# ---------------- 本模块阈值常量 ----------------
 
-_SESSION_ID: str | None = None
+PREVIEW_TTL_SECONDS = 300           # 来源：规格 §2 T7「preview_token 有 TTL 300s 且绑定参数」
+
+OTP_CODE = "123456"                 # 来源：规格 §5 L2「demo 中固定 123456」；**绝不写日志/facts/回执**
+
+
 _TOKENS: dict[str, dict] = {}
 #: 幂等临界区（卡 04b）：token 状态检查 → 翻转 → 扣款事务必须整体串行。
 #: 旧实现把 `state == "executed"` 检查放在事务外，两线程可同时通过 → 双重扣款（线程级 TOCTOU）。
@@ -66,164 +62,14 @@ _TOKENS: dict[str, dict] = {}
 _TOKENS_LOCK = threading.Lock()
 
 
-class ResolvePayeeReq(BaseModel):
-    model_config = STRICT
-
-    query: str = Field(min_length=1)
-
-
-class PayeeCandidate(BaseModel):
-    id: str
-    name: str
-    masked_phone: str | None = None
-
-
-class PayeeData(BaseModel):
-    candidates: list[PayeeCandidate]
-    ambiguous: bool
-
-
-class PreviewTransferReq(BaseModel):
-    model_config = STRICT
-
-    payee_id: str = Field(min_length=1)
-    amount: int = Field(gt=0)
-    schedule: str | None = None
-    split_with: list[str] | None = None
-
-
-class PreviewData(BaseModel):
-    preview_token: str
-    fee: int
-    tier: Literal["L0", "L1", "L2", "L3"]
-    requires_otp: bool
-    limits: dict
-
-
-class ExecuteTransferReq(BaseModel):
-    model_config = STRICT
-
-    preview_token: str = Field(min_length=1)
-    otp: str | None = None
-
-
-class ExecuteData(BaseModel):
-    txn_id: str
-    amount: int
-    payee_name: str
-    balance_after: int
-
-
-class AaRequestReq(BaseModel):
-    model_config = STRICT
-
-    payee_ids: list[str] = Field(min_length=1)
-    amount: int = Field(gt=0)
-
-
-class AaData(BaseModel):
-    request_id: str
-    per_person_amount: int
-
-
-def set_session_id(session_id: str | None) -> None:
-    """编排层按会话注入 session_id（审计用）；不注入时兜底 `session-<user>`。
-
-    与 `tools.query.set_current_user` 同一类"工具层私有约定"（规格 §6 已认可该模式）。
-    """
-    global _SESSION_ID
-    _SESSION_ID = session_id
-
-
-def current_session_id() -> str:
-    return _SESSION_ID or f"session-{current_user_id()}"
+def _now() -> datetime:
+    """取当前时间（单独抽出来是为了让测试能钉住「凌晨/短时高频」这类时间相关口径）。"""
+    return datetime.now()
 
 
 def _now() -> datetime:
     """取当前时间（单独抽出来是为了让测试能钉住"凌晨/短时高频"这类时间相关口径）。"""
     return datetime.now()
-
-
-# 薄封装 _ok/_fail/_invalid/_dao_reject/_money/_money_facts/_owned_account_ids 已收敛到
-# tools/_query_common.py；DAO 直查的两个替代品改为原语 dao.get_payee / dao.update_account_balance
-# （卡 04b：单份实现 + 消掉 TODO(dao-05b) 的层级绕过）。
-
-
-# ---------------- 权限档与限额（规格 §5） ----------------
-
-def _today_out_flows() -> list[dict]:
-    """今日（`_now()` 当天）该用户的支出流水（供单日累计与短时高频两个口径复用）。"""
-    today = _now().date().isoformat()
-    try:
-        page = dao.list_txn(today, today, limit=MAX_LIMIT)
-    except ValueError as exc:                                    # 理论上不会发生（日期由 _now 生成）
-        raise ToolError(ErrorCode.INVALID_ARGUMENT, str(exc)) from exc
-    owned = _owned_account_ids()
-    return [row for row in page["items"] if row["amount"] < 0 and row["account_id"] in owned]
-
-
-def _history_mean_cents() -> tuple[int, int]:
-    """近 HISTORY_DAYS 天支出均值的整数地板值 + 样本数（金额偏离因子用）。
-
-    样本 = 单次翻页上限内**最近** MAX_LIMIT 笔（样本数进 facts 供审计）；无样本 → 0（该因子不判定）。
-    """
-    moment = _now()
-    begin = (moment - timedelta(days=HISTORY_DAYS)).date().isoformat()
-    try:
-        page = dao.list_txn(begin, moment.date().isoformat(), limit=MAX_LIMIT)
-    except ValueError as exc:
-        raise ToolError(ErrorCode.INVALID_ARGUMENT, str(exc)) from exc
-    owned = _owned_account_ids()
-    outs = [-row["amount"] for row in page["items"]
-            if row["amount"] < 0 and row["account_id"] in owned and row["ts"] < moment.isoformat()]
-    return (sum(outs) // len(outs) if outs else 0), len(outs)
-
-
-def _factors(payee: dict, cents: int, flows: list[dict]) -> list[str]:
-    """规格 §5 的降级因子（命中任一 → 升一档；≥2 → 转人工）。
-
-    `device_change` / `geo_change` 无数据源（DDL 无设备/地理列），本卡不实现。
-    """
-    moment = _now()
-    floor = (moment - timedelta(minutes=VELOCITY_WINDOW_MINUTES)).isoformat()
-    hits = []
-    if moment.hour >= NIGHT_START_HOUR or moment.hour < NIGHT_END_HOUR:
-        hits.append("night")
-    if not payee["is_whitelist"] or payee["last_used_ts"] is None:
-        hits.append("new_payee")
-    recent = len([row for row in flows if floor <= row["ts"] <= moment.isoformat()])
-    if recent + 1 >= VELOCITY_MIN_WRITES:            # 含本次这一笔
-        hits.append("velocity")
-    mean, _ = _history_mean_cents()
-    if mean > 0 and cents > mean * AMOUNT_JUMP_RATIO:
-        hits.append("amount_jump")
-    return hits
-
-
-def _assess(payee: dict, cents: int, flows: list[dict]) -> dict:
-    """按规格 §5 定档：基础档 + 降级因子升档。
-
-    规格 §5 的 L2 基础条件本来就是「新收款人」，而 `new_payee` 又在降级因子清单里 —— 同一条
-    不能既定基础档又再升一档（否则非白名单收款人永远落到 L3、与「L2 + OTP」的口径自相矛盾）。
-    故：基础档已体现过的那条不再参与升档；`factors` 仍如实给出**全部命中**（透明），`escalation` 给升档数。
-    """
-    hits = _factors(payee, cents, flows)
-    whitelisted = bool(payee["is_whitelist"])
-    base = "L1" if (whitelisted and cents <= L1_MAX_CENTS) else "L2"
-    escalation = [hit for hit in hits if not (hit == "new_payee" and not whitelisted)]
-    tier = TIER_ORDER[min(TIER_ORDER.index(base) + len(escalation), len(TIER_ORDER) - 1)]
-    return {"tier": tier, "factors": hits, "escalation": len(escalation),
-            "requires_otp": tier in OTP_TIERS, "to_human": tier == "L3"}
-
-
-def _limits(flows: list[dict]) -> dict:
-    """剩余限额：单笔上限 / 单日累计上限 / 今日已用 / 今日剩余（全部整数分）。"""
-    used = sum(-row["amount"] for row in flows)
-    return {"single_max": SINGLE_TX_MAX_CENTS, "daily_max": DAILY_MAX_CENTS,
-            "daily_used": used, "daily_remaining": max(DAILY_MAX_CENTS - used, 0)}
-
-
-# ---------------- T6 resolve_payee ----------------
 
 def resolve_payee(query: str) -> ToolResult:
     """T6 收款人解析（L0）。data: `candidates[{id,name,masked_phone}]` / `ambiguous`。
@@ -253,9 +99,6 @@ def resolve_payee(query: str) -> ToolResult:
     only = facts["candidates"][0]
     return _ok(data.model_dump(), facts, f"找到收款人 {only['name']}（{only['phone']}）。")
 
-
-# ---------------- T7 preview_transfer ----------------
-
 def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
                      split_with: list[str] | None = None) -> ToolResult:
     """T7 转账预览（L0，**只算不执行**）。data: `preview_token` / `fee` / `tier` / `requires_otp` / `limits`。
@@ -277,7 +120,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         account = dao.get_balance("savings")
         if account is None or account["user_id"] != current_user_id():
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
-        flows = _today_out_flows()
+        flows = _today_out_flows(_now())
         limits = _limits(flows)
     except ToolError as exc:
         return _fail(exc.code, exc.message)
@@ -292,8 +135,8 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
     if account["balance"] < amount + fee:
         return _fail(ErrorCode.INSUFFICIENT_FUNDS, "储蓄账户余额不足")
 
-    judged = _assess(payee, amount, flows)
-    mean, sample = _history_mean_cents()
+    judged = _assess(payee, amount, flows, _now())
+    mean, sample = _history_mean_cents(_now())
     token = f"pt_{uuid.uuid4().hex}"
     trace_id = f"trace-{uuid.uuid4().hex[:12]}"
     limits_yuan = {f"limits_{key}_yuan": _money(value) for key, value in limits.items()}
@@ -304,7 +147,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
              "ttl_seconds": PREVIEW_TTL_SECONDS, "token_bound_to": "payee_id+amount+tier",
              "amount_ratio_threshold": AMOUNT_JUMP_RATIO, "history_days": HISTORY_DAYS,
              "history_sample": sample, "night_from_hour": NIGHT_START_HOUR, "night_to_hour": NIGHT_END_HOUR,
-             "velocity_window_minutes": VELOCITY_WINDOW_MINUTES, "velocity_min_writes": VELOCITY_MIN_WRITES,
+             "velocity_window_minutes": VELOCITY_MINUTES_WRITE, "velocity_min_writes": VELOCITY_MIN_WRITES,
              **{f"limits_{key}": value for key, value in limits.items()}, **limits_yuan,
              **_money_facts(account["balance"], "balance"), **_money_facts(fee, "fee"),
              **_money_facts(amount, "amount"), **_money_facts(mean, "history_mean")}
@@ -322,9 +165,6 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
                f"今日剩余 {limits_yuan['limits_daily_remaining_yuan']} 元。")
     return _ok(data.model_dump(), facts, message)
 
-
-# ---------------- T8 execute_transfer ----------------
-
 def execute_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
     """T8 转账执行（L1–L3）。data: `txn_id` / `amount` / `payee_name` / `balance_after`。
 
@@ -338,7 +178,6 @@ def execute_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
         return bad
     with _TOKENS_LOCK:                                          # 临界区：检查 → 扣款 → 翻转，整体串行
         return _execute_locked(preview_token, otp)
-
 
 def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
     """`execute_transfer` 的临界区主体；调用方必须已持有 `_TOKENS_LOCK`。"""
@@ -363,7 +202,7 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
         account = dao.get_balance("savings")
         if account is None or account["id"] != account_id or account["user_id"] != current_user_id():
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
-        limits = _limits(_today_out_flows())
+        limits = _limits(_today_out_flows(_now()))
         if amount > SINGLE_TX_MAX_CENTS or limits["daily_used"] + amount > DAILY_MAX_CENTS:
             return _fail(ErrorCode.OVER_LIMIT, "超过转账限额")
         if account["balance"] < amount + token["fee"]:
@@ -401,13 +240,9 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
         return _dao_reject(exc)
     return _ok(token["data"], token["facts"], token["message"])
 
-
 def _rollback_token(token: dict) -> None:
     """事务失败 → token 状态与快照一并回退，保证 executed 状态必然对应已提交的流水。"""
     token.update({"state": "preview", "data": None, "facts": None, "message": None})
-
-
-# ---------------- T9 create_aa_request ----------------
 
 def create_aa_request(payee_ids: list[str], amount: int) -> ToolResult:
     """T9 AA 收款请求（L1）。data: `request_id` / `per_person_amount`。

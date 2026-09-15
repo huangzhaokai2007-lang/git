@@ -111,3 +111,20 @@ def _owned_account_ids() -> set[str]:
         if row is not None and row["user_id"] == current_user_id():
             owned.add(row["id"])
     return owned
+
+
+# ---------------- 会话标识（任务卡 05 定义，卡 05b 归位；与 set_current_user 同族） ----------------
+
+_SESSION_ID: str | None = None
+
+
+def set_session_id(session_id: str | None) -> None:
+    """编排层按会话注入 session_id（审计用）；不注入时兜底 `session-<user>`。
+
+    与 `tools.query.set_current_user` 同一类"工具层私有约定"（规格 §6 已认可该模式）。
+    """
+    global _SESSION_ID
+    _SESSION_ID = session_id
+
+def current_session_id() -> str:
+    return _SESSION_ID or f"session-{current_user_id()}"

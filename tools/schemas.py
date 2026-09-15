@@ -143,3 +143,56 @@ class GenerateBillReportReq(BaseModel):
 class BillReportData(BaseModel):
     markdown: str
     summary_numbers: dict[str, int]
+
+# ---------- T6–T9 转账类（任务卡 05 定义，卡 05b 归位 schemas.py：CLAUDE.md 要求模型放这里） ----------
+
+class ResolvePayeeReq(BaseModel):
+    model_config = STRICT
+
+    query: str = Field(min_length=1)
+
+class PayeeCandidate(BaseModel):
+    id: str
+    name: str
+    masked_phone: str | None = None
+
+class PayeeData(BaseModel):
+    candidates: list[PayeeCandidate]
+    ambiguous: bool
+
+class PreviewTransferReq(BaseModel):
+    model_config = STRICT
+
+    payee_id: str = Field(min_length=1)
+    amount: int = Field(gt=0)
+    schedule: str | None = None
+    split_with: list[str] | None = None
+
+class PreviewData(BaseModel):
+    preview_token: str
+    fee: int
+    tier: Literal["L0", "L1", "L2", "L3"]
+    requires_otp: bool
+    limits: dict
+
+class ExecuteTransferReq(BaseModel):
+    model_config = STRICT
+
+    preview_token: str = Field(min_length=1)
+    otp: str | None = None
+
+class ExecuteData(BaseModel):
+    txn_id: str
+    amount: int
+    payee_name: str
+    balance_after: int
+
+class AaRequestReq(BaseModel):
+    model_config = STRICT
+
+    payee_ids: list[str] = Field(min_length=1)
+    amount: int = Field(gt=0)
+
+class AaData(BaseModel):
+    request_id: str
+    per_person_amount: int

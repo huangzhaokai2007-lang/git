@@ -1,246 +1,46 @@
-"""工具层 T1–T5（任务卡 04）：只读查询工具，统一返回 `ToolResult`（含 facts 事实包）。
+"""工具层 T1–T5（任务卡 04；卡 05b 拆分后）：只读查询工具，统一返回 `ToolResult`（含 facts 事实包）。
+
+分析内核（账期换算 / 占比 / 异常规则 / 报告渲染）与阈值常量在 `tools/_query_analysis.py`；
+共享薄封装与归属断言在 `tools/_query_common.py`。本模块只留 5 个公开工具，依赖单向
+`query → _query_analysis → _query_common`。
 
 依据 `docs/01-接口规格.md` 第 2 节（函数名/字段名冻结）+ 第 6 节 L2（越权防护）+ `CLAUDE.md` 铁律：
-- **LLM 不参与任何计算**：金额、占比、异常判定全部由本模块的整数运算决定。
-- **金额一律整数分**，全程不出现 float（含均值、百分比：用整除 + 最大余额法）。
-- 只允许调 `data/`（DAO）；不写 SQL、不做权限档判定（那是 `guard/` 的活）。
-- 本模块的**阈值常量**（文件头集中声明，逐条注明来源）之外不得再出现业务数字字面量。
-- 错误消息**一律不含数字**：回执的每个数字都必须能在 facts 里找到，参数回显会污染数字校验器
-  （详见 `guard/facts_check.py`，卡 13），故明细只写 logging。
+- **LLM 不参与任何计算**：金额、占比、异常判定全部由整数运算决定。
+- 金额一律整数分，全程不出现 float。
+- 错误消息**一律不含数字**：回执的每个数字都必须能在 facts 里找到。
 - 资源归属：DAO 不按 user 圈定（账本风险台账已登记），本层做归属断言，越权 → `FORBIDDEN`。
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 import re
-from bisect import bisect_left
-from datetime import date, datetime, timedelta
-
 from data import dao
-from tools._query_common import (PCT_TOTAL, ToolError, _dao_reject, _fail, _invalid, _money,
-                                 _money_facts, _ok, _owned_account_ids, current_user_id,
-                                 require_owned, set_current_user)
-from tools.schemas import (MAX_LIMIT, AnalyzeSpendingReq, AnomaliesData, AnomalyItem,
-                           BalanceData, BillReportData, DetectAnomaliesReq, ErrorCode,
-                           GenerateBillReportReq, GetBalanceReq, ListTxnData, ListTxnReq,
-                           SpendingData, SpendingGroup, ToolResult, TxnItem)
+
+from tools._query_analysis import (
+    AMOUNT_RATIO_THRESHOLD, BASELINE_DAYS, KIND_LABELS, NIGHT_END_HOUR, NIGHT_START_HOUR, VELOCITY_MINUTES_T4,
+    VELOCITY_MIN_TXNS, _anomalies, _owned_txns, _period_bounds, _previous_period, _report_markdown, _scan,
+    _spend_groups, _split_pct, _vs_prev_pct,
+)
+from tools._query_common import (
+    PCT_TOTAL, ToolError, _dao_reject, _fail, _invalid, _money, _money_facts, _ok, _owned_account_ids,
+    require_owned, set_current_user, current_user_id, set_current_user,
+)
+from tools.schemas import (
+    AnalyzeSpendingReq, AnomaliesData, AnomalyItem, BalanceData, BillReportData, DetectAnomaliesReq, ErrorCode,
+    GenerateBillReportReq, GetBalanceReq, ListTxnData, ListTxnReq, MAX_LIMIT, SpendingData, SpendingGroup,
+    ToolResult, TxnItem,
+)
 
 logger = logging.getLogger(__name__)
-
-# ---------------- 阈值常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
-AMOUNT_RATIO_THRESHOLD = 3          # 来源：规格 §2 T4 备注（>近 90 天支出均值 3 倍）；§5 的 amount_jump 5 倍=写操作降级因子，场景不同
-BASELINE_DAYS = 90                  # 来源：卡 04 第 3 条「近 90 天」；基准只取**支出**流水（见 _baseline_series）
-NIGHT_START_HOUR, NIGHT_END_HOUR = 23, 6   # 来源：规格 §5「night(23:00-06:00)」
-VELOCITY_WINDOW_MINUTES = 60        # 来源：卡 04 第 3 条「同商户 1 小时内」
-VELOCITY_MIN_TXNS = 3               # 来源：卡 04 第 3 条「≥3 笔」
-ACCOUNT_LABELS = {"savings": "储蓄账户", "credit": "信用账户"}
-CYCLE_LABELS = {"monthly": "每月", "yearly": "每年"}
-KIND_LABELS = {"monthly": "月度", "yearly": "年度"}
-PERIOD_KINDS = {"monthly": re.compile(r"^\d{4}-\d{2}$"), "yearly": re.compile(r"^\d{4}$")}
-REASON_AMOUNT_JUMP, REASON_NIGHT, REASON_VELOCITY = "金额显著高于近期均值", "凌晨时段交易", "同商户短时密集交易"
-
-_SESSION_USER: str | None = None
-_PERIOD_RE = re.compile(r"^(\d{4})(?:-(\d{2}))?$")
-
-
-# ToolError / set_current_user / current_user_id / require_owned 与会话用户上下文，
-# 以及 _ok/_fail/_invalid/_dao_reject/_money/_money_facts 已收敛到 tools/_query_common.py
-# （卡 04b：单份实现，禁复制；本模块只 import 复用）。
-
 
 def _stamp() -> str:
     return datetime.now().isoformat(timespec="seconds")
 
-
-def _dt(ts: str) -> datetime:
-    return datetime.fromisoformat(ts)
-
-
-def _next_month(day: date) -> date:
-    return date(day.year + day.month // 12, day.month % 12 + 1, 1)
-
-
-def _period_bounds(period: str) -> tuple[date, date]:
-    """`"2026-09"` / `"2026"` → 闭区间（首日, 末日）；非法 → INVALID_ARGUMENT。"""
-    match = _PERIOD_RE.match(period.strip()) if isinstance(period, str) else None
-    if match is None or (match.group(2) and not 1 <= int(match.group(2)) <= 12):
-        raise ToolError(ErrorCode.INVALID_ARGUMENT, "账期格式不对")
-    year, month = int(match.group(1)), match.group(2)
-    if month is None:
-        return date(year, 1, 1), date(year, 12, 31)
-    first = date(year, int(month), 1)
-    return first, _next_month(first) - timedelta(days=1)
-
-
-def _previous_period(period: str) -> str:
-    """上一个同长度账期：`2026-09` → `2026-08`，`2026-01` → `2025-12`，`2026` → `2025`。"""
-    start, _ = _period_bounds(period)
-    previous = date(start.year, start.month, 1) - timedelta(days=1)
-    return f"{previous.year:04d}-{previous.month:02d}" if len(period.strip()) > 4 else f"{previous.year:04d}"
-
-
-def _month_windows(start: date, end: date) -> list[tuple[str, str]]:
-    """把日期区间切成按月的小窗口（DAO 单次翻页上限 500 行，按窗口取可绕开截断）。"""
-    windows, cursor = [], start
-    while cursor <= end:
-        last = min(_next_month(cursor) - timedelta(days=1), end)
-        windows.append((cursor.isoformat(), last.isoformat()))
-        cursor = last + timedelta(days=1)
-    return windows
-
-
-def _owned_txns(date_from: str, date_to: str) -> list[dict]:
-    """取区间内**属于当前用户账户**的全部流水（按月分窗，条数超上限则报 TOO_MANY_ROWS）。
-
-    `date_from > date_to` 直接拒（与 DAO 同口径，避免悄悄返回空结果掩盖参数错误）。
-    """
-    first, last = date.fromisoformat(date_from), date.fromisoformat(date_to)
-    if first > last:
-        raise ToolError(ErrorCode.INVALID_ARGUMENT, "起始日期不能晚于结束日期")
-    owned, rows = _owned_account_ids(), []
-    for start, end in _month_windows(first, last):
-        page = dao.list_txn(start, end, limit=MAX_LIMIT)
-        if page["total_count"] > MAX_LIMIT:
-            raise ToolError(ErrorCode.TOO_MANY_ROWS, "该区间的流水过多，请缩小日期范围")
-        rows.extend(row for row in page["items"] if row["account_id"] in owned)
-    return rows
-
-
-def _split_pct(amounts: list[int], total: int) -> list[int]:
-    """整数百分比且**和恒为 PCT_TOTAL**（最大余额法）；total ≤ 0 → 全 0。"""
-    if total <= 0:
-        return [0] * len(amounts)
-    base = [amount * PCT_TOTAL // total for amount in amounts]
-    rest = PCT_TOTAL - sum(base)
-    order = sorted(range(len(amounts)), key=lambda i: (-(amounts[i] * PCT_TOTAL % total), i))
-    for index in order[:rest]:
-        base[index] += 1
-    return base
-
-
-def _vs_prev_pct(total: int, prev_total: int) -> int | None:
-    """与上期比的整数百分比（四舍五入，纯整数运算）；上期无支出 → None。"""
-    if prev_total <= 0:
-        return None
-    diff = total - prev_total
-    magnitude = (abs(diff) * 2 * PCT_TOTAL + prev_total) // (2 * prev_total)
-    return magnitude if diff >= 0 else -magnitude
-
-
-def _spend_groups(rows: list[dict], group_by: str) -> tuple[dict[str, int], int]:
-    """按 `group_by`（category|channel）汇总**支出**（amount<0）的绝对金额（分）。"""
-    totals: dict[str, int] = {}
-    for row in rows:
-        if row["amount"] < 0:
-            key = row[group_by] or "未分类"
-            totals[key] = totals.get(key, 0) + -row["amount"]
-    return totals, sum(totals.values())
-
-
-def _anomalies(rows: list[dict], series: list[tuple[datetime, int]]) -> list[dict]:
-    """三条规则（口径见文件头常量）；severity 由**命中规则条数**决定：≥2 high，1 medium。
-
-    `series` 是基准序列（该用户**支出**流水的 (时间, 绝对金额)，按时间升序）；
-    每笔交易的基准是它自己"近 90 天"（不含本笔）的均值 —— 规格字面口径，
-    与"用哪个账期来看"无关，故同一笔交易在任何账期下判定一致。
-    """
-    velocity = _velocity_hits(rows)
-    items: list[dict] = []
-    for row in sorted(rows, key=lambda item: (item["ts"], item["id"])):
-        baseline = _baseline_for(_dt(row["ts"]), series)
-        hits = []
-        if baseline > 0 and -row["amount"] > baseline * AMOUNT_RATIO_THRESHOLD:
-            hits.append(REASON_AMOUNT_JUMP)
-        if _is_night(row["ts"]):
-            hits.append(REASON_NIGHT)
-        if row["id"] in velocity:
-            hits.append(REASON_VELOCITY)
-        if hits:
-            items.append({"txn_id": row["id"], "reason": "、".join(hits),
-                          "severity": "high" if len(hits) > 1 else "medium",
-                          "amount": row["amount"], "baseline_mean": baseline})
-    return items
-
-
-def _baseline_series(rows: list[dict]) -> list[tuple[datetime, int]]:
-    """基准序列：**支出**流水的 (时间, 绝对金额)，时间升序（供二分取窗口）。
-
-    为什么只取支出：入账（工资金额最大）若参与均值，会把基准抬高到"什么都算不上异常"，
-    并且工资自身会被判为异常；金额偏离要答的是"这笔支出相对日常支出是否异常"。
-    """
-    return sorted((_dt(row["ts"]), -row["amount"]) for row in rows if row["amount"] < 0)
-
-
-def _baseline_for(moment: datetime, series: list[tuple[datetime, int]]) -> int:
-    """某笔交易"近 BASELINE_DAYS 天"（左闭右开、**不含本笔**）支出均值的整数地板值；无样本 → 0。
-
-    全程整数运算（无浮点）：区间求和后整除。
-    """
-    stop = bisect_left(series, (moment,))
-    begin = bisect_left(series, (moment - timedelta(days=BASELINE_DAYS),))
-    window = series[begin:stop]
-    return sum(amount for _, amount in window) // len(window) if window else 0
-
-
-def _scan(start: date, end: date) -> tuple[list[dict], list[tuple[datetime, int]]]:
-    """分析期流水 + 基准序列：一次取 [分析期起点 - BASELINE_DAYS 天, 分析期终点] 的流水，
-    期内的作扫描对象，全部作基准池（保证每笔都能看到自己往前 90 天的样本）。
-    """
-    pool = _owned_txns((start - timedelta(days=BASELINE_DAYS)).isoformat(), end.isoformat())
-    inside = [row for row in pool if start.isoformat() <= row["ts"][:10] <= end.isoformat()]
-    return inside, _baseline_series(pool)
-
-
-def _is_night(ts: str) -> bool:
-    hour = _dt(ts).hour
-    return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
-
-
-def _velocity_hits(rows: list[dict]) -> set[str]:
-    """同商户 (counterparty) 在 VELOCITY_WINDOW_MINUTES 分钟内出现 ≥VELOCITY_MIN_TXNS 笔 → 窗口内每笔命中。
-
-    无对手方名的流水（counterparty 为空）不参与该规则：没有商户可归组。
-    """
-    buckets: dict[str, list[dict]] = {}
-    for row in rows:
-        if row["counterparty"]:
-            buckets.setdefault(row["counterparty"], []).append(row)
-    window = timedelta(minutes=VELOCITY_WINDOW_MINUTES)
-    hits: set[str] = set()
-    for bucket in buckets.values():
-        ordered = sorted(bucket, key=lambda row: (row["ts"], row["id"]))
-        for index, first in enumerate(ordered):
-            group = [row for row in ordered[index:] if _dt(row["ts"]) - _dt(first["ts"]) < window]
-            if len(group) >= VELOCITY_MIN_TXNS:
-                hits.update(row["id"] for row in group)
-    return hits
-
-
 def _owned_subscriptions() -> list[dict]:
     """当前用户的进行中订阅（按 user_id 显式查询 → 归属由构造保证，天然无越权）。"""
     return dao.list_subscriptions(current_user_id(), "active")
-
-
-def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict], subs: list[dict]) -> str:
-    """生成 Markdown 账单报告：每个数字都从 `facts` 取（幻觉红线）。"""
-    lines = [f"# {KIND_LABELS[kind]}账单报告 · {period}", "", "## 总览",
-             f"- 本期支出合计：{facts['out_sum_yuan']} 元（{facts['out_count']} 笔）",
-             f"- 本期收入合计：{facts['in_sum_yuan']} 元（{facts['in_count']} 笔）",
-             f"- 净额：{facts['net_yuan']} 元"]
-    if facts["vs_prev_pct"] is not None:
-        lines.append(f"- 较上一账期：{facts['vs_prev_pct']}%（上期 {facts['prev_total_yuan']} 元）")
-    lines += ["", "## 支出明细（按占比）", "| 项目 | 金额（元） | 占比 |", "| --- | --- | --- |"]
-    lines += [f"| {group['key']} | {group['amount_yuan']} | {group['pct']}% |" for group in groups]
-    lines += ["", "## 订阅（进行中）"]
-    lines += ([f"- {sub['merchant']}：{sub['amount_yuan']} 元／{CYCLE_LABELS[sub['cycle']]}，下次扣费 {sub['next_charge_date']}"
-               for sub in subs] or ["- 无"])
-    lines += ["", "## 异常提示", f"本期发现 {facts['anomaly_count']} 笔可疑交易（详见异常检测结果）。", "",
-              "> 本报告全部数字取自工具事实包，未经模型改写。"]
-    return "\n".join(lines)
-
-
-# ---------------- T1–T5 公开工具 ----------------
 
 def get_balance(account_type: str) -> ToolResult:
     """T1 余额查询（L0）。data: `balance` / `available` / `as_of`（金额为整数分）。
@@ -265,7 +65,6 @@ def get_balance(account_type: str) -> ToolResult:
     message = (f"{ACCOUNT_LABELS[account_type]}余额 {facts['balance_yuan']} 元，"
                f"可用 {facts['available_yuan']} 元。")
     return _ok(data.model_dump(), facts, message)
-
 
 def list_txn(date_from: str, date_to: str, category: str | None = None,
              min_amount: int | None = None, limit: int = 50) -> ToolResult:
@@ -299,7 +98,6 @@ def list_txn(date_from: str, date_to: str, category: str | None = None,
     message = (f"共 {facts['total_count']} 笔流水，本次展示 {facts['returned_count']} 笔；"
                f"支出合计 {facts['page_out_sum_yuan']} 元，收入合计 {facts['page_in_sum_yuan']} 元。")
     return _ok(data.model_dump(), facts, message)
-
 
 def analyze_spending(period: str, group_by: str = "category") -> ToolResult:
     """T3 账单分析（L0）。data: `groups[{key,amount,pct}]` / `total` / `vs_prev_pct`。
@@ -336,7 +134,6 @@ def analyze_spending(period: str, group_by: str = "category") -> ToolResult:
     message = f"{facts['period']} 支出合计 {facts['total_yuan']} 元，{change}。"
     return _ok(data.model_dump(), facts, message)
 
-
 def detect_anomalies(period: str) -> ToolResult:
     """T4 异常检测（L0，纯规则，无任何 LLM 判断）。data: `items[{txn_id,reason,severity}]`。
 
@@ -356,7 +153,7 @@ def detect_anomalies(period: str) -> ToolResult:
     facts = {"period": period.strip(), "scanned_count": len(rows), "anomaly_count": len(items),
              "amount_ratio_threshold": AMOUNT_RATIO_THRESHOLD, "baseline_days": BASELINE_DAYS,
              "night_from_hour": NIGHT_START_HOUR, "night_to_hour": NIGHT_END_HOUR,
-             "velocity_window_minutes": VELOCITY_WINDOW_MINUTES, "velocity_min_txns": VELOCITY_MIN_TXNS,
+             "velocity_window_minutes": VELOCITY_MINUTES_T4, "velocity_min_txns": VELOCITY_MIN_TXNS,
              "items": [{"txn_id": item["txn_id"], "severity": item["severity"], "reason": item["reason"],
                         **_money_facts(item["amount"], "amount"),
                         **_money_facts(item["baseline_mean"], "baseline_mean")} for item in items]}
@@ -368,7 +165,6 @@ def detect_anomalies(period: str) -> ToolResult:
                f"金额规则为单笔支出超过其近 {facts['baseline_days']} 天支出均值的 "
                f"{facts['amount_ratio_threshold']} 倍。")
     return _ok(data.model_dump(), facts, message)
-
 
 def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
     """T5 账单报告（L0）。data: `markdown` / `summary_numbers`。
@@ -416,3 +212,8 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
     data = BillReportData(markdown=markdown, summary_numbers=summary)
     message = f"{facts['period']} {KIND_LABELS[kind]}账单：支出 {facts['out_sum_yuan']} 元，收入 {facts['in_sum_yuan']} 元。"
     return _ok(data.model_dump(), facts, message)
+
+
+ACCOUNT_LABELS = {"savings": "储蓄账户", "credit": "信用账户"}
+
+PERIOD_KINDS = {"monthly": re.compile(r"^\d{4}-\d{2}$"), "yearly": re.compile(r"^\d{4}$")}

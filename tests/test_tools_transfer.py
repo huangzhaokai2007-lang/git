@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from data.seed import SAVINGS_ID
-from tools import transfer
+from tools import _transfer_risk, query, transfer
 
 from tests.conftest import (FOREIGN_PAYEE, PAYEE, PAYEE_NEW, OTP, Clock, write_sql, count, balance, assert_covered, preview_ok, add_today_flows)
 
@@ -124,7 +124,9 @@ def test_preview_amount_jump_factor_uses_five_times_history(seeded: Path,
     正常账户里 5 倍历史均值(~1,000元) 已被"单笔上限 500元"遮蔽，故这里把历史均值压小来钉住因子逻辑。
     """
     assert transfer.AMOUNT_JUMP_RATIO == 5 and transfer.HISTORY_DAYS == 90
-    monkeypatch.setattr(transfer, "_history_mean_cents", lambda: (100, 50))
+    # 卡 05b：风控内核搬进 `_transfer_risk` 且改为**时间注入**（`moment` 由 transfer 传入，避免回边）。
+    # 该函数在 `_factors` 里是**模块内**调用，故打桩目标必须是风控模块自己（patch transfer 不再命中）。
+    monkeypatch.setattr(_transfer_risk, "_history_mean_cents", lambda moment: (100, 50))
     assert preview_ok(PAYEE, 501).facts["factors"] == ["amount_jump"]
     assert preview_ok(PAYEE, 500).facts["factors"] == []         # 恰好 5 倍不算（严格大于）
 
