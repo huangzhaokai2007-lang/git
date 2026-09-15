@@ -375,7 +375,7 @@ NEXT_CARD_WARNING: card-06 高危写操作走 confirm_ref 确认卡闭环、越�
 
 人类决策（我拍板，worker 按此执行）：
   - ① 范围不扩到 schemas.py：T10–T12 出入参模型先放 subscription.py/card.py 内（严格在范围内、零越界），06b 机械搬到 schemas.py（与 confirm_ref 归位一起做）
-  - ② confirm_ref 口径按 reviewer 定稿：自包含 ref（本层签发/校验/TTL 300s/绑定 action+target_id+用户/一次性消费+结果快照写回=幂等），不接受任意字符串；真·确认卡绑定留卡 09/10；T12 的 L3 60s 窗口 = 工具层只给 facts（l3_window_seconds=60 / l3_window_phase=pre_execution_by_orchestrator / to_human=True）+ 双因子；**不给 revocable=True**（窗口在编排层 pre_execution、执行后 lost 不可逆，与卡06第4条一致），PENDING_REVIEW 属卡 10
+  - ② confirm_ref 口径按 reviewer 定稿：自包含 ref（本层签发/校验/TTL 300s/绑定 action+target_id+用户/一次性消费+结果快照写回=幂等），不接受任意字符串；真·确认卡绑定留卡 09/10；T12 的 L3 60s 延迟可撤销 = 工具层只给 facts（l3_delay_seconds=60 / revocable=True / l3_window_phase=pre_execution / to_human）+ 双因子；**revocable=True 指执行前可撤销窗口（§4 PENDING_REVIEW + §5 L3 既定分层），执行后 lost 不可逆由状态机保证，两者不矛盾**；PENDING_REVIEW 属卡 10
 
 进度判断：
   - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b（均 commit + 审核闭环）
@@ -387,6 +387,32 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: 两点口径已拍板（范围不扩、confirm_ref 自包含），worker 按此开工。card-06 是 L2/L3 高危写（订阅取消/卡挂失/调额），confirm_ref 确认卡闭环 + 越权 + 审计，v4-pro。
 NEXT_CARD_WARNING: 同前：confirm_ref 自包含、越权断言、写 audit_log、cancel_subscription 幂等、report_lost=L3、金额整数分；范围不扩 schemas（模型放 subscription.py/card.py 内）；06b 收口「模型归 schemas + confirm_ref 抽 _confirm.py + 删 transfer.py 重复 _now」。
+
+## 决策记录 2026-09-15 22:10
+
+事实（自己查到的）：
+  - 最新存档点：48bfc9f（HEAD）
+  - 工作区：M conftest.py + 7 个未提交新文件（subscription.py/card.py + 5 测试）；verify 绿 520 passed
+  - 8 文件新指纹与 worker 给的逐一匹配（旧指纹作废，以此套为准）
+  - reviewer 通过 DM 钉死键名与两条口径（正式报告未落盘 board/reviews/card-06.md）
+
+reviewer 裁决（记台账，worker 已照做重出自证）：
+  - ① L3 facts 键名 = l3_delay_seconds=60 / revocable=True（另保留 l3_window_phase=pre_execution + to_human；L2 facts 不含 L3 键，有测试钉住）。revocable=True 指执行前可撤销窗口（§4 PENDING_REVIEW + §5 L3 既定分层），执行后 lost 不可逆由状态机保证，两者不矛盾。我上一轮把 revocable 误读成「执行后可撤销」选 (a) 去掉它是错的，已纠正。
+  - ② FORBIDDEN 口径收紧（行为变更）：未知/伪造/非本人/绑定不符的凭证 → FORBIDDEN（超 TTL 才是 TOKEN_EXPIRED）。
+  - ③ FORBIDDEN 一律写 audit_log.result='rejected' 留痕。
+  - ④ 僵尸订阅口径：使用记录 = counterparty==merchant 或 source_txn_id 指向的流水；锚点 = data.seed.AS_OF（不用 datetime.now()，跨天可复现），facts 加 zombie_as_of；年费 sub_0004 照字面标僵尸，不加 cycle 豁免。
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b（均 commit + 审核闭环）
+  - 卡在哪：card-06 代码完成、verify 绿 520、18/18 变异变红，待派审核师出正式报告后精准提交
+  - 风险累积：仍待拍 2 条（apply 不落库 mock 口径、adjust/set/lock=L2 与 unlock=L3 权限档归类）——不阻塞提交，记待办
+
+NEXT_CARD: 06
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: reviewer 已钉死键名与 FORBIDDEN/僵尸订阅口径，worker 照做并重出自证（520 passed、18/18 变异）。派审核师出正式 card-06 报告落盘，再精准提交 8 文件。
+NEXT_CARD_WARNING: 精准提交 8 文件（subscription.py/card.py + 5 测试 + conftest.py），禁 -A；2 条待拍口径（apply mock、权限档归类）不阻塞提交，随审核入台账。
+
 
 
 
