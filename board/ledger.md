@@ -53,6 +53,8 @@
 | card-04b | 真并发用例靠 monkeypatch `data.db.connect`（生产连接 check_same_thread=True 默认，进程内单连接） | TOCTOU 锁本身已变异证真，但 demo 若真多线程，第二个线程会 ProgrammingError | **待 @user**：demo 是否多线程；是则 data/db.py 开 check_same_thread=False |
 | card-04b | `VELOCITY_WINDOW_MINUTES` 同名不同义：query.py=60（T4 只读）/ transfer.py=10（§5 写降级），未合并（正确） | 同义不同名易误改其一 | 建议 05b 拆两个名字（如 VELOCITY_MINUTES_T4 / VELOCITY_MINUTES_WRITE） |
 | card-04b | 5 个新文件超卡明文范围（conftest.py + 4 个拆分测试文件） | 是「678/604 行拆 ≤300」的必然结果，非越界 | 待 @user 追认（避免下张卡被范围门禁卡住） |
+| card-06（预） | tools/transfer.py 第 65、70 行 `_now()` 重复定义（内容相同，05b 拆文件遗留） | 行为无影响（后者覆盖前者），但属重复代码 | 待办：06b 顺手删一行 |
+| card-06（预） | confirm_ref 机制落在 subscription.py/card.py（本卡范围），不碰共享层 | 与 05b「helper 归共享层」先例不一致，confirm_ref 后续卡可能复用 | 待办：06b 抽 tools/_confirm.py 归位 |
 
 ## 人类批示
 
@@ -362,6 +364,30 @@ MODEL: deepseek-v4-pro
 ACTION: run
 REASON: 工具层收口，进 card-06（订阅/卡 T10-T12）。订阅取消/卡挂失/调额属 L2/L3 高危写 + confirm_ref 确认卡闭环 + 越权 + 写审计，必须 v4-pro。这是评分主战场的开始。
 NEXT_CARD_WARNING: card-06 高危写操作走 confirm_ref 确认卡闭环、越权断言、写 audit_log；cancel_subscription 幂等；manage_card 的 report_lost = L3 路径；金额整数分；L2/L3 权限档按规格 §5 矩阵；提交只 add 卡范围文件禁 -A；注意 seed.py 已 300 压线，加种子数据会破线。
+
+## 决策记录 2026-09-15 21:30
+
+事实（自己查到的）：
+  - 最新存档点：0d5227a board: card-06 口径记录（HEAD）；其下 1d8d4c9 board / ad156c9 card-05b
+  - 工作区：clean；verify 绿（工具层收口，card-06 未开工）
+  - 我核实 worker 上报的瑕疵：tools/transfer.py 第 65、70 行 `_now()` 重复定义，内容完全相同（05b 拆文件遗留），后者覆盖前者，行为无影响
+  - worker 已开 card-06，抛 2 点待拍 + 1 瑕疵 + 1 建议
+
+人类决策（我拍板，worker 按此执行）：
+  - ① 范围不扩到 schemas.py：T10–T12 出入参模型先放 subscription.py/card.py 内（严格在范围内、零越界），06b 机械搬到 schemas.py（与 confirm_ref 归位一起做）
+  - ② confirm_ref 口径按 reviewer 定稿：自包含 ref（本层签发/校验/TTL 300s/绑定 action+target_id+用户/一次性消费+结果快照写回=幂等），不接受任意字符串；真·确认卡绑定留卡 09/10；T12 的 L3 60s 延迟可撤销 = 工具层只给 facts（l3_delay_seconds=60/revocable=True）+ 双因子 + 标记人工复核，PENDING_REVIEW 属卡 10
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b（均 commit + 审核闭环）
+  - 卡在哪：card-06（订阅/卡 T10-T12）worker 已开工，按上面两点口径执行
+  - 风险累积：新增待办 2 条（见台账）：_now 重复定义 + confirm_ref 06b 归位
+
+NEXT_CARD: 06
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 两点口径已拍板（范围不扩、confirm_ref 自包含），worker 按此开工。card-06 是 L2/L3 高危写（订阅取消/卡挂失/调额），confirm_ref 确认卡闭环 + 越权 + 审计，v4-pro。
+NEXT_CARD_WARNING: 同前：confirm_ref 自包含、越权断言、写 audit_log、cancel_subscription 幂等、report_lost=L3、金额整数分；范围不扩 schemas（模型放 subscription.py/card.py 内）；06b 收口「模型归 schemas + confirm_ref 抽 _confirm.py + 删 transfer.py 重复 _now」。
+
 
 
 
