@@ -23,7 +23,7 @@ import pytest
 from data import dao
 from data.db import connect, transaction
 from data.seed import SAVINGS_ID, generate
-from tools import query, transfer
+from tools import query, subscription, transfer
 
 # ---------------- 测试数据常量（多个模块共用） ----------------
 
@@ -56,9 +56,14 @@ class Clock:
 
 @pytest.fixture()
 def clock(monkeypatch: pytest.MonkeyPatch) -> Clock:
-    """钉死 `transfer._now`（时间相关档位/窗口断言的确定性来源）。"""
+    """钉死 `transfer._now` / `subscription._now`（时间相关档位/窗口断言的确定性来源）。
+
+    卡 06 追加订阅侧：取消的 `effective_date`、确认凭证的 TTL、僵尸订阅的「近 3 个月」窗口
+    都读 `subscription._now`，不钉住就会随运行时刻抖动。
+    """
     fixed = Clock(datetime(2026, 9, 12, 12, 0, 0))
     monkeypatch.setattr(transfer, "_now", fixed)
+    monkeypatch.setattr(subscription, "_now", fixed)
     return fixed
 
 
@@ -75,8 +80,10 @@ def seeded(tmp_path: Path, clock: Clock) -> Path:
     query.set_current_user(None)
     transfer.set_session_id("session-test")
     transfer._TOKENS.clear()
+    subscription._CONFIRM_REFS.clear()      # 卡 06：确认凭证是进程内状态，必须逐用例复位
     yield path
     transfer._TOKENS.clear()
+    subscription._CONFIRM_REFS.clear()
     transfer.set_session_id(None)
     query.set_current_user(None)
     dao.close()
