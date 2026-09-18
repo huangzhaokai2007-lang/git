@@ -699,3 +699,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 工具层安全加固（评分主战场）：tool_guard 统一越权校验 + 限流 + 幂等落库 + 参数边界。确定性代码，flash 够用。
 NEXT_CARD_WARNING: card-14 范围 guard/tool_guard.py + tools/*.py + tests/test_tool_guard.py；所有工具入口统一 tool_guard 校验资源 id 属当前 user（否则 FORBIDDEN + 写 risk_event）；限流同用户 60s 写操作>5 次拒绝；幂等表落库（非内存，重启仍有效）；参数边界金额正整数分、上限 500 万分、收款人 id 存在；单测越权访问他人账户/卡/持仓 + 重放 token + 非法金额。注意：这是改 tools/*.py 的大卡，若范围过大可拆 14a/14b，先做越权统一校验 + 参数边界（14a），限流+幂等落库（14b）。
+
+## 决策记录 2026-09-19 04:55（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：bbc9af8 board 记账（HEAD）；verify 绿 831 passed
+  - card-14 worker 报范围过大（15 工具散 7 文件约 2500 行），未留半成品，建议拆 14a/14b
+
+裁决（3 条口径 + 拆分）：
+  - ① 幂等表 + 限流计数表放 data/schema.sql + data/dao.py（**扩范围到 data 层**，架构正确，DDL 惯例）。
+  - ② 60s 限流「写操作」口径：算「新写操作调用次数」（含被拒的越权/非法参数尝试，防刷），**幂等重放（同 token 返回既有结果）不算一次**。
+  - ③ 越权拒绝留痕：audit_log.result='rejected'（既有口径）+ risk_event（卡 14 原话）**都写**，语义不同不重复（audit=操作留痕，risk=安全告警）。
+  - 拆分：14a（核心=越权统一校验 + 参数边界，工具侧改调用不改变行为/错误码/审计）→ 14b（存储类=限流 + 幂等落库，依赖 schema 决策）。
+
+NEXT_CARD: 14a
+MODEL: deepseek-flash
+ACTION: run
+REASON: 卡 14 拆两半，先做核心 14a（越权+参数边界），14b（限流+幂等落库）依赖 schema 后做。职责单一避免 worker BLOCKED。
+NEXT_CARD_WARNING: card-14a 范围 guard/tool_guard.py + tools/*.py + tests/test_tool_guard.py；tool_guard 统一入口=①资源归属校验（账户/卡/持仓/订阅→非本人→FORBIDDEN+写 risk_event+audit rejected）②参数边界（金额正整数分、上限 5000000 分、收款人 id 存在）；工具侧 require_owned 类校验改调 tool_guard，**不改变错误码/审计语义/行为**（对照 831 passed 基线逐条）；单测越权访问他人账户/卡/持仓 + 非法金额（0/负/浮点/超限/不存在收款人）。14b 的限流+幂等落库本卡不做。
