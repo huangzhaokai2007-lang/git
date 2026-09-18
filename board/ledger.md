@@ -912,3 +912,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏系列最后一卡：transfer 内存 _TOKENS 切幂等表（_CONFIRM_LOCK 防 TOCTOU），达成"转账链路幂等重启后仍有效"端到端。
 NEXT_CARD_WARNING: card-14b-6 范围 tools/transfer.py + guard/tool_guard.py（若需）+ tests/；transfer preview_transfer token 登记 + _execute_locked 状态翻转 + _rollback_token 回滚 + _TOKENS_LOCK 临界区边界，全切 idempotent_execute（复用 _CONFIRM_LOCK 包「查→产→写」）；加一条「两步预览→执行→重启→重放」端到端用例；改一个跑一次测试，不破坏 859 基线。
+
+## 决策记录 2026-09-19 07:45（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：701ee08 board 记账（HEAD）；verify 绿 859 passed
+  - card-14b-6 worker 勘察 + 设计完成，主动止损未改代码（资金主链路不零碎改，正确）
+
+裁决：
+  - ① 14b-6 交新会话照 worker 设计做（薄壳 _load_token/_store_token 替换 _TOKENS、先事务后写快照、端到端重启用例、变异 4 条）。
+  - ② DB 级守卫（条件更新防多进程重复执行）**加上**（代价小，多进程保险）。
+  - ③ scripts 两件入库；SPEC-CHANGE 已在 5235353 注明待用户确认。
+
+NEXT_CARD: 14b-6（重派新会话照设计）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 设计已完整（薄壳替换 + 事务优先 + DB守卫 + 端到端用例 + 变异），新会话照做即可，不再勘察。
+NEXT_CARD_WARNING: 照 worker 设计：① _load_token/_store_token 薄壳替换 _TOKENS 读写（行为逐字不变，71 条 transfer 用例是安全网）；② 保留 _TOKENS_LOCK + DB 级条件更新守卫（受影响行 0 = 已执行走幂等）；③ _rollback_token 改「先事务后写快照」（失败即没写 executed）；④ 端到端用例 preview→execute→新连接(=重启)→重放断言逐字相同 + txn/audit 只 +1；⑤ 变异 4 条（快照改回内存/去DB守卫/先写快照后事务/重放走限流）。
