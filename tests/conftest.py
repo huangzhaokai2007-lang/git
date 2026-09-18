@@ -23,7 +23,7 @@ import pytest
 from data import dao
 from data.db import connect, transaction
 from data.seed import SAVINGS_ID, generate
-from tools import query, subscription, transfer
+from tools import _wealth_risk, query, subscription, transfer
 
 # ---------------- 测试数据常量（多个模块共用） ----------------
 
@@ -81,9 +81,11 @@ def seeded(tmp_path: Path, clock: Clock) -> Path:
     transfer.set_session_id("session-test")
     transfer._TOKENS.clear()
     subscription._CONFIRM_REFS.clear()      # 卡 06：确认凭证是进程内状态，必须逐用例复位
+    _wealth_risk._ASSESSMENTS.clear()       # 卡 07：风险测评结果同族（进程内），同样逐用例复位
     yield path
     transfer._TOKENS.clear()
     subscription._CONFIRM_REFS.clear()
+    _wealth_risk._ASSESSMENTS.clear()
     transfer.set_session_id(None)
     query.set_current_user(None)
     dao.close()
