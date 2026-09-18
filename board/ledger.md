@@ -842,3 +842,19 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14b 核心（加表+限流+幂等原语）已提交 859 passed，三项收尾并 14b-2 按风险递增（①补名→②变异→③transfer切换）做。
 NEXT_CARD_WARNING: card-14b-2 范围 tools/*.py + guard/tool_guard.py + scripts/mutcheck_14b.py + tests/；① 39 处 require_owned 补 tool 名（可建 scripts/card14b_name_sites.py 批量，落在 scripts/ 合规），两条 *_untouched 断言放宽为「资金/流水未动+审计 rejected+risk_event 新增」；② 变异自检 4 条（幂等改内存/限流阈值放宽/只读也计数/重放也计数）；③ require_payee_exists 改 id 精确查找（补 payee_0001 不被误拒）；④ transfer 内存 _TOKENS 切幂等表（风险大，最后做，改一个跑一次测试）。
+
+## 决策记录 2026-09-19 06:45（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：719d026 card-14b-2（HEAD）；verify 绿 859 passed
+  - card-14b-2 = 修 require_payee_exists 假阴性（id 精确查找）+ 4 条变异脚本（4/4 真红）；scripts/mutcheck_14b.py 入库（可复用变异自检工具）
+
+两项未做（worker 交底，建议 14b-3）：
+  ① 39 处 require_owned 补 tool 名 + 两条 *_untouched 断言放宽（越权双写全覆盖）
+  ② transfer 内存 _TOKENS 切幂等表（幂等落库端到端接线，风险最高）
+
+NEXT_CARD: 14b-3
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14b-2 收官（require_payee_exists + 变异），两项剩余（39处补名 + transfer切库）开 14b-3，按 ①→② 风险递增。
+NEXT_CARD_WARNING: card-14b-3 范围 tools/*.py + guard/tool_guard.py + tests/；① 39 处 require_owned 补 tool="<工具名>"（可建 scripts 批量脚本，禁 heredoc），两条 *_untouched 断言放宽为「资金/流水未动+审计 rejected+risk_event 新增」；② transfer 内存 _TOKENS 切幂等表（preview/execute 状态翻转 + _rollback_token 回滚路径，改一个跑一次测试，确保重放同 token 返回同结果且重启有效）。
