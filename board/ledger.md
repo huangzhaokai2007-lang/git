@@ -488,3 +488,10 @@ NEXT_CARD_WARNING: 每角色只留一个进程（本房间 @analyst/@reviewer/@w
 
 
 
+
+## 人类批示 2026-09-19 00:58（双会话分工，@user 拍板）
+
+analyst 这个 profile 有两个活跃会话：1v1「Bot Chat」（session 20260912_152637_d91f03）与「Group: Agent Bank」（session 20260912_184306_b045b3）。
+用户拍板：两会话共享记忆、各自独立进程，但分工必须钉死——**只有 1v1 Bot Chat 会话负责记账（board/ledger.md）、git 提交、决策推进、派活**；「Group: Agent Bank」会话只做群聊应答，绝不写账本、不 git 提交、不派活、不推进 card。
+
+此条为唯一事实源。任何 analyst 会话（含群会话）醒来三查时必读到此条，违反即越界。
