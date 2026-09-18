@@ -23,6 +23,7 @@
 | card-10 | fdc3865 | PASS（无 MUST_FIX，5 条非阻塞 RISK） | 写操作端到端：guard/permission.py 档位 + confirm_card 确认卡 + OTP/幂等 + L3 待复核 + write_flow 拆分；verify 绿（709 passed）。2 次变异抽查真报警；四步走/幂等/脱敏验证到位 |
 | card-11 | e82b8fe | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 护栏层用例集：30 条 YAML + runner + verify 接入（SKIP→通过 30/30）+ 3 个 bug 修复；verify 绿（741 passed）。「用例有牙齿」实测（改断言即 FAIL） |
 | card-12 | 2e03abf | PASS（拦截率 34/34 100%，误报 0/14） | 注入检测护栏：10 确定性规则 + 归一化解混淆 + wrap_untrusted + 34 攻击串回归；verify 绿（799 passed）。**待 12b 接线 + 铁律7收口** |
+| card-12b | b6eee07 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 注入护栏接线（CLASSIFY 前 detect→REFUSE 零 LLM）+ 铁律7 收口（sanitize_facts 包裹）+ verify 第5段 SKIP→通过；verify 绿（805 passed）。2 次变异抽查真报警 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -653,3 +654,25 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏已备好未装上（安全主战场必须生效）。12b 接线 detect→REFUSE + 收口铁律 7（facts 自由文本 wrap）+ 收紧误报规则。全是确定性代码，flash 够用。
 NEXT_CARD_WARNING: card-12b 范围 agent/orchestrator.py + agent/templates.py + guard/injection.py（必要时）+ tests/；CLASSIFY 前 detect() 命中→REFUSE 不调 LLM；templates.polish 对 facts 自由文本字段（memo/counterparty/备注）先 wrap_untrusted；inj-transfer-all 收紧为「转给我/自己/他人账户」；lint 单测断言无自由文本裸拼接；verify.sh 第 5 段改「有哪个跑哪个」。
+
+## 决策记录 2026-09-19 04:25（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：b6eee07 card-12b（HEAD）；verify 绿 805 passed
+  - card-12b = PASS（无 MUST_FIX，4 条非阻塞 RISK）；2 次变异抽查真报警（零 LLM 调用 + 铁律7包裹）
+
+进度判断：
+  - 已完成卡：card-00~12b + 06b + 陌生商户 —— 数据层 + 工具层 + 编排层 + 护栏层（用例集/注入检测/接线收口）全部完成
+  - 卡在哪：护栏层 card-13（guard/facts_check.py 数字校验器，铁律 1/2 幻觉校验核心）
+  - 风险累积（4 条传导）：
+    1. memo/IM 正文的注入指令不被 detect 拦（extra_texts 无调用点）→ 需单开卡做自由文本二次筛查
+    2. sanitize_facts FREE_TEXT_FIELDS 白名单手动维护 → 新增字段要同步
+    3. 真实 DeepSeek 对 <untrusted_data> 标签响应待卡 14 冒烟
+    4. _is_wrapped 认两个函数名做 AST lint，改名会静默失效
+    - 硬 TODO（card-09/10 延续）：agent 直调 dao（_write_audit + AS_OF）越层 → 卡 13 是 guard 层，但越层收口需改 orchestrator + tools 层，**单开 13b 收口**（不混进数字校验器卡）
+
+NEXT_CARD: 13
+MODEL: deepseek-flash
+ACTION: run
+REASON: 数字校验器（铁律 1/2 幻觉校验核心）。归一化（千分位/万元/百分比/块元/整数分↔元）+ 未通过重生成一次再降级 + 审计 HALLUCINATION_BLOCKED，全确定性代码，flash 够用。
+NEXT_CARD_WARNING: card-13 范围 guard/facts_check.py + agent/templates.py + tests/test_facts_check.py；按规格 §7 实现 verify_numbers(reply,facts)；归一化千分位/万元/百分比/块元/整数分↔元；未通过→LLM 重生成一次→仍未通过→降级模板回执+审计 HALLUCINATION_BLOCKED；单测构造「facts 没有的数字出现在回执」断言被拦+降级。替换 card-09 的 templates.verify_numbers 最小可判版，语义一致。
