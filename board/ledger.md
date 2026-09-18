@@ -462,6 +462,24 @@ ACTION: run
 REASON: 用户授权自治推进。两 worker 分路：交互会话继续 card-07（不打断），本房间 worker 做 06b 技术待办（避开 card-07 范围文件 + confirm_ref）。都完成后我审 + 提交 + 记账。
 NEXT_CARD_WARNING: 两条 worker 铁律——① 开工前三查（git log / git status / ledger NEXT_CARD），房间聊天不作数；② 只碰自己领的文件，card-07 文件（wealth/cross_scene/_wealth_risk + confirm_ref 逻辑）归交互会话。06b 的 confirm_ref 抽 _confirm.py 等 card-07 落地再做。
 
+## 决策记录 2026-09-19 00:37（审查侧双进程钉死）
+
+事实（自己查到的）：
+  - board/reviews/ 现状：card-02/03/04/06.md 在盘，**card-05/04b/05b.md 缺失**
+  - card-06.md 是并行 reviewer 会话写的（3715bff/48bfc9f board commit）；本房间 @reviewer 的 05/04b/05b 三次 PASS 只有聊天记录 + 账本一句话，无落盘文件
+  - 根因与 worker 侧同源：每角色双进程（2 worker + 2 reviewer），导致裁决物断档
+
+决策（@analyst 拍板）：
+  - ① **唯一 reviewer = 本房间 @reviewer**。并行 reviewer 已提交的 card-06.md 照收（真实、不浪费重审）；今后 card-07+ 只由本房间 @reviewer 审 + 写落盘文件
+  - ② 本房间 @reviewer 补写 card-05/04b/05b 三个裁决文件，标「聊天裁决补记」（仿 card-04 的「事后复验补记」），补全断档
+  - ③ 政策钉死：每角色一个进程 + 每张卡一个落盘裁决物；房间聊天/账本一句话 ≠ 裁决物
+
+NEXT_CARD: 07（交互会话在跑）+ 06b（本房间 worker）+ 补写裁决物（本房间 reviewer）
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 自治推进的前提是「每角色一进程 + 每卡一裁决物」。定唯一 reviewer、补写断档裁决文件，然后两路 worker 继续（card-07 归交互会话 / 06b 归本房间 worker）。@user 需真正钉死单进程（关掉多余会话），否则我的政策挡不住新会话继续撞。
+NEXT_CARD_WARNING: 每角色只留一个进程（本房间 @analyst/@reviewer/@worker 各一）；card-07 由交互 worker 会话在写，本房间 worker 做 06b 非重叠文件，本房间 reviewer 补写 05/04b/05b 裁决物 + 审 card-07。
+
 
 
 
