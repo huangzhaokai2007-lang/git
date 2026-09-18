@@ -19,6 +19,7 @@
 | card-06 | d7fa98e | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T10–T12 订阅/卡管理（confirm_ref 确认闭环 + L2/L3 双因子）；verify 绿（520 passed）。18/18 变异抽查真报警；8 文件指纹零漂移 |
 | card-07 | f2f5235 | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T13–T16 理财/跨场景（风险测评纯代码计分 + 推荐过滤 + 申购赎回 + 送礼锁资金）；verify 绿（649 passed）。3 次变异抽查真报警。**工具层 T1–T16 全部完成** |
 | card-08 | 3fe912c | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 编排层首卡：agent/llm.py（LLM 客户端）+ agent/classifier.py（意图分类器）；verify 绿（675 passed）。3 次变异抽查真报警；铁律 6/7/8 验证到位 |
+| card-09 | 805cce6 | PASS（无 MUST_FIX，1 条 RISK 硬 TODO） | 编排层状态机 + templates（L0 只读路径，8 意图）；verify 绿（697 passed）。2 次变异抽查真报警。**硬 TODO：agent 直调 dao 越层，卡 13 guard 层实现时收敛** |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -532,3 +533,22 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 编排层 card-08 收官，进 card-09 状态机（先接 L0 只读意图）。只读路径不碰写操作、不碰金额单位口径争议，flash 够用；数字校验（VERIFY_NUMBERS）红线在 WARNING 里强调。
 NEXT_CARD_WARNING: card-09 范围 agent/orchestrator.py + agent/templates.py + tests/test_orchestrator_readonly.py；严格按规格 §4 状态机 IDLE→CLASSIFY→SLOT_FILL→PRECHECK→EXECUTE→VERIFY_NUMBERS→REPLY→AUDIT；只接 8 个 L0 只读意图；置信度<0.6 走 CLARIFY 追问（≤2 轮）；每请求 trace_id + 全程 audit_log；回执用 templates 模板，LLM 只许润色措辞不得改任何数字（铁律 1/2）；单测假 LLM 10 条输入断言 tool_calls+templates；禁任何写操作。
+
+## 决策记录 2026-09-19 03:05（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：805cce6 card-09（HEAD）；verify 绿 697 passed
+  - card-09 = PASS（无 MUST_FIX）；审核师裁决「agent 直调 dao」为真越层但判 RISK（函数调用级、无 in-scope 替代、无安全影响）
+
+进度判断：
+  - 已完成卡：card-00~09 + 06b + 陌生商户 —— 数据层 + 工具层 T1–T16 + 编排层 llm/classifier/状态机（只读）全部完成
+  - 卡在哪：编排层 card-10（写操作：智能转账端到端 + guard/permission.py 档位 + confirm_card.py）
+  - 风险累积：
+    - 硬 TODO（审核师钉死）：agent 直调 dao（insert_audit + AS_OF）越层 → 卡 13 guard 层实现时收敛为 tools 层审计 helper + AS_OF 访问器。
+    - SLOT_SCHEMA 金额口径（payee vs payee_id、amount 分 vs 元）：实际由工具层签名（card-05 transfer 用 payee_id + 整数分）已钉死，card-10 worker 对齐即可，**降级为非阻塞**（无需额外人类拍板）。
+
+NEXT_CARD: 10
+MODEL: deepseek-flash
+ACTION: run
+REASON: 进写操作路径（评分主战场）。guard/permission.py 档位判定 + confirm_card 确认卡 + 转账端到端，权限判定纯代码（铁律1）、金额整数分、幂等由 orchestrator 统一处理。用户已拍板全团队 flash。
+NEXT_CARD_WARNING: card-10 范围 agent/orchestrator.py + agent/confirm_card.py + guard/permission.py + tests/；新增 CONFIRM_CARD + PENDING_REVIEW 状态；confirm_card 渲染意图+金额+收款人(脱敏手机号)+预计到账+风险提示，用户回复"确认"才继续；guard/permission.py 按 §5 档位表+降级因子算 tier，≥2 因子→转人工；L2 OTP(demo 123456，错3次锁会话)；L3 延迟60s+撤销入口；OTP/幂等/审计由 orchestrator 统一、工具层不重复。SLOT_FILL 必须对齐工具层签名（payee→payee_id、元→分）。必测：未确认不执行(executed=False)/OTP错不执行/同preview_token确认两次只扣一次/新收款人+夜间升L3或转人工。
