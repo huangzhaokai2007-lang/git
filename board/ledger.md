@@ -717,3 +717,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 卡 14 拆两半，先做核心 14a（越权+参数边界），14b（限流+幂等落库）依赖 schema 后做。职责单一避免 worker BLOCKED。
 NEXT_CARD_WARNING: card-14a 范围 guard/tool_guard.py + tools/*.py + tests/test_tool_guard.py；tool_guard 统一入口=①资源归属校验（账户/卡/持仓/订阅→非本人→FORBIDDEN+写 risk_event+audit rejected）②参数边界（金额正整数分、上限 5000000 分、收款人 id 存在）；工具侧 require_owned 类校验改调 tool_guard，**不改变错误码/审计语义/行为**（对照 831 passed 基线逐条）；单测越权访问他人账户/卡/持仓 + 非法金额（0/负/浮点/超限/不存在收款人）。14b 的限流+幂等落库本卡不做。
+
+## 决策记录 2026-09-19 05:05（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：85e81bb board 记账（HEAD）；verify 绿 831 passed
+  - card-14a worker 勘察完成，报 3 条细口径，未留半成品
+
+裁决（3 条细口径，全采纳 worker 建议）：
+  - ① risk_event.factor 取单值 "unauthorized_resource"（不按资源类型细分）。
+  - ② 越权同时写 audit_log.result='rejected'（tool=被调工具名）+ risk_event（trace_id=当前请求 trace_id，None 留空）。
+  - ③ 金额：超 5,000,000 分 → OVER_LIMIT（沿用 transfer.py）；非正整数（0/负/浮点）→ INVALID_ARGUMENT。
+
+NEXT_CARD: 14a（继续，口径已定）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 勘察已完成，3 条口径裁决后，14a 剩下的是机械搬迁（tool_guard 统一入口 + _query_common 转发）+ 对照 831 基线，可一次跑完。
+NEXT_CARD_WARNING: 同上轮 14a WARNING。追加：risk_event.factor="unauthorized_resource"；越权双写 audit(tool=工具名)+risk_event(trace_id)；金额超限 OVER_LIMIT/非正整数 INVALID_ARGUMENT；_query_common 旧函数改转发保证 39 处 FORBIDDEN 错误码文案不变；resolve_payee 空候选保持反问不改 NOT_FOUND。
