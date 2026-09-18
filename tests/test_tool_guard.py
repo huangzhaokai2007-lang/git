@@ -64,14 +64,91 @@ def test_rejection_writes_the_audit_trail(seeded: Path) -> None:
     assert tool_guard.UNAUTHORIZED_FACTOR == "unauthorized_resource"
 
 
-def test_risk_event_factor_is_not_yet_allowed_by_ddl(seeded: Path) -> None:
-    """已知缺口（提醒用例）：`risk_event.factor` 的 CHECK 枚举里还没有越权取值 → 这一笔留痕暂时写不进去。
-
-    本用例在「DDL 加上该枚举值」后会自动变红，提醒把 `test_rejection_writes_the_audit_trail`
-    补回 risk_event 断言（卡 14b 一并做）。
-    """
+def test_risk_event_factor_is_allowed_by_ddl(seeded: Path) -> None:
+    """卡 14b：枚举已补齐，越权的安全留痕（risk_event.factor='unauthorized_resource'）现在写得进去。"""
     allowed = raw(seeded, "SELECT sql FROM sqlite_master WHERE name = 'risk_event'")[0]["sql"]
-    assert tool_guard.UNAUTHORIZED_FACTOR not in allowed
+    assert "unauthorized_resource" in allowed
+
+
+# ---------------- ④ 限流（滚动 60s、先计数再校验） ----------------
+
+def test_sixth_write_in_window_is_rejected(seeded: Path) -> None:
+    user = "u_rate_test"
+    for index in range(tool_guard.RATE_MAX_WRITES):
+        assert tool_guard.check_write_rate(user, tool="transfer") == index + 1
+    with pytest.raises(_query_common.ToolError) as exc:
+        tool_guard.check_write_rate(user, tool="transfer")                       # 第 6 次
+    assert exc.value.code is ErrorCode.OVER_LIMIT and "频繁" in exc.value.message
+    assert count(seeded, "rate_limit") == tool_guard.RATE_MAX_WRITES + 1          # 被拒的尝试也留痕
+
+
+def test_window_slides_and_writes_are_allowed_again(seeded: Path) -> None:
+    import datetime
+
+    user = "u_rate_slide"
+    base = datetime.datetime(2026, 9, 12, 12, 0, 0)
+    for _ in range(tool_guard.RATE_MAX_WRITES):
+        tool_guard.check_write_rate(user, tool="transfer", now=base)
+    later = base + datetime.timedelta(seconds=tool_guard.RATE_WINDOW_SECONDS + 1)
+    assert tool_guard.check_write_rate(user, tool="transfer", now=later) == 1     # 窗口滑走后重新放行
+
+
+def test_reads_do_not_touch_the_limiter(seeded: Path) -> None:
+    """只读不限流：不调 check_write_rate 就不该有任何计数。"""
+    before = count(seeded, "rate_limit")
+    tool_guard.require_amount_cents(10_000)
+    tool_guard.require_owned("账户", _query_common.current_user_id(), OWNED_ACCOUNT)
+    assert count(seeded, "rate_limit") == before
+
+
+# ---------------- ⑤ 幂等落库 ----------------
+
+def test_idempotent_replay_returns_same_result_and_runs_once(seeded: Path) -> None:
+    calls: list[int] = []
+
+    def producer(tag: str):
+        return lambda: (calls.append(1), {"txn_id": tag})[1]
+
+    first, replayed = tool_guard.idempotent_execute("tok-1", "transfer", "u_x", producer("t1"))
+    second, replayed_again = tool_guard.idempotent_execute("tok-1", "transfer", "u_x", producer("t2"))
+    assert first == second == {"txn_id": "t1"}                                   # 重放拿到既有结果
+    assert (replayed, replayed_again) == (False, True) and len(calls) == 1        # 只执行一次
+
+
+def test_idempotency_snapshot_survives_a_restart(seeded: Path) -> None:
+    """落库而非内存：用**全新连接**（等价于进程重启）读回同一份结果快照。"""
+    import json as _json
+    import sqlite3
+
+    tool_guard.idempotent_execute("tok-restart", "transfer", "u_x", lambda: {"txn_id": "txn-restart"})
+    with sqlite3.connect(seeded) as fresh:
+        row = fresh.execute("SELECT tool, user_id, result_json FROM idempotency WHERE token = ?",
+                            ("tok-restart",)).fetchone()
+    assert row[0] == "transfer" and row[1] == "u_x"
+    assert _json.loads(row[2]) == {"txn_id": "txn-restart"}
+
+
+def test_replay_does_not_count_toward_the_rate_limit(seeded: Path) -> None:
+    """幂等重放不算一次写操作：只有真正的新执行才进限流表。"""
+    user = "u_idem_rate"
+    before = count(seeded, "rate_limit")
+    tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": True})
+    tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": False})    # 重放
+    tool_guard.check_write_rate(user, tool="transfer")                            # 新写操作 → 计 1
+    assert count(seeded, "rate_limit") == before + 1
+
+
+# ---------------- ⑥ 越权双写（枚举补齐后 risk_event 也写得进） ----------------
+
+def test_foreign_access_writes_audit_and_risk_event(seeded: Path) -> None:
+    before_audit, before_risk = count(seeded, "audit_log"), count(seeded, "risk_event")
+    with pytest.raises(_query_common.ToolError):
+        tool_guard.require_owned("账户", FOREIGN_USER, FOREIGN_ACCOUNT, tool="get_balance",
+                                 trace_id="trace-14b")
+    assert count(seeded, "audit_log") == before_audit + 1
+    assert count(seeded, "risk_event") == before_risk + 1
+    risk = raw(seeded, "SELECT factor, trace_id FROM risk_event ORDER BY rowid DESC LIMIT 1")[0]
+    assert risk["factor"] == "unauthorized_resource" and risk["trace_id"] == "trace-14b"
 
 
 def test_query_common_require_owned_is_a_forwarder(seeded: Path) -> None:

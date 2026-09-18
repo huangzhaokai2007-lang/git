@@ -225,6 +225,37 @@ def insert_risk_event(user_id: str, factor: str, *, trace_id: str | None = None,
     return _insert("risk_event", _RISK_COLUMNS, values, str(values[0]), skip_ts=ts is None)
 
 
+# ---------------- 卡 14b：幂等落库 + 写操作限流（滚动窗口） ----------------
+
+def get_idempotent(token: str) -> dict | None:
+    """按 token 取幂等快照；没有则 None。**落库**而非内存 → 进程重启后依旧有效。"""
+    return _one("SELECT token, tool, user_id, result_json, created_at FROM idempotency"
+                " WHERE token = ?", (str(token),))
+
+
+def insert_idempotent(token: str, tool: str, user_id: str, result_json: str, created_at: str) -> None:
+    """写幂等快照（`INSERT OR IGNORE`：同 token 已存在即忽略，由调用方先查后写保证一致性）。"""
+    with _writing() as conn:
+        conn.execute("INSERT OR IGNORE INTO idempotency"
+                     " (token, tool, user_id, result_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                     (str(token), str(tool), str(user_id), _json_text(result_json, "result_json"),
+                      _stamp(created_at, "created_at")))
+
+
+def incr_rate_limit(user_id: str, tool: str, ts: str) -> None:
+    """记一次**写操作尝试**（含被拒的越权/非法参数尝试——先计数、再校验）。"""
+    with _writing() as conn:
+        conn.execute("INSERT INTO rate_limit (user_id, tool, ts) VALUES (?, ?, ?)",
+                     (str(user_id), str(tool), _stamp(ts, "ts")))
+
+
+def count_rate_limit(user_id: str, since_iso: str) -> int:
+    """滚动窗口内该用户的写操作尝试次数（`since_iso` 之后的行都算，含边界）。"""
+    row = _one("SELECT COUNT(*) AS n FROM rate_limit WHERE user_id = ? AND ts >= ?",
+               (str(user_id), _stamp(since_iso, "since_iso")))
+    return int(row["n"]) if row is not None else 0
+
+
 def update_account_balance(account_id: str, delta: int) -> dict | None:
     """按**增量**改账户余额（整数分，负=扣款）：`balance` 与 `available` 同步加减，返回更新后整行。
 

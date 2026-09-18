@@ -112,3 +112,63 @@ def require_payee_exists(payee_id: str, *, tool: str | None = None) -> None:
     del tool
     if not dao.find_payee(payee_id):                            # 名字/手机号/id 任一可检索到即视为存在
         raise _tool_error("NOT_FOUND", "收款人不存在")
+
+
+# ---------------- 卡 14b：写操作限流（滚动 60 秒）+ 幂等落库 ----------------
+
+#: 滚动窗口长度（秒）。来源：卡 14b 口径裁决 ①「滚动 60s，与 §5 velocity 因子同口径」
+RATE_WINDOW_SECONDS = 60
+#: 窗口内允许的最大写操作**尝试**次数。来源：卡 14b 第 3 条「>5 次拒绝」
+RATE_MAX_WRITES = 5
+
+
+def _now() -> Any:
+    """当前时刻（测试可 monkeypatch 本函数）。"""
+    from datetime import datetime
+
+    return datetime.now()
+
+
+def _window_start(now: Any) -> str:
+    """滚动窗口起点：`now - RATE_WINDOW_SECONDS`（ISO 秒精度）。"""
+    from datetime import timedelta
+
+    return (now - timedelta(seconds=RATE_WINDOW_SECONDS)).isoformat(timespec="seconds")
+
+
+def note_write(user_id: str, *, tool: str | None = None, now: Any = None) -> None:
+    """记一次写操作尝试（**含被拒的越权/非法参数尝试**，防刷）。只读工具不调用本函数。"""
+    moment = now or _now()
+    dao.incr_rate_limit(user_id, tool or "unknown_tool", moment.isoformat(timespec="seconds"))
+
+
+def check_write_rate(user_id: str, *, tool: str | None = None, now: Any = None) -> int:
+    """**先计数、再校验**：滚动 60s 内写操作尝试 > `RATE_MAX_WRITES` → 拒绝。返回窗口内次数。
+
+    计数写在判定之前，所以被拒的这次尝试也留在窗口里（卡 14b 裁决 ②，防刷）。
+    """
+    moment = now or _now()
+    note_write(user_id, tool=tool, now=moment)
+    used = dao.count_rate_limit(user_id, _window_start(moment))
+    if used > RATE_MAX_WRITES:
+        logger.warning("写操作限流命中：user=%s tool=%s 窗口内=%s", user_id, tool, used)
+        raise _tool_error("OVER_LIMIT", "操作过于频繁：60 秒内写操作次数已达上限，请稍后再试")
+    return used
+
+
+def idempotent_execute(token: str, tool: str, user_id: str, producer: Any) -> tuple[Any, bool]:
+    """幂等执行：**先查落库快照**，命中直接返回既有结果（返回 `(结果, 是否重放)`）。
+
+    重放**不**计入限流（卡 14b 裁决：幂等重放不算一次）—— 所以调用方应先调本函数、再在未命中时调
+    `check_write_rate`。快照落在 `idempotency` 表：进程重启（内存清空、只剩 DB 文件）后重放同 token 仍同结果。
+    """
+    import json
+
+    existing = dao.get_idempotent(token)
+    if existing is not None:
+        logger.info("幂等命中（重放，不计限流）：token=%s tool=%s", token, tool)
+        return json.loads(existing["result_json"]), True
+    result = producer()
+    dao.insert_idempotent(token, tool, user_id, json.dumps(result, ensure_ascii=False, default=str),
+                          _now().isoformat(timespec="seconds"))
+    return result, False

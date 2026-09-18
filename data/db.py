@@ -32,6 +32,8 @@ TABLES: tuple[str, ...] = (
     "payee",
     "audit_log",
     "risk_event",
+    "idempotency",
+    "rate_limit",
 )
 
 

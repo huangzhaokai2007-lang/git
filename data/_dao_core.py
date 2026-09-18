@@ -37,7 +37,8 @@ SUBSCRIPTION_STATUSES, SUBSCRIPTION_CYCLES = ("active", "cancelled", "paused"), 
 RISK_LEVELS, DIRECTIONS = ("R1", "R2", "R3", "R4", "R5"), ("in", "out")
 ACTORS, TIERS = ("user", "agent", "system"), ("L0", "L1", "L2", "L3")
 AUDIT_RESULTS = ("success", "rejected", "pending_confirm", "error")
-RISK_FACTORS = ("night", "geo", "device", "velocity", "amount_jump", "new_payee")
+RISK_FACTORS = ("night", "geo", "device", "velocity", "amount_jump", "new_payee",
+                "unauthorized_resource")            # 卡 14b：越权尝试的安全留痕因子
 RISK_ACTIONS = ("downgrade", "block", "to_human")
 CARD_FIELDS = ("type", "credit_limit", "single_limit", "daily_limit", "status")
 SUBSCRIPTION_FIELDS = ("merchant", "amount", "cycle", "next_charge_date", "source_txn_id", "status")
