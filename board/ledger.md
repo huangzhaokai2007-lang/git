@@ -552,3 +552,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 进写操作路径（评分主战场）。guard/permission.py 档位判定 + confirm_card 确认卡 + 转账端到端，权限判定纯代码（铁律1）、金额整数分、幂等由 orchestrator 统一处理。用户已拍板全团队 flash。
 NEXT_CARD_WARNING: card-10 范围 agent/orchestrator.py + agent/confirm_card.py + guard/permission.py + tests/；新增 CONFIRM_CARD + PENDING_REVIEW 状态；confirm_card 渲染意图+金额+收款人(脱敏手机号)+预计到账+风险提示，用户回复"确认"才继续；guard/permission.py 按 §5 档位表+降级因子算 tier，≥2 因子→转人工；L2 OTP(demo 123456，错3次锁会话)；L3 延迟60s+撤销入口；OTP/幂等/审计由 orchestrator 统一、工具层不重复。SLOT_FILL 必须对齐工具层签名（payee→payee_id、元→分）。必测：未确认不执行(executed=False)/OTP错不执行/同preview_token确认两次只扣一次/新收款人+夜间升L3或转人工。
+
+## 决策记录 2026-09-19 03:15（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：599acba board 记账（HEAD）；verify 绿 697 passed
+  - card-10 worker 报 BLOCKED：会话上下文接近上限，卡 10 约 600-700 行 + 两轮自证做不完，未留半成品
+
+关键裁决（OTP/幂等分层，card-10 卡文与工具层冲突）：
+  - 卡 10 原话「OTP/幂等由 orchestrator 统一处理、工具层不重复做」，但工具层 transfer（card-05 已 PASS）已实现 OTP 校验（固定 123456）+ 幂等（同 preview_token 返回同结果）。
+  - 裁决：**工具层 transfer 不动（已 PASS 不返工）；编排层复用工具层 OTP 校验+幂等（调 execute_transfer(preview_token, otp)），只额外维护「会话级 OTP 错误计数，错 3 次锁会话」**。卡文「统一处理」理解为流程调度统一，不是另写一份校验。
+  - 金额口径：amount(元)→整数分 用字符串拆分整数运算，禁 float（避免浮点精度）。
+
+NEXT_CARD: 10（重派，新会话）
+MODEL: deepseek-flash
+ACTION: run
+REASON: worker 上下文满 BLOCKED，重新派卡 10 开新会话做。分层冲突已裁决（工具层复用 OTP/幂等 + 编排层只加会话级锁），不扩卡改工具层。
+NEXT_CARD_WARNING: 同上一轮 card-10 WARNING。追加三条：① OTP/幂等复用工具层 execute_transfer（不重写校验），编排层只维护错3次锁会话；② 金额元→分字符串拆分整数运算禁 float；③ 三个假绿点必钉：未确认执行要断言 executed=False 且余额/流水不变、同 token 两次确认断言流水=1 且审计不新增、新收款人+夜间断言 tier 值+factors 明细（不是"非 L1"）。
