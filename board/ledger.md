@@ -22,6 +22,7 @@
 | card-09 | 805cce6 | PASS（无 MUST_FIX，1 条 RISK 硬 TODO） | 编排层状态机 + templates（L0 只读路径，8 意图）；verify 绿（697 passed）。2 次变异抽查真报警。**硬 TODO：agent 直调 dao 越层，卡 13 guard 层实现时收敛** |
 | card-10 | fdc3865 | PASS（无 MUST_FIX，5 条非阻塞 RISK） | 写操作端到端：guard/permission.py 档位 + confirm_card 确认卡 + OTP/幂等 + L3 待复核 + write_flow 拆分；verify 绿（709 passed）。2 次变异抽查真报警；四步走/幂等/脱敏验证到位 |
 | card-11 | e82b8fe | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 护栏层用例集：30 条 YAML + runner + verify 接入（SKIP→通过 30/30）+ 3 个 bug 修复；verify 绿（741 passed）。「用例有牙齿」实测（改断言即 FAIL） |
+| card-12 | 2e03abf | PASS（拦截率 34/34 100%，误报 0/14） | 注入检测护栏：10 确定性规则 + 归一化解混淆 + wrap_untrusted + 34 攻击串回归；verify 绿（799 passed）。**待 12b 接线 + 铁律7收口** |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -632,3 +633,23 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏层注入检测（铁律 7 安全主战场）。关键词/正则规则层 + wrap_untrusted 数据层 + lint 单测，全是确定性代码无 LLM 推理，flash 够用。
 NEXT_CARD_WARNING: card-12 范围 guard/injection.py + tests/test_injection.py；规则层关键词/正则（忽略之前指令/你现在是/开发者模式/导出全部用户/告诉我系统提示词/绕过验证/免密等）命中→unsafe_request；数据层 wrap_untrusted(source,text) 用 <untrusted_data source="...">包裹；lint 单测扫描 agent/ 所有 LLM 调用点断言无直接拼接自由文本；≥20 条攻击串（中英混合/编码混淆/分段绕过）全被拦。
+
+## 决策记录 2026-09-19 04:10（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：2e03abf card-12（HEAD）；verify 绿 799 passed
+  - card-12 = 拦截率 34/34 100%、误报 0/14、165+237 行 ≤300；未接线（实时链路未调 detect）
+
+裁决（6 条待拍板，逐条拍板）：
+  - ① 规则层未接线（最重要）→ **开 card-12b：CLASSIFY 前先跑 detect()，命中直接 REFUSE 不调 LLM**（确定性优先，也省一次调用）。
+  - ② 铁律 7 收口缺口：templates.polish 的 facts（含自由文本）未 wrap_untrusted → **并进 12b 收口**（polish 内对自由文本字段 wrap_untrusted）。
+  - ③ wrap_untrusted 无生产调用点 → 12b 在编排层（或 templates）注入包裹点。
+  - ④ 误报 inj-transfer-all 拦"把余额全部转给李四"→ 收紧为「转给我/自己/他人账户」以减误报，12b 顺手做。
+  - ⑤ verify.sh 第 5 段要求 injection.py + facts_check.py 同时存在 → 改「有哪个跑哪个」，卡 13 后自然全过。
+  - ⑥ base64/拼音/同音字不覆盖 → 记待办（关键词法边界，演示需要再补）。
+
+NEXT_CARD: 12b
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏已备好未装上（安全主战场必须生效）。12b 接线 detect→REFUSE + 收口铁律 7（facts 自由文本 wrap）+ 收紧误报规则。全是确定性代码，flash 够用。
+NEXT_CARD_WARNING: card-12b 范围 agent/orchestrator.py + agent/templates.py + guard/injection.py（必要时）+ tests/；CLASSIFY 前 detect() 命中→REFUSE 不调 LLM；templates.polish 对 facts 自由文本字段（memo/counterparty/备注）先 wrap_untrusted；inj-transfer-all 收紧为「转给我/自己/他人账户」；lint 单测断言无自由文本裸拼接；verify.sh 第 5 段改「有哪个跑哪个」。
