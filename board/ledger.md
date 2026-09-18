@@ -24,6 +24,7 @@
 | card-11 | e82b8fe | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 护栏层用例集：30 条 YAML + runner + verify 接入（SKIP→通过 30/30）+ 3 个 bug 修复；verify 绿（741 passed）。「用例有牙齿」实测（改断言即 FAIL） |
 | card-12 | 2e03abf | PASS（拦截率 34/34 100%，误报 0/14） | 注入检测护栏：10 确定性规则 + 归一化解混淆 + wrap_untrusted + 34 攻击串回归；verify 绿（799 passed）。**待 12b 接线 + 铁律7收口** |
 | card-12b | b6eee07 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 注入护栏接线（CLASSIFY 前 detect→REFUSE 零 LLM）+ 铁律7 收口（sanitize_facts 包裹）+ verify 第5段 SKIP→通过；verify 绿（805 passed）。2 次变异抽查真报警 |
+| card-13 | f100002 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 数字校验器 facts_check（千分位/万元/百分比/块元/分↔元归一化 + 重生成再降级 HALLUCINATION_BLOCKED）；verify 绿（831 passed）。3 次变异抽查真报警（拦截/万元/模板转发） |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -676,3 +677,25 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 数字校验器（铁律 1/2 幻觉校验核心）。归一化（千分位/万元/百分比/块元/整数分↔元）+ 未通过重生成一次再降级 + 审计 HALLUCINATION_BLOCKED，全确定性代码，flash 够用。
 NEXT_CARD_WARNING: card-13 范围 guard/facts_check.py + agent/templates.py + tests/test_facts_check.py；按规格 §7 实现 verify_numbers(reply,facts)；归一化千分位/万元/百分比/块元/整数分↔元；未通过→LLM 重生成一次→仍未通过→降级模板回执+审计 HALLUCINATION_BLOCKED；单测构造「facts 没有的数字出现在回执」断言被拦+降级。替换 card-09 的 templates.verify_numbers 最小可判版，语义一致。
+
+## 决策记录 2026-09-19 04:40（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：f100002 card-13（HEAD）；verify 绿 831 passed
+  - card-13 = PASS（无 MUST_FIX，4 条非阻塞 RISK）；3 次变异抽查真报警
+
+进度判断：
+  - 已完成卡：card-00~13 + 06b + 陌生商户 —— 数据层 + 工具层 + 编排层 + 护栏层三大件（注入检测/用例集/数字校验器）全部完成
+  - 卡在哪：护栏层 card-14（工具层安全加固：tool_guard 越权统一校验 + 限流 + 幂等落库）
+  - 风险累积（4 条传导）：
+    1. 分↔元容差偏宽（§7 固有歧义，「10000元」当「10000分」放行）→ SPEC 口径，若评审抠单位写错建议 SPEC-CHANGE
+    2. 符号不校验（§7 绝对值，-32% 说成 32% 不拦）
+    3. 裸「万」不处理（只认「万元」）→ 改 docstring 或补分支
+    4. 序号（R3/第3档）按数字处理可能误伤
+    - 硬 TODO（越层收口）仍挂：agent 直调 dao，等 card-14 后单开 13b 收口
+
+NEXT_CARD: 14
+MODEL: deepseek-flash
+ACTION: run
+REASON: 工具层安全加固（评分主战场）：tool_guard 统一越权校验 + 限流 + 幂等落库 + 参数边界。确定性代码，flash 够用。
+NEXT_CARD_WARNING: card-14 范围 guard/tool_guard.py + tools/*.py + tests/test_tool_guard.py；所有工具入口统一 tool_guard 校验资源 id 属当前 user（否则 FORBIDDEN + 写 risk_event）；限流同用户 60s 写操作>5 次拒绝；幂等表落库（非内存，重启仍有效）；参数边界金额正整数分、上限 500 万分、收款人 id 存在；单测越权访问他人账户/卡/持仓 + 重放 token + 非法金额。注意：这是改 tools/*.py 的大卡，若范围过大可拆 14a/14b，先做越权统一校验 + 参数边界（14a），限流+幂等落库（14b）。
