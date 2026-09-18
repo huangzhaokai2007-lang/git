@@ -228,6 +228,7 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
         ctx.intent = step.intent
     for state in step.states:
         ctx.enter(state)
+    ctx.tool_calls.extend(step.tools or ([step.tool] if step.tool else []))   # 写路径的工具轨迹
     ctx.tier, ctx.executed, ctx.pending_id = step.tier, step.executed, step.pending_id
     if step.missing:
         ctx.missing = step.missing

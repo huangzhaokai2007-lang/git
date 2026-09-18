@@ -37,9 +37,9 @@ OTP_MAX_ERRORS = 3
 
 #: 降级因子 → 客户可读的风险提示（只列 §5 的五个；未命中因子则给中性提示）
 FACTOR_NOTES = {
-    "night": "夜间（23:00-06:00）转账",
+    "night": "夜间时段（深夜至凌晨）转账",
     "velocity": "短时内多笔写操作",
-    "amount_jump": "金额明显高于您近 90 天的支出水平",
+    "amount_jump": "金额明显高于您近三个月的支出水平",
     "device_change": "设备变更",
     "geo_change": "常用位置变化",
     "new_payee": "首次向该收款人转账",

@@ -28,7 +28,7 @@ fi
 
 step "3/5 评测用例 tests/cases/*.yaml"
 if ls tests/cases/*.yaml >/dev/null 2>&1; then
-  $PT tests/test_cases.py || FAIL=1
+  $PT tests/test_cases.py -s || FAIL=1        # -s：把「用例通过率」打印出来（规格 §8 要求）
 else
   skip "还没有用例集（请做卡 11）"
 fi

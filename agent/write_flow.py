@@ -47,6 +47,7 @@ class Step(BaseModel):
     reply: str = ""
     ask: str | None = None
     tool: str | None = None
+    tools: list[str] = []                # 本步调用过的工具（审计 tool_calls 用；tool 仅审计归属）
     tier: str | None = None
     executed: bool = False
     pending_id: str | None = None
@@ -119,6 +120,11 @@ def build_card(intent: str, facts: Mapping, *, payee_name: str, masked_phone: st
         tier=str(facts["tier"]), requires_otp=requires_otp,
         expected_arrival=confirm_card.expected_arrival(str(facts["tier"])),
         risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
+
+
+def plain_confirm_text(payee_name: str, masked_phone: str, amount_yuan: str, tier: str) -> str:
+    """纯事实版确认文本：确认卡出现 facts 之外的数字时的降级回执（只引用传入值）。"""
+    return f"请确认：向 {payee_name}（{masked_phone}）转账 {amount_yuan} 元，权限档 {tier}。"
 
 
 def card_numbers_outside_facts(card_text: str, facts: Mapping) -> list[str]:
@@ -221,8 +227,8 @@ def _to_confirmation_card(confirmation_ctx: dict, verdict: permission.TierVerdic
     card_facts = {**preview.facts, "payee_phone": card.masked_phone}   # 手机号来自 resolve_payee
     if (stray := card_numbers_outside_facts(card_text, card_facts)):   # 铁律 2 守门
         logger.error("确认卡出现 facts 之外的数字，降级为纯事实回执：%s", stray)
-        card_text, degraded = confirm_card.plain_confirm_text(card.payee_name, card.masked_phone,
-                                                              card.amount_yuan, card.tier), True
+        card_text, degraded = plain_confirm_text(card.payee_name, card.masked_phone,
+                                                 card.amount_yuan, card.tier), True
     confirm_card.start(confirm_card.Confirmation(
         session_id=confirmation_ctx["session_id"], intent=confirmation_ctx["intent"],
         preview_token=confirmation_ctx["preview_token"], payee_id=slots["payee_id"],
@@ -253,5 +259,7 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
     branch = (_to_pending(context, verdict) if verdict.delayed                       # L3：延迟 + 撤销
               else _to_confirmation_card(context, verdict, filled, preview))         # L1/L2：确认卡
     branch.states = ["SLOT_FILL", "PRECHECK", *branch.states]
+    branch.tool = branch.tool or "preview_transfer"                   # 铁律 3 第一步：只算不执行
+    branch.tools = ["preview_transfer"]
     branch.tier = verdict.tier
     return branch
