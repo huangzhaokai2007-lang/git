@@ -36,10 +36,11 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import classifier, templates
+from agent import classifier, confirm_card, templates, write_flow
 from data import dao
 from data.seed import AS_OF
-from tools import query, subscription, wealth
+from guard import permission
+from tools import query, subscription, transfer, wealth
 from tools._query_common import current_session_id
 from tools.schemas import ToolResult
 
@@ -59,6 +60,9 @@ READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", 
                 "subscription_list", "card_query", "wealth_recommend")
 #: 缺槽即追问（代码判定）；其余只读意图的槽位都可确定性缺省或本就可选
 REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {"txn_query": RANGE_FIELDS}
+
+#: 写意图清单定义在 `agent/write_flow.py`（写路径的唯一归属）；这里是引用别名，避免两份清单漂移
+WRITE_INTENTS = write_flow.WRITE_INTENTS
 #: 分析类意图的 period 缺省/解析口径（锚点当月）
 PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
 RELATIVE_PERIOD_OFFSETS = {"上个月": -1, "上月": -1, "本月": 0, "这个月": 0, "当月": 0, "上上个月": -2}
@@ -93,6 +97,9 @@ class Turn(BaseModel):
     ask: str | None = None
     degraded: bool = False
     to_human: bool = False
+    tier: str | None = None            # 卡 10：本次写操作的权限档（代码判定）
+    executed: bool = False             # 卡 10：**只有**工具层执行成功才为 True
+    pending_id: str | None = None      # 卡 10：L3 待复核编号（可撤销）
     error_code: str | None = None
 
 
@@ -106,6 +113,9 @@ class _Ctx:
         self.intent, self.confidence = "out_of_scope", 0.0
         self.slots: dict = {}
         self.missing: list[str] = []
+        self.tier: str | None = None                 # 卡 10：权限档（guard 判定）
+        self.executed = False                        # 卡 10：工具层执行成功才置 True
+        self.pending_id: str | None = None           # 卡 10：L3 待复核编号
 
     def enter(self, state: str) -> None:
         """进入一个状态（规格 §4 的状态名；顺序在返回结果里可查，便于断言「不可跳步」）。"""
@@ -172,8 +182,8 @@ def _precheck(intent: str) -> str:
 
 
 def _code(result: ToolResult) -> str | None:
-    code = result.error_code
-    return getattr(code, "value", None) or (str(code) if code else None)
+    """工具结果错误码字符串（实现唯一在 `write_flow.error_code_of`，这里只做转发）。"""
+    return write_flow.error_code_of(result)
 
 
 def _finish(ctx: _Ctx, reply: str, *, result: str, tool: str | None = None,
@@ -186,7 +196,8 @@ def _finish(ctx: _Ctx, reply: str, *, result: str, tool: str | None = None,
     _write_audit(ctx, tool=tool, result=result, error_code=error_code)
     return Turn(trace_id=ctx.trace_id, intent=ctx.intent, confidence=ctx.confidence, states=ctx.states,
                 tool_calls=ctx.tool_calls, missing_slots=ctx.missing, reply=reply, ask=ask,
-                degraded=degraded, to_human=to_human, error_code=error_code)
+                degraded=degraded, to_human=to_human, error_code=error_code, tier=ctx.tier,
+                executed=ctx.executed, pending_id=ctx.pending_id)
 
 
 def _write_audit(ctx: _Ctx, *, tool: str | None, result: str, error_code: str | None) -> None:
@@ -211,15 +222,33 @@ def _clarify(ctx: _Ctx, ask: str, *, reason: str) -> Turn:
     return _finish(ctx, ask, result="rejected", ask=ask)
 
 
+def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
+    """把写路径的 `Step` 落成状态轨迹与审计（写路径不碰审计、不碰追问轮次上限）。"""
+    if step.intent:
+        ctx.intent = step.intent
+    for state in step.states:
+        ctx.enter(state)
+    ctx.tier, ctx.executed, ctx.pending_id = step.tier, step.executed, step.pending_id
+    if step.missing:
+        ctx.missing = step.missing
+        return _clarify(ctx, templates.clarify_missing(step.missing), reason="missing_slots")
+    return _finish(ctx, step.reply, result=step.result, tool=step.tool, error_code=step.error_code,
+                   ask=step.ask, degraded=step.degraded, to_human=step.to_human)
+
+
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
            session_id: str | None = None) -> Turn:
     """处理一句用户输入，返回 `Turn`（含到达过的状态序列与调用过的工具）。
 
     `clarify_round`：调用方在追问后续接时自增（0 → 最多 2 轮追问后转人工）。
-    本函数不判权限细节、不执行任何写操作（卡 09 红线）。
+    写操作走 `_start_write` / `_resume_write`（preview → 档位 → 确认/OTP → 幂等执行）；
+    档位与因子由 `guard.permission` 纯代码判定，本函数只调度（铁律 1）。
     """
     ctx = _Ctx(f"trace-{uuid.uuid4().hex[:12]}", session_id or current_session_id(), clarify_round)
     ctx.enter("IDLE")
+    if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类
+        ctx.intent = inflight
+        return _apply(ctx, write_flow.resume(ctx.session_id, text))
     ctx.enter("CLASSIFY")
     verdict = classifier.classify(_with_date_context(text), history)
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence
@@ -229,6 +258,13 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
         return _finish(ctx, templates.refuse(verdict.unsafe_reason), result="rejected")
     if ctx.confidence < CONFIDENCE_FLOOR:
         return _clarify(ctx, templates.clarify_low_confidence(), reason="low_confidence")
+    if ctx.intent in WRITE_INTENTS:                                      # 卡 10：写路径
+        return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id))
+    return _read_flow(ctx)
+
+
+def _read_flow(ctx: _Ctx) -> Turn:
+    """只读路径（卡 09）：SLOT_FILL → PRECHECK → EXECUTE → VERIFY_NUMBERS → 回执。"""
     if ctx.intent not in READ_INTENTS:
         ctx.enter("PRECHECK")
         return _finish(ctx, templates.unsupported(ctx.intent), result="rejected")

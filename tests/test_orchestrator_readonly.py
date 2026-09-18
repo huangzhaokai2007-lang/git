@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent import classifier, llm, orchestrator, templates
+from agent import classifier, llm, orchestrator, templates, write_flow
 from data import dao
 
 from tests.conftest import count, raw
@@ -76,9 +76,11 @@ def test_typical_inputs_reach_the_expected_tool(seeded: Path, monkeypatch: pytes
 
 def test_read_only_inputs_never_call_a_tool_and_never_write(seeded: Path,
                                                            monkeypatch: pytest.MonkeyPatch) -> None:
-    """禁写操作：写意图与「没有对应工具」的只读意图（card_query）都不得调用任何工具。"""
+    """禁写：没有对应工具的只读意图（card_query）与未接通的写意图都不得调用任何工具。
+
+    （card-10 已把 transfer_single 接进确认流程，转账路径的断言移到 `tests/test_confirm_flow.py`。）
+    """
     for text, verdict in (("帮我查一下卡", out("card_query")),
-                          ("给李四转 100 元", out("transfer_single", slots={"payee": "李四"})),
                           ("帮我挂失卡片", out("card_report_lost", slots={"card_id": "card_savings_0001"}))):
         fake_llm(monkeypatch, [verdict])
         result = orchestrator.handle(text)
@@ -210,11 +212,16 @@ def test_read_intents_are_exactly_the_eight_from_the_card(seeded: Path,
 
 
 def test_no_write_intent_has_a_route(seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """静态红线：编排层不得把任何写操作意图路由到工具（本卡禁写）。"""
+    """静态红线：只读路由表里不得出现写意图；card-10 只放行 transfer 的确认流程。"""
     write_intents = (set(classifier.INTENT_LABELS) - set(orchestrator.READ_INTENTS)
                      - {"smalltalk", "out_of_scope", "unsafe_request"})
     assert not (set(orchestrator.TOOL_ROUTES) & write_intents)
+    assert not (set(orchestrator.TOOL_ROUTES) & set(orchestrator.WRITE_INTENTS))
     source = Path(orchestrator.__file__).read_text(encoding="utf-8")
-    for forbidden in ("execute_transfer", "cancel_subscription", "manage_card", "trade_wealth",
+    for forbidden in ("cancel_subscription", "manage_card", "trade_wealth",
                       "plan_gift", "create_aa_request", "assess_risk"):
         assert forbidden not in source
+    # card-10b 拆分后：唯一放行的写工具在写路径模块里，且只能经确认流程调用
+    flow = Path(write_flow.__file__).read_text(encoding="utf-8")
+    assert "transfer.execute_transfer" in flow
+    assert "transfer.execute_transfer" not in source and "execute_transfer(" not in source
