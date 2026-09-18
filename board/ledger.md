@@ -929,3 +929,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 设计已完整（薄壳替换 + 事务优先 + DB守卫 + 端到端用例 + 变异），新会话照做即可，不再勘察。
 NEXT_CARD_WARNING: 照 worker 设计：① _load_token/_store_token 薄壳替换 _TOKENS 读写（行为逐字不变，71 条 transfer 用例是安全网）；② 保留 _TOKENS_LOCK + DB 级条件更新守卫（受影响行 0 = 已执行走幂等）；③ _rollback_token 改「先事务后写快照」（失败即没写 executed）；④ 端到端用例 preview→execute→新连接(=重启)→重放断言逐字相同 + txn/audit 只 +1；⑤ 变异 4 条（快照改回内存/去DB守卫/先写快照后事务/重放走限流）。
+
+## 决策记录 2026-09-19 07:55（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：609cb60 board 记账（HEAD）；verify 绿 859 passed
+  - card-14b-6 worker 报 BLOCKED：会话预算耗尽（连做 8 卡：12b/13/14a/14b/14b-2/3/4/5），非设计不足
+
+判断：
+  - 护栏层核心全部完成：注入检测（34/34）、数字校验器（防幻觉）、越权 fail-closed、限流（60s 5次）、幂等落库原语（重启有效）。
+  - 14b-6 是「transfer 链路切幂等表」的最后接线（原语已实现+有单测，差接线），非紧急。设计已完整（薄壳替换+事务优先+DB守卫+端到端用例+变异4条）。
+  - **阻塞：需人类开新 worker 会话**（我无权限开新会话，重派进同一会话不带来新预算）。
+
+NEXT_CARD: none（阻塞等人类开新 worker 会话）
+MODEL: deepseek-flash
+ACTION: human
+REASON: worker 会话耗尽（连做 8 卡），14b-6 及后续卡 15~19 都需新 worker 会话。请用户醒来开新 worker 会话，14b-6 设计已完整照做即可。
+NEXT_CARD_WARNING: 14b-6 设计已就绪（见上轮 WARNING），新会话第一步只做薄壳替换 + 跑 71 条 transfer 用例做安全网，再往下。
