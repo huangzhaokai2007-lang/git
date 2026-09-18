@@ -18,9 +18,25 @@ from typing import Mapping
 from pydantic import BaseModel, ConfigDict
 
 from agent import llm
+from guard import injection
 from tools.schemas import ToolResult
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_facts(value: object, *, key: str | None = None) -> object:
+    """facts 的"送模型副本"：自由文本字段先包成 `<untrusted_data>`（铁律 7，卡 12b 收口）。
+
+    不可信文本当**数据**不当指令 —— memo / counterparty / 备注 / IM 正文这类字段（含嵌在
+    items[] 里的）会被包进数据块；数字与结构原样保留，润色的数字校验照旧可用。
+    """
+    if isinstance(value, dict):
+        return {item: sanitize_facts(inner, key=item) for item, inner in value.items()}
+    if isinstance(value, list):
+        return [sanitize_facts(inner, key=key) for inner in value]
+    if isinstance(value, str) and key in injection.FREE_TEXT_FIELDS:
+        return injection.wrap_untrusted(f"facts.{key}", value)
+    return value
 
 # ---------------- 8 个只读意图的回执模板（占位符全部来自 facts） ----------------
 #: 余额：facts 键见 tools/query.py T1（balance_yuan / available_yuan / as_of；account_type_cn 由编排层按
@@ -201,7 +217,8 @@ POLISH_SYSTEM = (
 
 def polish(text: str, facts: Mapping) -> str | None:
     """让 LLM 润色措辞；LLM 不可用或返回空 → `None`（**读请求不因润色失败而失败**）。"""
-    payload = json.dumps({"reply": text, "facts": facts}, ensure_ascii=False, default=str)
+    payload = json.dumps({"reply": text, "facts": sanitize_facts(facts)}, ensure_ascii=False,
+                         default=str)                                  # 自由文本先包成数据块（铁律 7）
     try:
         out = llm.chat_json(POLISH_SYSTEM, payload, _Polished)
     except llm.LLMUnavailable:

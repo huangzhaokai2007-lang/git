@@ -41,8 +41,11 @@ else
 fi
 
 step "5/5 红线检查（注入检测 + 数字校验器）"
-if [ -f guard/injection.py ] && [ -f guard/facts_check.py ]; then
-  $PT tests/test_injection.py tests/test_facts_check.py || FAIL=1
+REDLINE_TESTS=""
+[ -f guard/injection.py ] && REDLINE_TESTS="$REDLINE_TESTS tests/test_injection.py"
+[ -f guard/facts_check.py ] && REDLINE_TESTS="$REDLINE_TESTS tests/test_facts_check.py"
+if [ -n "$REDLINE_TESTS" ]; then
+  $PT $REDLINE_TESTS || FAIL=1
 else
   skip "护栏未实现（请做卡 12 / 13）"
 fi

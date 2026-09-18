@@ -39,7 +39,7 @@ from pydantic import BaseModel, ConfigDict
 from agent import classifier, confirm_card, templates, write_flow
 from data import dao
 from data.seed import AS_OF
-from guard import permission
+from guard import injection, permission
 from tools import query, subscription, transfer, wealth
 from tools._query_common import current_session_id
 from tools.schemas import ToolResult
@@ -247,6 +247,11 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
     """
     ctx = _Ctx(f"trace-{uuid.uuid4().hex[:12]}", session_id or current_session_id(), clarify_round)
     ctx.enter("IDLE")
+    screen = injection.detect(text)                        # 规则层先行：确定性，命中就不调 LLM（卡 12b）
+    if screen.blocked:
+        ctx.intent = injection.UNSAFE_INTENT
+        ctx.enter("REFUSE")
+        return _finish(ctx, templates.refuse(screen.reason), result="rejected")
     if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类
         ctx.intent = inflight
         return _apply(ctx, write_flow.resume(ctx.session_id, text))
