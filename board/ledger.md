@@ -858,3 +858,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14b-2 收官（require_payee_exists + 变异），两项剩余（39处补名 + transfer切库）开 14b-3，按 ①→② 风险递增。
 NEXT_CARD_WARNING: card-14b-3 范围 tools/*.py + guard/tool_guard.py + tests/；① 39 处 require_owned 补 tool="<工具名>"（可建 scripts 批量脚本，禁 heredoc），两条 *_untouched 断言放宽为「资金/流水未动+审计 rejected+risk_event 新增」；② transfer 内存 _TOKENS 切幂等表（preview/execute 状态翻转 + _rollback_token 回滚路径，改一个跑一次测试，确保重放同 token 返回同结果且重启有效）。
+
+## 决策记录 2026-09-19 07:00（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：06bd385 card-14b-3（HEAD）；verify 绿 859 passed
+  - card-14b = PASS（无 MUST_FIX，4 RISK）；card-14b-3 = 补 5 处 tool 名 + 放宽断言（越权双写全覆盖）
+
+RISK 传导（reviewer 4 条 + worker 交底）：
+  1. 【接线期】idempotent_execute「先查后写」TOCTOU 无锁 → 14b-4 接线时复用 card-05 _CONFIRM_LOCK 包「查→产→写」临界区
+  2. 【接线期】限流-幂等调用顺序：docstring「先幂等后限流」= producer 先执行再被拒 → 14b-4 把限流判定前移到 producer 前（保持重放不计数）
+  3. require_payee_exists（已改 id 精确）未接线 preview_transfer → 14b-4 接线
+  4. flaky 测试 test_replay_does_not_count_toward_the_rate_limit 偶发红（根因=限流表跨用例残留，测试隔离缺陷）→ 14b-4 修（fixture 清理 rate_limit 表）
+
+NEXT_CARD: 14b-4
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏层最后一卡：transfer 内存 _TOKENS 切幂等表（端到端接线）+ 处理 2 条接线期 RISK（TOCTOU 锁 + 限流前移）+ 修 flaky（限流表 fixture 清理）+ require_payee_exists 接线。
+NEXT_CARD_WARNING: card-14b-4 范围 tools/transfer.py + guard/tool_guard.py + tests/ + tests/conftest.py；① transfer _TOKENS 切 idempotent_execute，复用 _CONFIRM_LOCK 包「查→产→写」临界区（防 TOCTOU）；② 限流判定前移到 producer 前（先 check_write_rate 再执行，重放不计数）；③ require_payee_exists 接线 preview_transfer；④ 修 flaky：fixture 清理 rate_limit 表（跨用例残留）；⑤ 测试名 test_statements_split_into_ten 改名 12（顺手）。改一个跑一次测试。
