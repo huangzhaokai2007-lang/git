@@ -18,6 +18,7 @@
 | card-05b | ad156c9 | PASS（无 MUST_FIX，3 条 RISK） | 拆源文件收口 300 行 + VELOCITY 常量改名；verify 绿（389 passed）。全部源/测试文件首次 ≤300、依赖单向禁反向、零丢用例（178→190，+12） |
 | card-06 | d7fa98e | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T10–T12 订阅/卡管理（confirm_ref 确认闭环 + L2/L3 双因子）；verify 绿（520 passed）。18/18 变异抽查真报警；8 文件指纹零漂移 |
 | card-07 | f2f5235 | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T13–T16 理财/跨场景（风险测评纯代码计分 + 推荐过滤 + 申购赎回 + 送礼锁资金）；verify 绿（649 passed）。3 次变异抽查真报警。**工具层 T1–T16 全部完成** |
+| card-08 | 3fe912c | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 编排层首卡：agent/llm.py（LLM 客户端）+ agent/classifier.py（意图分类器）；verify 绿（675 passed）。3 次变异抽查真报警；铁律 6/7/8 验证到位 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -514,3 +515,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 工具层 T1–T16 全部收官，进入编排层 card-08（llm.py + classifier.py 意图识别）。LLM 客户端 + 意图分类器 + 假 LLM 单测，不涉及权限/业务判断，flash 够用。全团队已切 flash。
 NEXT_CARD_WARNING: card-08 范围 agent/llm.py + agent/classifier.py + tests/test_classifier.py；llm.py 用 openai SDK + response_format=json_object + Pydantic 二次校验 + 超时20s重试2次；classifier 只做意图识别+槽位，禁权限/业务判断；单测用假 LLM monkeypatch（正常/JSON非法/超时/字段缺失），不依赖真网络。
+
+## 决策记录 2026-09-19 02:55（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：3fe912c card-08（HEAD）；verify 绿 675 passed
+  - card-08 = PASS（无 MUST_FIX，2 条非阻塞 RISK）；3 次变异抽查真报警；铁律 6/7/8 验证到位
+
+进度判断：
+  - 已完成卡：card-00~08 + 06b + 陌生商户 —— 数据层 + 工具层 T1–T16 + 编排层 llm/classifier 全部完成
+  - 卡在哪：编排层 card-09（orchestrator 状态机，先接 L0 只读意图）
+  - 风险累积（2 条传导）：① SLOT_SCHEMA 是 worker 按 §2 归纳的意图契约（规格 §3 没给槽位表），金额槽位单位口径（payee vs payee_id、amount 分 vs 元）需人类拍板——但那只影响写操作，card-09 只读意图槽位简单，**留 card-10 写操作前拍板**；② 未接真实模型联调（卡要求假 LLM），card-09 联调时观察 DeepSeek temp=0.0+json_object 故障率。
+
+NEXT_CARD: 09
+MODEL: deepseek-flash
+ACTION: run
+REASON: 编排层 card-08 收官，进 card-09 状态机（先接 L0 只读意图）。只读路径不碰写操作、不碰金额单位口径争议，flash 够用；数字校验（VERIFY_NUMBERS）红线在 WARNING 里强调。
+NEXT_CARD_WARNING: card-09 范围 agent/orchestrator.py + agent/templates.py + tests/test_orchestrator_readonly.py；严格按规格 §4 状态机 IDLE→CLASSIFY→SLOT_FILL→PRECHECK→EXECUTE→VERIFY_NUMBERS→REPLY→AUDIT；只接 8 个 L0 只读意图；置信度<0.6 走 CLARIFY 追问（≤2 轮）；每请求 trace_id + 全程 audit_log；回执用 templates 模板，LLM 只许润色措辞不得改任何数字（铁律 1/2）；单测假 LLM 10 条输入断言 tool_calls+templates；禁任何写操作。
