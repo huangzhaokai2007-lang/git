@@ -772,3 +772,17 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14b 勘察完成，口径已定，剩下是机械执行（schema/DAO/tool_guard/39处补tool/单测）。
 NEXT_CARD_WARNING: 同上一轮 14b WARNING。追加：限流滚动60s；先计数再校验；DAO 沿用 _insert 风格别写裸 SQL。
+
+## 决策记录 2026-09-19 05:50（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：a849343 board 记账（HEAD）；verify 绿 852 passed
+  - card-14b worker 报零改动（内联脚本被 shell 拒，执行前中止），但给出详细施工方案
+
+裁决：14b 零改动重派新会话，worker 建议「不要大 heredoc，按文件 write_file/patch，改一个跑一次测试」。已采纳，施工顺序照 worker 方案（schema→dao→tool_guard→test→39处补名）。
+
+NEXT_CARD: 14b（重派新会话）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14b 因 heredoc 被 shell 拒零改动，重派新会话按 write_file/patch 分步做。口径已全定，机械执行。
+NEXT_CARD_WARNING: 同 14b WARNING。追加：用 write_file/patch 工具改文件，禁 heredoc 内联脚本；按顺序 schema→dao→tool_guard→test→39处补名，改一个跑一次 pytest。
