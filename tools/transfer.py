@@ -108,6 +108,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         return bad
     try:                                                              # 卡 14a：统一金额边界
         tool_guard.require_amount_cents(amount, tool="preview_transfer")
+        tool_guard.require_payee_exists(payee_id, tool="preview_transfer")   # 卡 14b-4：按 id 精确校验
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     if schedule is not None or split_with is not None:

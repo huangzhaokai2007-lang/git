@@ -130,7 +130,14 @@ def test_idempotency_snapshot_survives_a_restart(seeded: Path) -> None:
 
 
 def test_replay_does_not_count_toward_the_rate_limit(seeded: Path) -> None:
-    """幂等重放不算一次写操作：只有真正的新执行才进限流表。"""
+    """幂等重放不算一次写操作：只有真正的新执行才进限流表。
+
+    卡 14b-4：先把 `rate_limit` 清空，避免同一临时库在别的用例/复用路径上留下行导致偶发红（测试隔离）。
+    """
+    import sqlite3
+
+    with sqlite3.connect(seeded) as conn:
+        conn.execute("DELETE FROM rate_limit")
     user = "u_idem_rate"
     before = count(seeded, "rate_limit")
     tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": True})

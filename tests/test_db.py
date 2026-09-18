@@ -123,7 +123,8 @@ def test_schema_sql_is_verbatim_copy_of_spec() -> None:
     assert written == spec_ddl_block()
 
 
-def test_statements_split_into_ten_complete_statements() -> None:
+def test_statements_split_into_twelve_complete_statements() -> None:
+    """卡 14b-4（reviewer RISK #4）：表数已是 12（规格 §DDL 加 idempotency / rate_limit），名字同步。"""
     parsed = statements(schema_sql())
     assert len(parsed) == len(TABLES)
     assert all(statement.startswith("CREATE TABLE") for statement in parsed)
