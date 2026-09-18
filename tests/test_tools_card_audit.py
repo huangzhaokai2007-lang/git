@@ -50,7 +50,7 @@ def test_foreign_card_is_forbidden_and_untouched(foreign: Path) -> None:
     result = _call(FOREIGN_CARD, "lock")
     assert result.error_code == ErrorCode.FORBIDDEN
     assert raw(foreign, "SELECT status FROM card WHERE id = ?", (FOREIGN_CARD,))[0]["status"] == "normal"
-    assert count(foreign, "audit_log") >= before + 1             # 卡 14b-3：越权双写（工具自身 + tool_guard 各留一笔）
+    assert count(foreign, "audit_log") == before + 1             # 卡 14b-5：审计由工具层自己写（恰好一笔）
     row = raw(foreign, "SELECT * FROM audit_log ORDER BY rowid DESC LIMIT 1")[0]
     assert row["result"] == "rejected" and FOREIGN_CARD in row["params_json"]
 

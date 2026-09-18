@@ -80,13 +80,15 @@ def _risk_event(trace_id: str | None) -> None:
 def require_owned(resource: str, owner_id: str | None, resource_id: str, *,
                   tool: str | None = None, trace_id: str | None = None,
                   intent: str | None = None) -> None:
-    """资源归属断言：不属于当前用户 → `FORBIDDEN`（并写 audit_log + risk_event）。fail-closed。"""
+    """资源归属断言：不属于当前用户 → `FORBIDDEN`（fail-closed）。
+
+    留痕分工（卡 14b-5 裁决）：**审计由工具层自己写**（它带 params_json 细节），
+    tool_guard 只写 `risk_event`（安全视角的越权检索）。两者不重复。
+    """
     common = _common()
     if owner_id != common.current_user_id():
         logger.warning("越权访问被拦：resource=%s id=%s owner=%s user=%s",
                        resource, resource_id, owner_id, common.current_user_id())
-        _audit_rejected(tool, trace_id, intent,
-                        {"resource": resource, "resource_id": resource_id})
         _risk_event(trace_id)
         raise _tool_error("FORBIDDEN", f"{resource}不属于当前用户")
 
@@ -172,6 +174,7 @@ def idempotent_execute(token: str, tool: str, user_id: str, producer: Any) -> tu
     if existing is not None:
         logger.info("幂等命中（重放，不计限流）：token=%s tool=%s", token, tool)
         return json.loads(existing["result_json"]), True
+    check_write_rate(user_id, tool=tool)          # 卡 14b-5：限流判定前移——先计数、先判定，再产生任何写副作用
     result = producer()
     dao.insert_idempotent(token, tool, user_id, json.dumps(result, ensure_ascii=False, default=str),
                           _now().isoformat(timespec="seconds"))

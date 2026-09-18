@@ -50,17 +50,14 @@ def test_own_resource_passes(seeded: Path) -> None:
     tool_guard.require_owned("账户", _query_common.current_user_id(), OWNED_ACCOUNT)   # 不抛即通过
 
 
-def test_rejection_writes_the_audit_trail(seeded: Path) -> None:
-    """裁决 ②：越权必须写 audit_log.result='rejected'（tool=被调工具名、trace_id 可溯）。"""
-    before_audit = count(seeded, "audit_log")
+def test_rejection_leaves_the_audit_to_the_tool_layer(seeded: Path) -> None:
+    """卡 14b-5 分工裁决：审计由工具层自己写（带 params_json），tool_guard 只写 risk_event。"""
+    before_audit, before_risk = count(seeded, "audit_log"), count(seeded, "risk_event")
     with pytest.raises(_query_common.ToolError):
         tool_guard.require_owned("账户", FOREIGN_USER, FOREIGN_ACCOUNT, tool="get_balance",
-                                 trace_id="trace-14a", intent="balance_query")
-    assert count(seeded, "audit_log") == before_audit + 1
-    audit = raw(seeded, "SELECT tool, result, error_code, trace_id FROM audit_log"
-                        " ORDER BY rowid DESC LIMIT 1")[0]
-    assert (audit["tool"], audit["result"], audit["error_code"]) == ("get_balance", "rejected", "FORBIDDEN")
-    assert audit["trace_id"] == "trace-14a"
+                                 trace_id="trace-14a")
+    assert count(seeded, "audit_log") == before_audit            # 审计不归 tool_guard 写（避免重复留痕）
+    assert count(seeded, "risk_event") == before_risk + 1        # 安全留痕归 tool_guard 写
     assert tool_guard.UNAUTHORIZED_FACTOR == "unauthorized_resource"
 
 
@@ -140,20 +137,20 @@ def test_replay_does_not_count_toward_the_rate_limit(seeded: Path) -> None:
         conn.execute("DELETE FROM rate_limit")
     user = "u_idem_rate"
     before = count(seeded, "rate_limit")
-    tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": True})
-    tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": False})    # 重放
-    tool_guard.check_write_rate(user, tool="transfer")                            # 新写操作 → 计 1
-    assert count(seeded, "rate_limit") == before + 1
+    tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": True})    # 新执行 → 计 1 次
+    tool_guard.idempotent_execute("tok-rate", "transfer", user, lambda: {"ok": False})   # 重放 → 不计数
+    assert count(seeded, "rate_limit") == before + 1        # 卡 14b-5：计数发生在 producer 之前的 idempotent_execute 内
 
 
 # ---------------- ⑥ 越权双写（枚举补齐后 risk_event 也写得进） ----------------
 
-def test_foreign_access_writes_audit_and_risk_event(seeded: Path) -> None:
+def test_foreign_access_writes_risk_event_only(seeded: Path) -> None:
+    """卡 14b-5：tool_guard 只写 risk_event；审计由工具层自己写（本用例只打统一入口，故审计不变）。"""
     before_audit, before_risk = count(seeded, "audit_log"), count(seeded, "risk_event")
     with pytest.raises(_query_common.ToolError):
         tool_guard.require_owned("账户", FOREIGN_USER, FOREIGN_ACCOUNT, tool="get_balance",
                                  trace_id="trace-14b")
-    assert count(seeded, "audit_log") == before_audit + 1
+    assert count(seeded, "audit_log") == before_audit
     assert count(seeded, "risk_event") == before_risk + 1
     risk = raw(seeded, "SELECT factor, trace_id FROM risk_event ORDER BY rowid DESC LIMIT 1")[0]
     assert risk["factor"] == "unauthorized_resource" and risk["trace_id"] == "trace-14b"
@@ -161,10 +158,10 @@ def test_foreign_access_writes_audit_and_risk_event(seeded: Path) -> None:
 
 def test_query_common_require_owned_is_a_forwarder(seeded: Path) -> None:
     """收口后仍是同一个入口：老调用点（39 处）走的还是这份实现。"""
-    before_audit = count(seeded, "audit_log")
+    before_risk = count(seeded, "risk_event")
     with pytest.raises(_query_common.ToolError):
         _query_common.require_owned("卡片", FOREIGN_USER, FOREIGN_ACCOUNT, tool="get_card")
-    assert count(seeded, "audit_log") == before_audit + 1
+    assert count(seeded, "risk_event") == before_risk + 1        # 卡 14b-5：转发路径也写 risk_event
 
 
 # ---------------- ② 金额边界 ----------------

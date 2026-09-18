@@ -187,7 +187,7 @@ def test_t11_foreign_subscription_is_forbidden_and_untouched(foreign: Path) -> N
     result = sub.cancel_subscription(FOREIGN_SUB, _ref(target=FOREIGN_SUB))
     assert result.error_code == ErrorCode.FORBIDDEN
     assert raw(foreign, "SELECT status FROM subscription WHERE id = ?", (FOREIGN_SUB,))[0]["status"] == "active"
-    assert count(foreign, "audit_log") >= before + 1             # 卡 14b-3：越权双写（工具自身 + tool_guard 各留一笔）
+    assert count(foreign, "audit_log") == before + 1             # 卡 14b-5：审计由工具层自己写（恰好一笔）
     assert raw(foreign, "SELECT result FROM audit_log ORDER BY rowid DESC LIMIT 1")[0]["result"] == "rejected"
 
 
