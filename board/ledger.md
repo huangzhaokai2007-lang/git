@@ -21,6 +21,7 @@
 | card-08 | 3fe912c | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 编排层首卡：agent/llm.py（LLM 客户端）+ agent/classifier.py（意图分类器）；verify 绿（675 passed）。3 次变异抽查真报警；铁律 6/7/8 验证到位 |
 | card-09 | 805cce6 | PASS（无 MUST_FIX，1 条 RISK 硬 TODO） | 编排层状态机 + templates（L0 只读路径，8 意图）；verify 绿（697 passed）。2 次变异抽查真报警。**硬 TODO：agent 直调 dao 越层，卡 13 guard 层实现时收敛** |
 | card-10 | fdc3865 | PASS（无 MUST_FIX，5 条非阻塞 RISK） | 写操作端到端：guard/permission.py 档位 + confirm_card 确认卡 + OTP/幂等 + L3 待复核 + write_flow 拆分；verify 绿（709 passed）。2 次变异抽查真报警；四步走/幂等/脱敏验证到位 |
+| card-11 | e82b8fe | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 护栏层用例集：30 条 YAML + runner + verify 接入（SKIP→通过 30/30）+ 3 个 bug 修复；verify 绿（741 passed）。「用例有牙齿」实测（改断言即 FAIL） |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -610,3 +611,24 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏层首卡，用例驱动测试框架 + YAML 用例集 + verify 接入。写测试框架与用例，不实现权限/注入逻辑，flash 够用。
 NEXT_CARD_WARNING: card-11 范围 tests/cases/ + tests/test_cases.py + scripts/verify.sh；按规格 §8 YAML 格式，≥30 条（账单5/转账6/订阅5/卡片4/理财4/越权安全6）；每条断言 intent/tool_calls/tier/must_contain/must_not_contain/executed；test_cases.py 输出通过率+失败 diff；verify.sh 纳入用例测试失败退出码非0。越权用例要覆盖「资源非本人→FORBIDDEN」。
+
+## 决策记录 2026-09-19 03:55（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：e82b8fe card-11（HEAD）；verify 绿 741 passed
+  - card-11 = PASS（无 MUST_FIX，4 条非阻塞 RISK）；「用例有牙齿」实测（改断言即 FAIL）；3 处范围外 bug 修复经审核师确认正确
+
+进度判断：
+  - 已完成卡：card-00~11 + 06b + 陌生商户 —— 数据层 + 工具层 + 编排层 + 护栏层用例集 全部完成
+  - 卡在哪：护栏层 card-12（guard/injection.py 注入检测，铁律 7）
+  - 风险累积（4 条传导）：
+    1. 越权覆盖是「替代」非「完整」（编排层未路由带 id 读工具，用伪造凭证覆盖）→ 待读工具接编排层后补正面用例
+    2. 越级推荐回执回显请求档位 R5（非实际等级）→ tools/wealth.py 范围外，后续 SPEC 或 07b
+    3. 用例格式扩展（slots/now/turns/tool）规格 §8 未定义 → 待人类确认入规格
+    4. sec-004 不钉档位（amount_jump 浮动）→ 档位靠 trf-001/002/006 钉死
+
+NEXT_CARD: 12
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏层注入检测（铁律 7 安全主战场）。关键词/正则规则层 + wrap_untrusted 数据层 + lint 单测，全是确定性代码无 LLM 推理，flash 够用。
+NEXT_CARD_WARNING: card-12 范围 guard/injection.py + tests/test_injection.py；规则层关键词/正则（忽略之前指令/你现在是/开发者模式/导出全部用户/告诉我系统提示词/绕过验证/免密等）命中→unsafe_request；数据层 wrap_untrusted(source,text) 用 <untrusted_data source="...">包裹；lint 单测扫描 agent/ 所有 LLM 调用点断言无直接拼接自由文本；≥20 条攻击串（中英混合/编码混淆/分段绕过）全被拦。
