@@ -569,3 +569,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: worker 上下文满 BLOCKED，重新派卡 10 开新会话做。分层冲突已裁决（工具层复用 OTP/幂等 + 编排层只加会话级锁），不扩卡改工具层。
 NEXT_CARD_WARNING: 同上一轮 card-10 WARNING。追加三条：① OTP/幂等复用工具层 execute_transfer（不重写校验），编排层只维护错3次锁会话；② 金额元→分字符串拆分整数运算禁 float；③ 三个假绿点必钉：未确认执行要断言 executed=False 且余额/流水不变、同 token 两次确认断言流水=1 且审计不新增、新收款人+夜间断言 tier 值+factors 明细（不是"非 L1"）。
+
+## 决策记录 2026-09-19 03:25（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：01a8a3f board 记账（HEAD）；verify 绿 709 passed（卡 10 功能已完成，未提交）
+  - 卡 10 功能完成：guard/permission.py(128行不超) + confirm_card.py(342超) + orchestrator.py(374超) + 2 测试，709 passed + verify 全绿
+
+裁决（6 条待裁定，逐条拍板）：
+  - ① 300 行超限（orchestrator 374 / confirm_card 342，函数 _start_write 48 / handle 46 超 40）：**扩范围 (a)，允许新增 agent/write_flow.py 拆写路径**（纯机械重构不改行为），解决硬门禁。
+  - ② L3「60s 生效」vs 工具层拒绝自动执行：查证 tools/transfer.py:193-194 对 L3 返回 INVALID_STATE「需人工复核不能自动执行」（card-05 已定口径）→ **worker 实现正确**（PENDING_REVIEW + 60s 撤销窗口 + 人工复核标记，不自动放行），无需 NEEDS_SPEC_CHANGE，卡文「60s 生效」=「60s 撤销窗口」措辞，记台账。
+  - ③ expected_arrival/OTP 提示语 demo 措辞、④ 会话态进程内存（demo 规模可）、⑤ resolve_payee 未记 Turn.tool_calls → 记待办，不阻塞。
+  - ⑥ 未跑变异自检 → 拆分后补跑。
+
+NEXT_CARD: 10b（机械拆分 + 补变异自检）
+MODEL: deepseek-flash
+ACTION: fix_first
+REASON: 功能已通（709 passed），但 300/40 行硬门禁必拆（审阅师会 FAIL）+ 变异自检未跑。扩范围新增 write_flow.py 纯机械拆分不改行为，拆完补变异自检再提交审核。
+NEXT_CARD_WARNING: 拆分只许动 agent/ 文件（orchestrator/confirm_card/write_flow/templates），不改 guard/permission.py 与工具层，不改任何行为（709 passed 必须保持）；拆完 orchestrator.py + confirm_card.py ≤300 行、所有函数 ≤40 行；补跑变异自检；指纹重报。
