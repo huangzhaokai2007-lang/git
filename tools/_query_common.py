@@ -22,6 +22,7 @@ from data import dao
 from data.seed import USER_ID as DEMO_USER_ID
 from tools.schemas import ACCOUNT_TYPES, ErrorCode, ToolResult
 
+from guard import tool_guard
 logger = logging.getLogger(__name__)
 
 #: 分 → 元 的换算基数（`_money` 专用）。与 `PCT_TOTAL` 数值同为 100 但**语义无关**，故各自命名：
@@ -52,15 +53,15 @@ def current_user_id() -> str:
     return _SESSION_USER or DEMO_USER_ID
 
 
-def require_owned(resource: str, owner_id: str | None, resource_id: str) -> None:
+def require_owned(resource: str, owner_id: str | None, resource_id: str, *, tool: str | None = None,
+                  trace_id: str | None = None, intent: str | None = None) -> None:
     """L2 归属断言（规格第 6 节）：资源不属于当前用户 → `FORBIDDEN`。
 
-    卡 06/07 的 get_card / get_subscription / get_product 等资源查询必须调用本函数。
+    卡 14a 起**唯一实现**在 `guard/tool_guard.require_owned`（越权还会写 audit_log.rejected + risk_event）；
+    本函数保留原签名与错误文案（`{resource}不属于当前用户`），只是转发，保证既有 39 处调用点行为不变。
     """
-    if owner_id != current_user_id():
-        logger.warning("越权访问被拦：resource=%s id=%s owner=%s user=%s",
-                       resource, resource_id, owner_id, current_user_id())
-        raise ToolError(ErrorCode.FORBIDDEN, f"{resource}不属于当前用户")
+    tool_guard.require_owned(resource, owner_id, resource_id, tool=tool,
+                             trace_id=trace_id, intent=intent)
 
 
 def _fail(code: ErrorCode, message: str) -> ToolResult:

@@ -46,6 +46,7 @@ from tools.schemas import (
     ExecuteData, AaRequestReq, AaData, ErrorCode, ToolResult,
 )
 
+from guard import tool_guard
 logger = logging.getLogger(__name__)
 
 # ---------------- 本模块阈值常量 ----------------
@@ -105,6 +106,10 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
     if (bad := _invalid(PreviewTransferReq, payee_id=payee_id, amount=amount,
                         schedule=schedule, split_with=split_with)) is not None:
         return bad
+    try:                                                              # 卡 14a：统一金额边界
+        tool_guard.require_amount_cents(amount, tool="preview_transfer")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
     if schedule is not None or split_with is not None:
         logger.warning("本卡未实现定时/拆分转账：schedule=%r split_with=%r", schedule, split_with)
         return _fail(ErrorCode.INVALID_ARGUMENT, "本卡还不支持定时转账或拆分转账")
