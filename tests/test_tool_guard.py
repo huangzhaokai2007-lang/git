@@ -73,13 +73,14 @@ def test_risk_event_factor_is_allowed_by_ddl(seeded: Path) -> None:
 # ---------------- ④ 限流（滚动 60s、先计数再校验） ----------------
 
 def test_sixth_write_in_window_is_rejected(seeded: Path) -> None:
+    """写死字面量 5/6（**不复用 `RATE_MAX_WRITES`**）——否则阈值被放宽时这条用例也跟着放宽，就测不出东西。"""
     user = "u_rate_test"
-    for index in range(tool_guard.RATE_MAX_WRITES):
+    for index in range(5):                                                    # 字面量：窗口内允许 5 次
         assert tool_guard.check_write_rate(user, tool="transfer") == index + 1
     with pytest.raises(_query_common.ToolError) as exc:
-        tool_guard.check_write_rate(user, tool="transfer")                       # 第 6 次
+        tool_guard.check_write_rate(user, tool="transfer")                     # 第 6 次
     assert exc.value.code is ErrorCode.OVER_LIMIT and "频繁" in exc.value.message
-    assert count(seeded, "rate_limit") == tool_guard.RATE_MAX_WRITES + 1          # 被拒的尝试也留痕
+    assert count(seeded, "rate_limit") == 6                                    # 被拒的尝试也留痕
 
 
 def test_window_slides_and_writes_are_allowed_again(seeded: Path) -> None:
@@ -196,5 +197,9 @@ def test_missing_payee_is_not_found(seeded: Path) -> None:
     assert exc.value.code is ErrorCode.NOT_FOUND
 
 
-def test_existing_payee_reference_passes(seeded: Path) -> None:
-    tool_guard.require_payee_exists("王五")                     # 可被收款人检索命中的引用 → 放行
+def test_valid_payee_id_is_not_misjudged(seeded: Path) -> None:
+    """reviewer 发现：模糊子串搜不到 id 列 → 有效 id（payee_0001）曾被误判 NOT_FOUND；现为按 id 精确查找。"""
+    tool_guard.require_payee_exists(PAYEE)                      # payee_0001：有效 id → 放行
+    with pytest.raises(_query_common.ToolError) as exc:
+        tool_guard.require_payee_exists("payee_9999")           # 不存在的 id → NOT_FOUND
+    assert exc.value.code is ErrorCode.NOT_FOUND

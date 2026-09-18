@@ -108,9 +108,13 @@ def require_amount_cents(cents: object, *, tool: str | None = None, trace_id: st
 
 
 def require_payee_exists(payee_id: str, *, tool: str | None = None) -> None:
-    """收款人 id 必须存在（不存在 → `NOT_FOUND`，不泄露是否存在他人同名收款人）。"""
+    """收款人 **id** 必须存在（按 id 精确查找，不用模糊子串）→ 不存在则 `NOT_FOUND`。
+
+    reviewer 在卡 14b 复查时发现：早先版本用 `find_payee(text)`（只搜 name/phone/bank 子串），
+    有效 id（如 `payee_0001`）会被误判为 NOT_FOUND。改用 DAO 的 `get_payee(payee_id)` 精确查找。
+    """
     del tool
-    if not dao.find_payee(payee_id):                            # 名字/手机号/id 任一可检索到即视为存在
+    if dao.get_payee(payee_id) is None:
         raise _tool_error("NOT_FOUND", "收款人不存在")
 
 
