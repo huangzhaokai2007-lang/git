@@ -894,3 +894,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏层真正最后一卡：限流前移（producer 前）+ transfer 切幂等表（_CONFIRM_LOCK 防 TOCTOU）+ 越权留痕分工调整。
 NEXT_CARD_WARNING: card-14b-5 范围 tools/transfer.py + guard/tool_guard.py + tests/；① 限流前移：check_write_rate 移进 idempotent_execute 非重放分支且 producer 前（同步 test_replay 期望）；② transfer _TOKENS 切 idempotent_execute，复用 _CONFIRM_LOCK 包「查→产→写」临界区防 TOCTOU，touch preview/execute 状态翻转 + _rollback_token，改一个跑一次测试；③ 越权留痕：工具层保留审计、tool_guard 只写 risk_event（改并存态 assert >= 为明确分工断言）。
+
+## 决策记录 2026-09-19 07:30（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：0bf6b69 card-14b-5（HEAD）；verify 绿 859 passed
+  - card-14b-5 = 限流前移 producer 前 + 越权留痕分工（tool_guard 只写 risk_event，审计归工具层）；变异 4/4
+
+裁决：
+  - ① 14b-6 开：护栏系列真正剩下的唯一功能项（transfer _TOKENS 切幂等表端到端）。
+  - ② scripts/mutcheck_14b.py + card14b_name_sites.py 都入库（可复用工具）。
+  - ③ 规格 §DDL SPEC-CHANGE 已在提交信息注明（5235353），待用户确认。
+  - ④ 卡13遗留挂账。
+
+NEXT_CARD: 14b-6
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏系列最后一卡：transfer 内存 _TOKENS 切幂等表（_CONFIRM_LOCK 防 TOCTOU），达成"转账链路幂等重启后仍有效"端到端。
+NEXT_CARD_WARNING: card-14b-6 范围 tools/transfer.py + guard/tool_guard.py（若需）+ tests/；transfer preview_transfer token 登记 + _execute_locked 状态翻转 + _rollback_token 回滚 + _TOKENS_LOCK 临界区边界，全切 idempotent_execute（复用 _CONFIRM_LOCK 包「查→产→写」）；加一条「两步预览→执行→重启→重放」端到端用例；改一个跑一次测试，不破坏 859 基线。
