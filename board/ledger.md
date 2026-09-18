@@ -20,6 +20,7 @@
 | card-07 | f2f5235 | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T13–T16 理财/跨场景（风险测评纯代码计分 + 推荐过滤 + 申购赎回 + 送礼锁资金）；verify 绿（649 passed）。3 次变异抽查真报警。**工具层 T1–T16 全部完成** |
 | card-08 | 3fe912c | PASS（无 MUST_FIX，2 条非阻塞 RISK） | 编排层首卡：agent/llm.py（LLM 客户端）+ agent/classifier.py（意图分类器）；verify 绿（675 passed）。3 次变异抽查真报警；铁律 6/7/8 验证到位 |
 | card-09 | 805cce6 | PASS（无 MUST_FIX，1 条 RISK 硬 TODO） | 编排层状态机 + templates（L0 只读路径，8 意图）；verify 绿（697 passed）。2 次变异抽查真报警。**硬 TODO：agent 直调 dao 越层，卡 13 guard 层实现时收敛** |
+| card-10 | fdc3865 | PASS（无 MUST_FIX，5 条非阻塞 RISK） | 写操作端到端：guard/permission.py 档位 + confirm_card 确认卡 + OTP/幂等 + L3 待复核 + write_flow 拆分；verify 绿（709 passed）。2 次变异抽查真报警；四步走/幂等/脱敏验证到位 |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -587,3 +588,25 @@ MODEL: deepseek-flash
 ACTION: fix_first
 REASON: 功能已通（709 passed），但 300/40 行硬门禁必拆（审阅师会 FAIL）+ 变异自检未跑。扩范围新增 write_flow.py 纯机械拆分不改行为，拆完补变异自检再提交审核。
 NEXT_CARD_WARNING: 拆分只许动 agent/ 文件（orchestrator/confirm_card/write_flow/templates），不改 guard/permission.py 与工具层，不改任何行为（709 passed 必须保持）；拆完 orchestrator.py + confirm_card.py ≤300 行、所有函数 ≤40 行；补跑变异自检；指纹重报。
+
+## 决策记录 2026-09-19 03:40（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：fdc3865 card-10（HEAD）；verify 绿 709 passed
+  - card-10 = PASS（无 MUST_FIX，5 条非阻塞 RISK）；2 次变异抽查真报警；worker 自报 bug 修复（error_code_of 枚举化）经审核师确认正确
+
+进度判断：
+  - 已完成卡：card-00~10 + 06b + 陌生商户 —— 数据层 + 工具层 T1–T16 + 编排层（llm/classifier/状态机/写操作端到端）全部完成
+  - 卡在哪：护栏层首卡 card-11（tests/cases/*.yaml 用例集 + verify.sh 接入，评分主战场）
+  - 风险累积（5 条传导）：
+    1. 【延续 card-09，硬 TODO】agent 直调 dao 未收敛 → 卡 13 必须收口（tools 层审计 helper + AS_OF 访问器）
+    2. L3 无真正放行口（60s 到期无自动执行路径）→ 后续卡
+    3. 会话态进程内存（重启清空、多 worker 不共享）→ demo 口径
+    4. resolve_payee 未计 Turn.tool_calls → 可观测性缺口
+    5. expected_arrival demo 措辞（§5 未定义到账口径）
+
+NEXT_CARD: 11
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏层首卡，用例驱动测试框架 + YAML 用例集 + verify 接入。写测试框架与用例，不实现权限/注入逻辑，flash 够用。
+NEXT_CARD_WARNING: card-11 范围 tests/cases/ + tests/test_cases.py + scripts/verify.sh；按规格 §8 YAML 格式，≥30 条（账单5/转账6/订阅5/卡片4/理财4/越权安全6）；每条断言 intent/tool_calls/tier/must_contain/must_not_contain/executed；test_cases.py 输出通过率+失败 diff；verify.sh 纳入用例测试失败退出码非0。越权用例要覆盖「资源非本人→FORBIDDEN」。
