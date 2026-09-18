@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict
 
 from agent import llm
-from guard import injection
+from guard import facts_check, injection
 from tools.schemas import ToolResult
 
 logger = logging.getLogger(__name__)
@@ -159,45 +158,14 @@ def account_type_cn(account_type: object) -> str:
 
 # ---------------- 回执生成：模板 → LLM 润色 → 数字校验（规格 §4 的 VERIFY_NUMBERS 判据） ----------------
 POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重生成一次 → 仍不过则降级为模板」
-_DATEISH = re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?")
-_NUMBER = re.compile(r"\d[\d,\.]*")
-
-
-def _digits(text: str) -> set[str]:
-    """文本里的数字（去掉千分位/小数点；日期时间先摘掉）—— 与 facts 侧同一套归一化口径。"""
-    return {re.sub(r"\D", "", token) for token in _NUMBER.findall(_DATEISH.sub(" ", text))}
-
-
-def facts_digits(facts: Mapping) -> set[str]:
-    """递归收集 facts 里所有数字的归一化形态（含 `*_yuan` 展示串与嵌套结构）。"""
-    found: set[str] = set()
-
-    def walk(node: object) -> None:
-        if isinstance(node, bool):
-            return
-        if isinstance(node, int):
-            found.add(str(abs(node)))
-        elif isinstance(node, float):
-            found.update(_digits(f"{node}"))
-        elif isinstance(node, str):
-            found.update(_digits(node))
-        elif isinstance(node, Mapping):
-            for value in node.values():
-                walk(value)
-        elif isinstance(node, (list, tuple)):
-            for value in node:
-                walk(value)
-
-    walk(facts)
-    return found
-
-
 def verify_numbers(text: str, facts: Mapping) -> set[str]:
-    """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。这就是幻觉校验的判据。
+    """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。
 
-    卡 13 会把这里换成 `guard/` 的数字校验器；本卡先给出最小可判版本，接口语义保持一致。
+    判据的唯一实现已搬到 `guard/facts_check.verify_numbers`（规格 §7 的冻结签名 `-> (bool, list[str])`）；
+    这里保留"未通过数字集合"的形态给模板层与编排层使用，语义与卡 09 完全一致。
     """
-    return _digits(text) - facts_digits(facts)
+    passed, offenders = facts_check.verify_numbers(text, facts)
+    return set() if passed else set(offenders)
 
 
 class _Polished(BaseModel):
