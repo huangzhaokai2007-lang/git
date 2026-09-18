@@ -876,3 +876,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏层最后一卡：transfer 内存 _TOKENS 切幂等表（端到端接线）+ 处理 2 条接线期 RISK（TOCTOU 锁 + 限流前移）+ 修 flaky（限流表 fixture 清理）+ require_payee_exists 接线。
 NEXT_CARD_WARNING: card-14b-4 范围 tools/transfer.py + guard/tool_guard.py + tests/ + tests/conftest.py；① transfer _TOKENS 切 idempotent_execute，复用 _CONFIRM_LOCK 包「查→产→写」临界区（防 TOCTOU）；② 限流判定前移到 producer 前（先 check_write_rate 再执行，重放不计数）；③ require_payee_exists 接线 preview_transfer；④ 修 flaky：fixture 清理 rate_limit 表（跨用例残留）；⑤ 测试名 test_statements_split_into_ten 改名 12（顺手）。改一个跑一次测试。
+
+## 决策记录 2026-09-19 07:15（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：40adb7d card-14b-4（HEAD）；verify 绿 859 passed
+  - card-14b-4 = require_payee_exists 接线 + 修 flaky（确定性隔离）+ 测试名改 12；两项核心未做（预算尽）
+
+裁决（4 条）：
+  - ① 越权重复留痕口径：**工具层保留自己那笔审计（带 params_json 细节），tool_guard 只写 risk_event**（分工不重叠）。14b-5 调整（当前并存态 assert >=）。
+  - ② scripts/mutcheck_14b.py + card14b_name_sites.py 都入库（可复用工具）。
+  - ③ 14b-5 顺序：先限流前移（②改动小）→ 再 transfer 切幂等表（①风险高）。
+  - ④ 卡13遗留挂账。
+
+NEXT_CARD: 14b-5
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏层真正最后一卡：限流前移（producer 前）+ transfer 切幂等表（_CONFIRM_LOCK 防 TOCTOU）+ 越权留痕分工调整。
+NEXT_CARD_WARNING: card-14b-5 范围 tools/transfer.py + guard/tool_guard.py + tests/；① 限流前移：check_write_rate 移进 idempotent_execute 非重放分支且 producer 前（同步 test_replay 期望）；② transfer _TOKENS 切 idempotent_execute，复用 _CONFIRM_LOCK 包「查→产→写」临界区防 TOCTOU，touch preview/execute 状态翻转 + _rollback_token，改一个跑一次测试；③ 越权留痕：工具层保留审计、tool_guard 只写 risk_event（改并存态 assert >= 为明确分工断言）。
