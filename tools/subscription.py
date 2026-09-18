@@ -263,7 +263,7 @@ def _cancel_locked(sub_id: str, confirm_ref: str) -> ToolResult:
         sub = dao.get_subscription(sub_id)
         if sub is None:
             return _fail(ErrorCode.NOT_FOUND, "找不到该订阅")
-        require_owned("订阅", sub["user_id"], sub["id"])
+        require_owned("订阅", sub["user_id"], sub["id"], tool="_cancel_locked")
         record = check_confirm_ref(confirm_ref, CANCEL_ACTION, sub_id)
         if (cached := confirmed_result(record)) is not None:
             return cached

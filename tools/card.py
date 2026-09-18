@@ -193,7 +193,7 @@ def _manage_locked(req: ManageCardReq) -> ToolResult:
         row = dao.get_card(req.card_id)
         if row is None:
             return _fail(ErrorCode.NOT_FOUND, "找不到该卡片")
-        require_owned("卡片", row["user_id"], row["id"])
+        require_owned("卡片", row["user_id"], row["id"], tool="_manage_locked")
         if not req.confirm_ref:
             return _fail(ErrorCode.FORBIDDEN, "该操作需要确认凭证")
         record = check_confirm_ref(req.confirm_ref, MANAGE_ACTION, req.card_id)

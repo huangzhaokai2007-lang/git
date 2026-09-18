@@ -117,7 +117,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         payee = dao.get_payee(payee_id)
         if payee is None:
             return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
-        require_owned("收款人", payee["user_id"], payee["id"])
+        require_owned("收款人", payee["user_id"], payee["id"], tool="preview_transfer")
         account = dao.get_balance("savings")
         if account is None or account["user_id"] != current_user_id():
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
@@ -264,7 +264,7 @@ def create_aa_request(payee_ids: list[str], amount: int) -> ToolResult:
             row = dao.get_payee(payee_id)
             if row is None:
                 return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
-            require_owned("收款人", row["user_id"], row["id"])
+            require_owned("收款人", row["user_id"], row["id"], tool="create_aa_request")
             payees.append(row)
         trace_id = f"trace-{uuid.uuid4().hex[:12]}"
         request_id = f"aa_{uuid.uuid4().hex[:12]}"

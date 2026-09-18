@@ -56,7 +56,7 @@ def get_balance(account_type: str) -> ToolResult:
     if row is None:
         return _fail(ErrorCode.NOT_FOUND, "没有这类账户")
     try:
-        require_owned("账户", row["user_id"], row["id"])
+        require_owned("账户", row["user_id"], row["id"], tool="get_balance")
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     facts = {**_money_facts(row["balance"], "balance"), **_money_facts(row["available"], "available"),
