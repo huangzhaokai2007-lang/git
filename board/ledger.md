@@ -441,6 +441,27 @@ ACTION: run
 REASON: 待拍口径清理完毕，进工具层最后一卡 card-07（T13–T16 理财/跨场景：风险评估 + 推荐 + 申购赎回 + 送礼计划）。涉及 T15 申购赎回 L2 写 + confirm_ref + 跨场景锁资金，v4-pro。
 NEXT_CARD_WARNING: card-07 范围 tools/wealth.py + tools/cross_scene.py + tests/；T13 风险评级由代码算（R1-R5 规则）；T15 申购赎回走 confirm_ref 确认卡 + 写审计 + 金额整数分；T16 锁资金 + mock 预订；陌生商户实现（T4 补第4条）若本卡顺路做，注意范围与 seed 数据。
 
+## 决策记录 2026-09-19 00:36
+
+事实（自己查到的）：
+  - 最新存档点：87bb9ae board（HEAD）；其下 b84ac38 SPEC-CHANGE / 94177d9 board / d7fa98e card-06（T10-T12 已 PASS）
+  - 工作区：M tests/conftest.py + ?? tools/wealth.py / tools/cross_scene.py / tools/_wealth_risk.py + 4 个测试（**第二个 worker 会话正在写 card-07**，T15 6 failed 未完成）
+  - 事故：本房间 worker 按房间上下文开工「卡06」，write_file 覆盖了已提交的 card-06 文件（subscription.py / card.py / test_tools_subscription.py），已 git checkout 回 HEAD，net 零破坏；card-06 仍完整（d7fa98e + PASS）
+  - 根因：房间聊天滞后于仓库；两个 worker 会话并行（第三次并行打架）
+
+人类决策（用户「今晚自主工作，不需拍板，一口气往后做」）：团队自治推进，@analyst 负责协调两路 worker 不撞车 + 记账
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b/06（工具层 T1-T12 全完成）
+  - 卡在哪：card-07（T13-T16 理财/跨场景）由第二个 worker 会话在写；本房间 worker 改做 card-06b 技术待办
+  - 分工：交互会话 = card-07 唯一 owner（不打断）；本房间 worker = 06b（docstring / 僵尸订阅兜底 / 陌生商户 T4 第4条 / facts 逐字断言 / total_count / 删重复 _now），**confirm_ref 抽 _confirm.py 延后到 card-07 落地**（避免撞 T15）
+
+NEXT_CARD: 07（交互会话在跑）+ 06b（本房间 worker 并行，非重叠文件）
+MODEL: deepseek-v4-pro
+ACTION: run
+REASON: 用户授权自治推进。两 worker 分路：交互会话继续 card-07（不打断），本房间 worker 做 06b 技术待办（避开 card-07 范围文件 + confirm_ref）。都完成后我审 + 提交 + 记账。
+NEXT_CARD_WARNING: 两条 worker 铁律——① 开工前三查（git log / git status / ledger NEXT_CARD），房间聊天不作数；② 只碰自己领的文件，card-07 文件（wealth/cross_scene/_wealth_risk + confirm_ref 逻辑）归交互会话。06b 的 confirm_ref 抽 _confirm.py 等 card-07 落地再做。
+
 
 
 
