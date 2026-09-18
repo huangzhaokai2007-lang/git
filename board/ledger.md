@@ -25,6 +25,7 @@
 | card-12 | 2e03abf | PASS（拦截率 34/34 100%，误报 0/14） | 注入检测护栏：10 确定性规则 + 归一化解混淆 + wrap_untrusted + 34 攻击串回归；verify 绿（799 passed）。**待 12b 接线 + 铁律7收口** |
 | card-12b | b6eee07 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 注入护栏接线（CLASSIFY 前 detect→REFUSE 零 LLM）+ 铁律7 收口（sanitize_facts 包裹）+ verify 第5段 SKIP→通过；verify 绿（805 passed）。2 次变异抽查真报警 |
 | card-13 | f100002 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 数字校验器 facts_check（千分位/万元/百分比/块元/分↔元归一化 + 重生成再降级 HALLUCINATION_BLOCKED）；verify 绿（831 passed）。3 次变异抽查真报警（拦截/万元/模板转发） |
+| card-14a | 7361c99 | PASS（越权校验收口 + 参数边界，852 passed） | 越权统一 tool_guard + 金额正整数分/上限/收款人存在边界，工具侧转发零回归；5/5 变异真报警。**待 14b 补 risk_event 枚举 + 限流 + 幂等落库** |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -734,3 +735,23 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 勘察已完成，3 条口径裁决后，14a 剩下的是机械搬迁（tool_guard 统一入口 + _query_common 转发）+ 对照 831 基线，可一次跑完。
 NEXT_CARD_WARNING: 同上轮 14a WARNING。追加：risk_event.factor="unauthorized_resource"；越权双写 audit(tool=工具名)+risk_event(trace_id)；金额超限 OVER_LIMIT/非正整数 INVALID_ARGUMENT；_query_common 旧函数改转发保证 39 处 FORBIDDEN 错误码文案不变；resolve_payee 空候选保持反问不改 NOT_FOUND。
+
+## 决策记录 2026-09-19 05:20（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：7361c99 card-14a（HEAD）；verify 绿 852 passed
+  - card-14a = 越权统一 tool_guard + 参数边界，5/5 变异真报警；risk_event 留痕受 DDL 拒绝只留 audit 一笔
+
+裁决（6 条待拍板，逐条拍板）：
+  - ① risk_event.factor CHECK 加 unauthorized_resource：**扩范围到 data 层，14b 一起改 schema**（加枚举 + 幂等表 + 限流表）。
+  - ② 39 处调用点补工具名（机械收尾）→ **并进 14b**。
+  - ③ CLAUDE.md 补 tools/→guard/ 一行：**写入被拒（受保护文件），待用户醒来批准**，记待办不阻塞。
+  - ④ 金额两层上限并存（tool_guard 5,000,000 分硬上限 vs transfer 50,000 分业务单笔）→ 口径不同来源不同，合理并存，记台账。
+  - ⑤ require_payee_exists 不统一替换 preview_transfer（保持 NOT_FOUND 文案不变，避免破基线），留 guard 通用。
+  - ⑥ 卡 13 遗留待拍板继续挂账。
+
+NEXT_CARD: 14b
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14a 越权+参数边界收官，14b 做存储类（限流 + 幂等落库 + risk_event 枚举 + 39 处补工具名）。扩范围到 data 层（schema/dao）。
+NEXT_CARD_WARNING: card-14b 范围 guard/tool_guard.py + data/schema.sql + data/dao.py + tools/*.py + tests/；① data/schema.sql risk_event.factor CHECK 加 unauthorized_resource；② 新增幂等表（token 落库，重启仍有效）+ 限流计数表；③ 限流同用户 60s 写操作>5 次拒绝（算新写调用含被拒尝试，幂等重放不算）；④ 39 处调用点补 tool 名（越权双写齐全）；⑤ dao 加幂等/限流原语（insert_idempotent/get_idempotent、incr_rate_limit）；单测：幂等落库重启有效 + 重放同 token 返回同结果 + 限流第 6 次拒绝。
