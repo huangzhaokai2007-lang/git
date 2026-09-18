@@ -1,0 +1,239 @@
+"""编排层回执模板（卡 09）：**数字一律靠占位符从 `ToolResult.facts` 注入**，模板里不写死任何业务数字。
+
+铁律 1/2 的落点：
+- 回执优先用这里的模板（`render`），LLM 只能给措辞润色、**不得改动任何数字**（编排层用校验器兜住）。
+- 模板正文只有文字与占位符；占位符缺键会**直接报错**（宁可炸也不静默留白 —— 静默留白会变成"看起来对"的幻觉）。
+- 反问/拒答/未接通/降级模板都不含任何业务数字（它们是"没有事实包"的路径）。
+
+覆盖范围：卡 09 只接 8 个 L0 只读意图（`READ_INTENTS` 在 orchestrator 里定义，这里只管渲染）。
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import re
+from typing import Mapping
+
+from pydantic import BaseModel, ConfigDict
+
+from agent import llm
+from tools.schemas import ToolResult
+
+logger = logging.getLogger(__name__)
+
+# ---------------- 8 个只读意图的回执模板（占位符全部来自 facts） ----------------
+#: 余额：facts 键见 tools/query.py T1（balance_yuan / available_yuan / as_of；account_type_cn 由编排层按
+#: **非数字**标签注入，校验器只认数字，标签不影响校验）
+T_BALANCE = "您的{account_type_cn}账户余额为 {balance_yuan} 元，可用余额 {available_yuan} 元（截至 {as_of}）。"
+
+#: 流水：facts 键见 T2（total_count / page_out_sum_yuan / page_in_sum_yuan / items[]）
+#: 注意：T2 的 facts **没有** date_from/date_to 键 → 模板不得印时间范围（否则数字校验会把它当幻觉）
+T_TXN = "共查到 {total_count} 笔交易，其中支出合计 {page_out_sum_yuan} 元、收入合计 {page_in_sum_yuan} 元。"
+
+#: 账单分析：facts 键见 T3（period / total_yuan / vs_prev_pct / groups[]）
+T_ANALYSIS = "{period} 共支出 {total_yuan} 元，环比 {vs_prev_pct}%。"
+
+#: 异常检测：facts 键见 T4（scanned_count / anomaly_count / items[]）
+T_ANOMALY = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔异常，请留意。"
+
+#: 账单报告：facts 键见 T5（period / out_sum_yuan / in_sum_yuan / net_yuan；markdown 由编排层附加）
+T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yuan} 元，净支出 {net_yuan} 元。"
+
+#: 订阅列表：facts 键见 T10（subscription_count / zombie_count）
+T_SUBSCRIPTION = "当前有 {subscription_count} 个订阅，其中 {zombie_count} 个疑似僵尸订阅。"
+
+#: 理财推荐：facts 键见 T14（risk_level / item_count）
+T_WEALTH = "按风险等级 {risk_level} 为您推荐 {item_count} 个产品。"
+
+#: 卡查询：§2 没有读卡工具 → 未接通（无数字的模板，见 `T_UNSUPPORTED`）。
+
+#: 反问（缺槽/低置信度）：只列缺失项的中文名，不含任何业务数字
+T_CLARIFY_SLOT = "我需要再确认一下：请补充{slots_cn}。"
+T_CLARIFY_LOW_CONFIDENCE = "没太理解您的意思，能再说得具体一点吗？（例如「查一下余额」「上个月花了多少」）"
+T_CLARIFY_TOO_MANY = "连续两次没能确认您的需求，我先转人工客服帮您处理。"
+
+#: 拒答（unsafe_request）：模板化，不作任何工具调用
+T_REFUSE = "这个请求我没法执行：{unsafe_reason}。我只能办理账户查询、账单分析等正常银行业务。"
+
+#: 未接通（写操作类意图或没有对应工具的意图，如 card_query）
+T_UNSUPPORTED = "「{intent_cn}」这个功能还没接通，本版本暂时只支持查询类操作。"
+
+#: 工具失败：只报错误码与工具自己的解释（工具消息里的数字本就来自 facts），不润色、不补数字
+T_TOOL_ERROR = "这次没能查到您要的信息（{error_code}）：{detail}"
+
+#: 数字校验未通过时的降级提示（与卡 13 的口径一致：降级为模板回执 + audit 记 HALLUCINATION_BLOCKED）
+T_DEGRADED_NOTE = "（以下为系统直接给出的结果）"
+
+#: 意图中文名（用于反问/未接通的措辞；纯文案，不含数字）
+INTENT_CN: dict[str, str] = {
+    "balance_query": "余额查询", "txn_query": "交易流水查询", "bill_analysis": "账单分析",
+    "anomaly_check": "异常交易检测", "bill_report": "账单报告", "subscription_list": "订阅查询",
+    "card_query": "卡片查询", "wealth_recommend": "理财推荐", "transfer_single": "转账",
+    "transfer_scheduled": "预约转账", "aa_collect": "AA 收款", "subscription_cancel": "取消订阅",
+    "subscription_remind": "订阅提醒", "card_apply": "申请新卡", "card_limit_adjust": "调整限额",
+    "card_lock": "锁卡", "card_unlock": "解锁", "card_report_lost": "挂失", "risk_assess": "风险测评",
+    "wealth_buy": "理财申购", "wealth_redeem": "理财赎回", "gift_plan": "送礼计划",
+    "smalltalk": "闲聊", "out_of_scope": "越界请求", "unsafe_request": "不安全请求",
+}
+
+#: 槽位中文名（反问时用；**不做任何单位换算** —— 金额单位口径留 card-10 拍板）
+SLOT_CN: dict[str, str] = {
+    "account_type": "账户类型（储蓄/信用）", "date_from": "起始日期", "date_to": "结束日期",
+    "period": "时间范围（如 2026-09 或 2026）", "category": "消费类别", "min_amount": "最低金额",
+    "limit": "返回条数", "group_by": "分组方式", "kind": "报告类型", "status": "订阅状态",
+    "card_id": "卡号", "risk_level": "风险等级", "horizon_days": "投资期限（天）", "amount": "金额",
+    "product_id": "产品", "answers": "问卷答案", "contact": "联系人", "date": "日期", "budget": "预算",
+    "payee": "收款人", "payee_ids": "收款人列表", "schedule": "预约时间", "split_with": "分账对象",
+    "sub_id": "订阅", "card_type": "卡片类型",
+}
+
+TEMPLATES: dict[str, str] = {
+    "balance_query": T_BALANCE, "txn_query": T_TXN, "bill_analysis": T_ANALYSIS,
+    "anomaly_check": T_ANOMALY, "bill_report": T_REPORT_HEAD, "subscription_list": T_SUBSCRIPTION,
+    "wealth_recommend": T_WEALTH,
+}
+
+
+class TemplateError(RuntimeError):
+    """模板渲染失败（缺占位符 / 键名写错）。**宁可炸**也不许静默留白（静默留白=幻觉的温床）。"""
+
+
+def render(intent: str, facts: Mapping[str, object]) -> str:
+    """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
+    template = TEMPLATES.get(intent)
+    if template is None:
+        raise TemplateError(f"没有为 {intent!r} 定义回执模板")
+    try:
+        return template.format(**facts)
+    except KeyError as exc:                                  # 缺占位符：这是代码 bug，必须暴露
+        raise TemplateError(f"{intent!r} 模板缺少 facts 键：{exc}") from exc
+
+
+def clarify_missing(missing: list[str]) -> str:
+    """缺槽反问：把缺失的槽位名换成人话（无业务数字）。"""
+    names = "、".join(SLOT_CN.get(slot, slot) for slot in missing)
+    return T_CLARIFY_SLOT.format(slots_cn=names)
+
+
+def clarify_low_confidence() -> str:
+    return T_CLARIFY_LOW_CONFIDENCE
+
+
+def clarify_to_human() -> str:
+    return T_CLARIFY_TOO_MANY
+
+
+def refuse(unsafe_reason: str | None) -> str:
+    return T_REFUSE.format(unsafe_reason=(unsafe_reason or "该操作不在允许范围内").strip())
+
+
+def unsupported(intent: str) -> str:
+    return T_UNSUPPORTED.format(intent_cn=INTENT_CN.get(intent, intent))
+
+
+def tool_error(error_code: str | None, detail: str) -> str:
+    return T_TOOL_ERROR.format(error_code=error_code or "ERROR", detail=detail)
+
+
+def account_type_cn(account_type: object) -> str:
+    """账户类型中文（模板占位符用；未知值原样返回，不猜）。"""
+    return {"savings": "储蓄", "credit": "信用"}.get(str(account_type), str(account_type))
+
+
+# ---------------- 回执生成：模板 → LLM 润色 → 数字校验（规格 §4 的 VERIFY_NUMBERS 判据） ----------------
+POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重生成一次 → 仍不过则降级为模板」
+_DATEISH = re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?")
+_NUMBER = re.compile(r"\d[\d,\.]*")
+
+
+def _digits(text: str) -> set[str]:
+    """文本里的数字（去掉千分位/小数点；日期时间先摘掉）—— 与 facts 侧同一套归一化口径。"""
+    return {re.sub(r"\D", "", token) for token in _NUMBER.findall(_DATEISH.sub(" ", text))}
+
+
+def facts_digits(facts: Mapping) -> set[str]:
+    """递归收集 facts 里所有数字的归一化形态（含 `*_yuan` 展示串与嵌套结构）。"""
+    found: set[str] = set()
+
+    def walk(node: object) -> None:
+        if isinstance(node, bool):
+            return
+        if isinstance(node, int):
+            found.add(str(abs(node)))
+        elif isinstance(node, float):
+            found.update(_digits(f"{node}"))
+        elif isinstance(node, str):
+            found.update(_digits(node))
+        elif isinstance(node, Mapping):
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, (list, tuple)):
+            for value in node:
+                walk(value)
+
+    walk(facts)
+    return found
+
+
+def verify_numbers(text: str, facts: Mapping) -> set[str]:
+    """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。这就是幻觉校验的判据。
+
+    卡 13 会把这里换成 `guard/` 的数字校验器；本卡先给出最小可判版本，接口语义保持一致。
+    """
+    return _digits(text) - facts_digits(facts)
+
+
+class _Polished(BaseModel):
+    """润色输出（最小 schema：只允许一个字段，多余字段即校验失败）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reply: str
+
+
+POLISH_SYSTEM = (
+    "你是银行智能体的措辞润色器。输入是一段已经生成好的回执与它的事实包。"
+    "任务：只调整措辞让它更自然，**严禁改动、删除、新增任何数字**（金额、笔数、百分比、日期都不许动），"
+    '也不许添加事实包里没有的信息。只输出 JSON：{"reply": "润色后的文本"}。'
+)
+
+
+def polish(text: str, facts: Mapping) -> str | None:
+    """让 LLM 润色措辞；LLM 不可用或返回空 → `None`（**读请求不因润色失败而失败**）。"""
+    payload = json.dumps({"reply": text, "facts": facts}, ensure_ascii=False, default=str)
+    try:
+        out = llm.chat_json(POLISH_SYSTEM, payload, _Polished)
+    except llm.LLMUnavailable:
+        logger.warning("润色不可用（LLM 不可用），改用模板原样回执")
+        return None
+    return out.reply.strip() or None
+
+
+def _template_values(intent: str, slots: Mapping, result: ToolResult) -> dict:
+    """模板占位符取值：**数字只从 facts 来**，编排层只补非数字标签（如账户类型中文名）。"""
+    values: dict = dict(result.facts)
+    if intent == "balance_query":
+        values["account_type_cn"] = account_type_cn(slots.get("account_type") or "savings")
+    return values
+
+
+def compose_reply(intent: str, slots: Mapping, result: ToolResult) -> tuple[str, bool, int]:
+    """模板 → LLM 润色 → 数字校验。返回 `(回执, 是否因幻觉降级, 润色尝试次数)`。
+
+    降级条件（卡 13 口径）：润色结果出现 facts 之外的数字 → 重生成一次 → 仍不过 → 回模板原样文本。
+    """
+    reply = render(intent, _template_values(intent, slots, result))
+    if intent == "bill_report" and result.data.get("markdown"):
+        reply = f"{reply}\n\n{result.data['markdown']}"
+    hallucinated, attempts = False, 0
+    for _ in range(POLISH_ATTEMPTS):
+        attempts += 1
+        candidate = polish(reply, result.facts)
+        if candidate is None:
+            break
+        if not verify_numbers(candidate, result.facts):
+            return candidate, False, attempts
+        hallucinated = True
+        logger.warning("润色后出现 facts 之外的数字，第 %s 次重生成：intent=%s", attempts, intent)
+    return reply, hallucinated, attempts
