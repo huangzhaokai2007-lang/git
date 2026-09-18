@@ -755,3 +755,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14a 越权+参数边界收官，14b 做存储类（限流 + 幂等落库 + risk_event 枚举 + 39 处补工具名）。扩范围到 data 层（schema/dao）。
 NEXT_CARD_WARNING: card-14b 范围 guard/tool_guard.py + data/schema.sql + data/dao.py + tools/*.py + tests/；① data/schema.sql risk_event.factor CHECK 加 unauthorized_resource；② 新增幂等表（token 落库，重启仍有效）+ 限流计数表；③ 限流同用户 60s 写操作>5 次拒绝（算新写调用含被拒尝试，幂等重放不算）；④ 39 处调用点补 tool 名（越权双写齐全）；⑤ dao 加幂等/限流原语（insert_idempotent/get_idempotent、incr_rate_limit）；单测：幂等落库重启有效 + 重放同 token 返回同结果 + 限流第 6 次拒绝。
+
+## 决策记录 2026-09-19 05:35（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：852255c board 记账（HEAD）；verify 绿 852 passed
+  - card-14b worker 勘察完成，报 3 条口径，未留半成品
+
+裁决（3 条口径，全采纳 worker 建议）：
+  - ① 限流窗口：滚动 60s（按写入行时间戳计数，与 velocity 因子同口径）。
+  - ② rate_limit 计数时机：尝试即计数（含越权/非法参数），**先计数、再校验**（被拒尝试也计，防刷）。
+  - ③ 卡 13 遗留待拍板继续挂账。
+
+NEXT_CARD: 14b（继续，口径已定）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14b 勘察完成，口径已定，剩下是机械执行（schema/DAO/tool_guard/39处补tool/单测）。
+NEXT_CARD_WARNING: 同上一轮 14b WARNING。追加：限流滚动60s；先计数再校验；DAO 沿用 _insert 风格别写裸 SQL。
