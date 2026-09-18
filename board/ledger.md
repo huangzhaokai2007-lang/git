@@ -802,3 +802,23 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14b 实现完成但门禁红（规格冻结守卫），授权 SPEC-CHANGE 加表 + 同步测试 + 39处补名 + 变异自检 + transfer 快照切落库，一次性收口。
 NEXT_CARD_WARNING: 同 14b WARNING。追加：授权改规格 §DDL 加 2 表 + tests/test_db.py 三处 10→12；39 处补 tool 名；变异自检建 scripts/mutcheck_14b.py；transfer 内存 _TOKENS 切幂等表。
+
+## 决策记录 2026-09-19 06:15（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：7361c99 card-14a（HEAD）；verify 852 passed（14a 独立复跑绿）
+  - card-14a = PASS（无 MUST_FIX，4 条非阻塞 RISK）；3 次变异抽查真报警
+
+RISK 传导（4 条）：
+  1. require_payee_exists 用 find_payee 模糊子串（不搜 id 列），有效 id payee_0001 被误判 NOT_FOUND → **14b 收尾顺手修**（改 id 精确查找，已派）
+  2. 金额两层上限并存（tool_guard 5M vs transfer 50k）→ 记台账
+  3. risk_event.factor 枚举超出 DDL CHECK → 14b SPEC-CHANGE 加表时一并加枚举
+  4. require_owned 39 处 tool 名传播未完成 → 14b 收尾
+
+reviewer 也确认：14b 的 7 个失败根因 = 我授权的 SPEC-CHANGE（加表）打破「schema 与规格逐字一致」守卫，worker 正在同步规格 DDL，不影响 14a PASS。
+
+NEXT_CARD: 14b（收尾继续）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14a PASS 落定；14b 收尾（加表+同步+39处补名+变异+快照切落库+require_payee_exists 修 id 查找）继续。
+NEXT_CARD_WARNING: 同 14b WARNING。追加：require_payee_exists 改 id 精确查找（补 payee_0001 不被误拒的测试）。
