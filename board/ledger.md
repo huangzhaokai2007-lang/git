@@ -17,6 +17,7 @@
 | card-04b | 7d86b8d | PASS（无 MUST_FIX，4 条 RISK） | 工具层清理：共享 helpers 单份化 + 拆测试 ≤300 + DAO get_payee/update_account_balance + TOCTOU 锁；verify 绿（377 passed）。2 条变异抽查真报警、拆分零丢用例（旧 96→新 102） |
 | card-05b | ad156c9 | PASS（无 MUST_FIX，3 条 RISK） | 拆源文件收口 300 行 + VELOCITY 常量改名；verify 绿（389 passed）。全部源/测试文件首次 ≤300、依赖单向禁反向、零丢用例（178→190，+12） |
 | card-06 | d7fa98e | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T10–T12 订阅/卡管理（confirm_ref 确认闭环 + L2/L3 双因子）；verify 绿（520 passed）。18/18 变异抽查真报警；8 文件指纹零漂移 |
+| card-07 | f2f5235 | PASS（无 MUST_FIX，3 条非阻塞 RISK） | 工具层 T13–T16 理财/跨场景（风险测评纯代码计分 + 推荐过滤 + 申购赎回 + 送礼锁资金）；verify 绿（649 passed）。3 次变异抽查真报警。**工具层 T1–T16 全部完成** |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -495,3 +496,21 @@ analyst 这个 profile 有两个活跃会话：1v1「Bot Chat」（session 20260
 用户拍板：两会话共享记忆、各自独立进程，但分工必须钉死——**只有 1v1 Bot Chat 会话负责记账（board/ledger.md）、git 提交、决策推进、派活**；「Group: Agent Bank」会话只做群聊应答，绝不写账本、不 git 提交、不派活、不推进 card。
 
 此条为唯一事实源。任何 analyst 会话（含群会话）醒来三查时必读到此条，违反即越界。
+
+## 决策记录 2026-09-19 02:40（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：ca3db11 board: card-07 记账（HEAD）；其下 f2f5235 card-07
+  - 工作区：clean；verify 绿 649 passed
+  - card-07 = PASS（无 MUST_FIX，3 条非阻塞 RISK）；3 次变异抽查真报警；_wealth_risk.py 变异残留已修
+
+进度判断：
+  - 已完成卡：card-00/00b/01/02/03/04/05/04b/05b/06/07 + 06b技术待办 + 陌生商户规则 —— **工具层 T1–T16 全部完成并通过审核**
+  - 卡在哪：工具层收官，进入编排层首卡 card-08（LLM 客户端 + 意图分类器）
+  - 风险累积：3 条 RISK 传导 07b：① tools 层直写 SQL（wealth/cross_scene 用 dao.connection 裸 SQL，绕过 DAO 业务函数）② _score 年龄≥200 未处理（StopIteration 未捕获）③ T14 签名放宽（3 参数改可选，规格未标注）
+
+NEXT_CARD: 08
+MODEL: deepseek-flash
+ACTION: run
+REASON: 工具层 T1–T16 全部收官，进入编排层 card-08（llm.py + classifier.py 意图识别）。LLM 客户端 + 意图分类器 + 假 LLM 单测，不涉及权限/业务判断，flash 够用。全团队已切 flash。
+NEXT_CARD_WARNING: card-08 范围 agent/llm.py + agent/classifier.py + tests/test_classifier.py；llm.py 用 openai SDK + response_format=json_object + Pydantic 二次校验 + 超时20s重试2次；classifier 只做意图识别+槽位，禁权限/业务判断；单测用假 LLM monkeypatch（正常/JSON非法/超时/字段缺失），不依赖真网络。
