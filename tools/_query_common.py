@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date, timedelta
 
 from pydantic import BaseModel, ValidationError
 
@@ -125,6 +126,23 @@ def set_session_id(session_id: str | None) -> None:
     """
     global _SESSION_ID
     _SESSION_ID = session_id
+
+
+def month_windows(start: date, end: date) -> list[tuple[str, str]]:
+    """把日期区间切成**按月**的小窗口（闭区间，返回 ISO 字符串对）。
+
+    为什么共享单份：DAO 单次翻页上限 `MAX_LIMIT`（500 行），大窗口直接取会被**静默截断**——
+    查询侧会漏算统计口径、订阅侧会误判僵尸订阅（卡 06 台账 RISK-3）。卡 06b 把它从
+    `_query_analysis` 提到这里，两个调用方共用一份，避免两份实现漂移。
+    """
+    windows, cursor = [], start
+    while cursor <= end:
+        following = date(cursor.year + cursor.month // 12, cursor.month % 12 + 1, 1)
+        last = min(following - timedelta(days=1), end)
+        windows.append((cursor.isoformat(), last.isoformat()))
+        cursor = last + timedelta(days=1)
+    return windows
+
 
 def current_session_id() -> str:
     return _SESSION_ID or f"session-{current_user_id()}"

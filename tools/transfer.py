@@ -67,10 +67,6 @@ def _now() -> datetime:
     return datetime.now()
 
 
-def _now() -> datetime:
-    """取当前时间（单独抽出来是为了让测试能钉住"凌晨/短时高频"这类时间相关口径）。"""
-    return datetime.now()
-
 def resolve_payee(query: str) -> ToolResult:
     """T6 收款人解析（L0）。data: `candidates[{id,name,masked_phone}]` / `ambiguous`。
 

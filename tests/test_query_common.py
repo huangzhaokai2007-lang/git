@@ -1,8 +1,12 @@
-"""任务卡 04b 单测：`tools/_query_common.py` 共享 helper 的契约（会话用户 / 归属断言 / 金额展示 / 枚举）。"""
+"""任务卡 04b/05b 单测：`tools/_query_common.py` 共享 helper 的契约（会话用户 / 归属断言 / 金额展示 / 枚举）。
+
+卡 06b 追加：**facts 逐字断言**工具 —— 补上审核 RISK-1 的漏洞（`numbers()` 会把 `1,234.56` 与
+`123,456` 归一成同一串，挡不住量级错）。本文件是所有查询类测试的公共依赖，故 helper 放这里。"""
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -82,3 +86,30 @@ def test_owned_account_ids_is_fail_closed(foreign: Path) -> None:
     owned = _query_common._owned_account_ids()
     assert FOREIGN_ACCOUNT not in owned
     assert owned == {CREDIT_ID}
+
+
+# ---------------- 卡 06b：facts 逐字断言（补审核 RISK-1） ----------------
+
+#: 保留千分位与小数点的数字 token（与 conftest 里归一化的 `_NUMBER` 刻意不同）
+_VERBATIM_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+_VERBATIM_DATE = re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?)?")
+
+
+def assert_facts_verbatim(text: str, facts: dict) -> None:
+    """**逐字**断言：text 里每个数字 token 必须原样出现在 facts 里（不剥千分位/小数点）。
+
+    与 `conftest.assert_covered` 的区别：那边把 `1,234.56` 与 `123,456` 归一成同一串，
+    量级错（少/多一个 0、丢了小数点）照样通过；这里逐字比对，量级错必红（卡 04 审核 RISK-1）。
+    """
+    haystack = json.dumps(facts, ensure_ascii=False)
+    tokens = set(_VERBATIM_NUMBER.findall(_VERBATIM_DATE.sub(" ", text)))
+    missing = sorted(token for token in tokens if token not in haystack)
+    assert not missing, f"这些数字没有逐字出现在 facts 里：{missing}｜文本：{text[:200]}"
+
+
+def test_verbatim_assertion_catches_a_magnitude_error() -> None:
+    """自证这条断言有牙齿：把「1,234.56 元」写成「123,456 元」时，归一化断言会放过、逐字断言必红。"""
+    facts = {"amount": 123_456, "amount_yuan": "1,234.56"}
+    assert_facts_verbatim("本期支出合计：1,234.56 元。", facts)          # 正确：逐字命中
+    with pytest.raises(AssertionError):
+        assert_facts_verbatim("本期支出合计：123,456 元。", facts)      # 量级错：逐字不命中

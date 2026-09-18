@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from data.seed import SAVINGS_ID
 from tools import subscription as sub
 from tools.schemas import ErrorCode
 
@@ -23,6 +24,31 @@ CANCELLED_ID = "sub_0005"       # 健悦健身（seed 里就是已取消）
 
 def _ref(action: str = sub.CANCEL_ACTION, target: str = "sub_0001") -> str:
     return sub.issue_confirm_ref(action, target)
+
+
+def _bulk_txn_rows(path: Path, count: int, ts: str = "2026-08-20T12:00:00") -> None:
+    """往僵尸窗口内的某个月灌 `count` 笔流水（直接写库，用于触发/验证单窗上限兜底）。"""
+    write_sql(path, [
+        ("INSERT INTO txn (id, account_id, ts, amount, direction, counterparty, category, channel,"
+         " memo, balance_after) VALUES (?, ?, ?, -100, 'out', '灌水订阅商户', '订阅', '代扣', NULL, 0)",
+         (f"txn-overflow-{index:04d}", SAVINGS_ID, ts)) for index in range(count)])
+
+
+def test_t10_zombie_window_within_the_dao_page_cap(seeded: Path) -> None:
+    """正向：窗口内数据没超 DAO 单次 500 行上限 → 正常返回（兜底不误伤）。"""
+    _bulk_txn_rows(seeded, 50)
+    assert sub.list_subscriptions().ok
+
+
+def test_t10_zombie_window_over_the_dao_page_cap_is_refused(seeded: Path) -> None:
+    """卡 06b 兜底：单月超过 500 行上限 → `TOO_MANY_ROWS`。
+
+    没有这道检查时 DAO 会**静默截断**，`charged` 集合会漏商户 → 把有扣费的订阅误判成僵尸。
+    """
+    _bulk_txn_rows(seeded, 600)
+    result = sub.list_subscriptions()
+    assert result.ok is False and result.error_code == "TOO_MANY_ROWS"
+    assert result.data is None and result.facts == {}
 
 
 # ---------------- T10 list_subscriptions ----------------

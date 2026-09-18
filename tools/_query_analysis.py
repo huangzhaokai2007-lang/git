@@ -17,7 +17,7 @@ from datetime import date, datetime, timedelta
 
 from data import dao
 from tools._query_common import (
-    PCT_TOTAL, ToolError, _owned_account_ids,
+    PCT_TOTAL, ToolError, _owned_account_ids, month_windows,
 )
 from tools.schemas import (
     ErrorCode, MAX_LIMIT,
@@ -47,13 +47,8 @@ def _previous_period(period: str) -> str:
     return f"{previous.year:04d}-{previous.month:02d}" if len(period.strip()) > 4 else f"{previous.year:04d}"
 
 def _month_windows(start: date, end: date) -> list[tuple[str, str]]:
-    """把日期区间切成按月的小窗口（DAO 单次翻页上限 500 行，按窗口取可绕开截断）。"""
-    windows, cursor = [], start
-    while cursor <= end:
-        last = min(_next_month(cursor) - timedelta(days=1), end)
-        windows.append((cursor.isoformat(), last.isoformat()))
-        cursor = last + timedelta(days=1)
-    return windows
+    """（卡 06b）转发到 `tools._query_common.month_windows`：单份实现，订阅侧同样复用。"""
+    return month_windows(start, end)
 
 def _owned_txns(date_from: str, date_to: str) -> list[dict]:
     """取区间内**属于当前用户账户**的全部流水（按月分窗，条数超上限则报 TOO_MANY_ROWS）。
@@ -99,17 +94,23 @@ def _spend_groups(rows: list[dict], group_by: str) -> tuple[dict[str, int], int]
             totals[key] = totals.get(key, 0) + -row["amount"]
     return totals, sum(totals.values())
 
-def _anomalies(rows: list[dict], series: list[tuple[datetime, int]]) -> list[dict]:
-    """三条规则（口径见文件头常量）；severity 由**命中规则条数**决定：≥2 high，1 medium。
+def _anomalies(rows: list[dict], series: list[tuple[datetime, int]],
+               merchant_index: dict[str, list[datetime]] | None = None) -> list[dict]:
+    """四条规则（口径见文件头常量）；severity 由**命中规则条数**决定：≥2 high，1 medium。
 
     `series` 是基准序列（该用户**支出**流水的 (时间, 绝对金额)，按时间升序）；
+    `merchant_index` 是基准池里每个 counterparty 的交易时间列表（升序），用于第 4 条规则
+    「陌生商户：过去 `NEW_MERCHANT_DAYS` 天内该 counterparty 无交易（不含本笔）」。
+
     每笔交易的基准是它自己"近 90 天"（不含本笔）的均值 —— 规格字面口径，
     与"用哪个账期来看"无关，故同一笔交易在任何账期下判定一致。
     """
     velocity = _velocity_hits(rows)
+    index = merchant_index or {}
     items: list[dict] = []
     for row in sorted(rows, key=lambda item: (item["ts"], item["id"])):
-        baseline = _baseline_for(_dt(row["ts"]), series)
+        moment = _dt(row["ts"])
+        baseline = _baseline_for(moment, series)
         hits = []
         if baseline > 0 and -row["amount"] > baseline * AMOUNT_RATIO_THRESHOLD:
             hits.append(REASON_AMOUNT_JUMP)
@@ -117,11 +118,32 @@ def _anomalies(rows: list[dict], series: list[tuple[datetime, int]]) -> list[dic
             hits.append(REASON_NIGHT)
         if row["id"] in velocity:
             hits.append(REASON_VELOCITY)
+        if row["counterparty"] and _is_new_merchant(index.get(row["counterparty"], [moment]), moment):
+            hits.append(REASON_NEW_MERCHANT)
         if hits:
             items.append({"txn_id": row["id"], "reason": "、".join(hits),
                           "severity": "high" if len(hits) > 1 else "medium",
                           "amount": row["amount"], "baseline_mean": baseline})
     return items
+
+
+def _is_new_merchant(times: list[datetime], moment: datetime) -> bool:
+    """本笔之前 `NEW_MERCHANT_DAYS` 天内该 counterparty 没有过交易 → 陌生商户（规格 T4 第 4 条）。"""
+    index = bisect_left(times, moment)                      # 严格早于本笔的笔数
+    if index == 0:
+        return True
+    return times[index - 1] < moment - timedelta(days=NEW_MERCHANT_DAYS)
+
+
+def _merchant_index(rows: list[dict]) -> dict[str, list[datetime]]:
+    """基准池里 counterparty → 交易时间（升序）的索引，供陌生商户规则二分查询。"""
+    index: dict[str, list[datetime]] = {}
+    for row in rows:
+        if row["counterparty"]:
+            index.setdefault(row["counterparty"], []).append(_dt(row["ts"]))
+    for times in index.values():
+        times.sort()
+    return index
 
 def _baseline_series(rows: list[dict]) -> list[tuple[datetime, int]]:
     """基准序列：**支出**流水的 (时间, 绝对金额)，时间升序（供二分取窗口）。
@@ -141,13 +163,13 @@ def _baseline_for(moment: datetime, series: list[tuple[datetime, int]]) -> int:
     window = series[begin:stop]
     return sum(amount for _, amount in window) // len(window) if window else 0
 
-def _scan(start: date, end: date) -> tuple[list[dict], list[tuple[datetime, int]]]:
-    """分析期流水 + 基准序列：一次取 [分析期起点 - BASELINE_DAYS 天, 分析期终点] 的流水，
-    期内的作扫描对象，全部作基准池（保证每笔都能看到自己往前 90 天的样本）。
+def _scan(start: date, end: date) -> tuple[list[dict], list[tuple[datetime, int]], dict[str, list[datetime]]]:
+    """分析期流水 + 基准序列 + 商户索引：一次取 [分析期起点 - BASELINE_DAYS 天, 分析期终点] 的流水，
+    期内的作扫描对象，全部作基准池（保证每笔都能看到自己往前 90 天的样本，陌生商户规则同样靠它）。
     """
     pool = _owned_txns((start - timedelta(days=BASELINE_DAYS)).isoformat(), end.isoformat())
     inside = [row for row in pool if start.isoformat() <= row["ts"][:10] <= end.isoformat()]
-    return inside, _baseline_series(pool)
+    return inside, _baseline_series(pool), _merchant_index(pool)
 
 def _is_night(ts: str) -> bool:
     hour = _dt(ts).hour
@@ -205,5 +227,8 @@ CYCLE_LABELS = {"monthly": "每月", "yearly": "每年"}
 KIND_LABELS = {"monthly": "月度", "yearly": "年度"}
 
 REASON_AMOUNT_JUMP, REASON_NIGHT, REASON_VELOCITY = "金额显著高于近期均值", "凌晨时段交易", "同商户短时密集交易"
+#: T4 第 4 条规则（规格 §2 T4 备注，SPEC-CHANGE b84ac38 定稿）：过去 90 天该 user 无交易的 counterparty
+NEW_MERCHANT_DAYS = 90
+REASON_NEW_MERCHANT = "陌生商户交易"
 
 _PERIOD_RE = re.compile(r"^(\d{4})(?:-(\d{2}))?$")

@@ -39,7 +39,7 @@ from data.db import transaction
 from data.seed import AS_OF
 from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, _owned_account_ids, current_user_id,
-    current_session_id, require_owned,
+    current_session_id, month_windows, require_owned,
 )
 from tools.schemas import MAX_LIMIT, ErrorCode, ToolResult
 
@@ -189,15 +189,28 @@ def _months_ago(day: date, months: int) -> date:
 
 
 def _zombie_ids(subs: list[dict]) -> list[str]:
-    """疑似僵尸订阅 id：窗口内没有对应使用记录的订阅（口径见文件头，锚点用 `AS_OF` 保证跨天可复现）。"""
-    floor = _months_ago(AS_OF, ZOMBIE_WINDOW_MONTHS).isoformat()
-    page = dao.list_txn(floor, AS_OF.isoformat(), limit=MAX_LIMIT)
-    owned = _owned_account_ids()
-    rows = [row for row in page["items"] if row["account_id"] in owned]
+    """疑似僵尸订阅 id：窗口内没有对应使用记录的订阅（口径见文件头，锚点用 `AS_OF` 保证跨天可复现）。
+
+    **兜底（卡 06b / 台账 RISK-3）**：窗口按月分窗取流水，单窗超 `MAX_LIMIT` 直接
+    `TOO_MANY_ROWS` —— 否则会被 DAO 的 500 行上限**静默截断**，把有扣费记录的商户误判成僵尸。
+    """
+    floor = _months_ago(AS_OF, ZOMBIE_WINDOW_MONTHS)
+    rows = _window_flows(floor)
     charged = {row["counterparty"] for row in rows}          # 扣费流水按商户名匹配
     fresh_txns = {row["id"] for row in rows}                 # 或 source_txn_id 指向的流水落在窗口内
     return [sub["id"] for sub in subs
             if sub["merchant"] not in charged and sub.get("source_txn_id") not in fresh_txns]
+
+
+def _window_flows(floor: date) -> list[dict]:
+    """取 `[floor, AS_OF]` 窗口内**当前用户账户**的流水：按月分窗 + 单窗上限兜底（见 `_zombie_ids`）。"""
+    owned, rows = _owned_account_ids(), []
+    for start, end in month_windows(floor, AS_OF):
+        page = dao.list_txn(start, end, limit=MAX_LIMIT)
+        if page["total_count"] > MAX_LIMIT:
+            raise ToolError(ErrorCode.TOO_MANY_ROWS, "该窗口的使用记录过多，请缩小范围")
+        rows.extend(row for row in page["items"] if row["account_id"] in owned)
+    return rows
 
 
 def list_subscriptions(status: str = "active") -> ToolResult:
@@ -211,11 +224,13 @@ def list_subscriptions(status: str = "active") -> ToolResult:
         return bad
     try:
         subs = dao.list_subscriptions(current_user_id(), status)
+        zombies = _zombie_ids(subs)                 # 窗口数据超上限 → TOO_MANY_ROWS（卡 06b 兜底）
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
     except ValueError as exc:
         return _dao_reject(exc)
     items = [{key: sub[key] for key in ("id", "merchant", "amount", "cycle", "next_charge_date")}
              for sub in subs]
-    zombies = _zombie_ids(subs)
     data = ListSubscriptionsData(items=[SubscriptionItem(**item) for item in items])
     facts = {"status": status, "subscription_count": len(items), "zombie_count": len(zombies),
              "zombie_ids": zombies, "zombie_window_months": ZOMBIE_WINDOW_MONTHS,

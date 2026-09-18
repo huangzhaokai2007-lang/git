@@ -19,7 +19,7 @@ import re
 from data import dao
 
 from tools._query_analysis import (
-    AMOUNT_RATIO_THRESHOLD, BASELINE_DAYS, KIND_LABELS, NIGHT_END_HOUR, NIGHT_START_HOUR, VELOCITY_MINUTES_T4,
+    AMOUNT_RATIO_THRESHOLD, NEW_MERCHANT_DAYS, BASELINE_DAYS, KIND_LABELS, NIGHT_END_HOUR, NIGHT_START_HOUR, VELOCITY_MINUTES_T4,
     VELOCITY_MIN_TXNS, _anomalies, _owned_txns, _period_bounds, _previous_period, _report_markdown, _scan,
     _spend_groups, _split_pct, _vs_prev_pct,
 )
@@ -144,15 +144,16 @@ def detect_anomalies(period: str) -> ToolResult:
         return bad
     try:
         start, end = _period_bounds(period)
-        rows, series = _scan(start, end)
+        rows, series, merchants = _scan(start, end)
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     except ValueError as exc:
         return _dao_reject(exc)
-    items = _anomalies(rows, series)
+    items = _anomalies(rows, series, merchants)
     facts = {"period": period.strip(), "scanned_count": len(rows), "anomaly_count": len(items),
              "amount_ratio_threshold": AMOUNT_RATIO_THRESHOLD, "baseline_days": BASELINE_DAYS,
              "night_from_hour": NIGHT_START_HOUR, "night_to_hour": NIGHT_END_HOUR,
+             "new_merchant_days": NEW_MERCHANT_DAYS,
              "velocity_window_minutes": VELOCITY_MINUTES_T4, "velocity_min_txns": VELOCITY_MIN_TXNS,
              "items": [{"txn_id": item["txn_id"], "severity": item["severity"], "reason": item["reason"],
                         **_money_facts(item["amount"], "amount"),
@@ -181,11 +182,11 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
         return _fail(ErrorCode.INVALID_ARGUMENT, "报告类型与账期粒度不一致")
     try:
         start, end = _period_bounds(clean)
-        rows, series = _scan(start, end)
+        rows, series, merchants = _scan(start, end)
         prev_start, prev_end = _period_bounds(_previous_period(clean))
         prev_total = _spend_groups(_owned_txns(prev_start.isoformat(), prev_end.isoformat()), "category")[1]
         subs = _owned_subscriptions()
-        anomalies = _anomalies(rows, series)
+        anomalies = _anomalies(rows, series, merchants)
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     except ValueError as exc:

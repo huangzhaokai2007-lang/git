@@ -14,6 +14,7 @@ from data.seed import CREDIT_ID, USER_ID
 from tools import query
 
 from tests.conftest import (FOREIGN_TXN, FOREIGN_AMOUNT, raw, facts_numbers, assert_covered, assert_dates_covered, assert_no_floats, txns_of)
+from tests.test_query_common import assert_facts_verbatim
 
 
 def test_bill_report_markdown_numbers_all_come_from_facts(seeded: Path) -> None:
@@ -22,6 +23,8 @@ def test_bill_report_markdown_numbers_all_come_from_facts(seeded: Path) -> None:
     assert_covered(result.data["markdown"], result.facts)
     assert_dates_covered(result.data["markdown"], result.facts)
     assert_covered(result.message, result.facts)
+    assert_facts_verbatim(result.data["markdown"], result.facts)          # 卡 06b：逐字（挡量级错）
+    assert_facts_verbatim(result.message, result.facts)
     assert "| 项目 | 金额（元） | 占比 |" in result.data["markdown"]
 
 
@@ -141,6 +144,7 @@ def test_no_floats_anywhere_in_data_or_facts(seeded: Path, name: str, args: tupl
 def test_reply_message_numbers_are_all_in_facts(seeded: Path, name: str, args: tuple, kwargs: dict) -> None:
     result = getattr(query, name)(*args, **kwargs)
     assert_covered(result.message, result.facts)
+    assert_facts_verbatim(result.message, result.facts)                   # 卡 06b：逐字（挡量级错）
 
 
 ILLEGAL_CALLS = [

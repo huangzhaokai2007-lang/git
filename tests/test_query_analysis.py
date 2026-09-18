@@ -141,7 +141,11 @@ def test_verdict_is_independent_of_the_period_look(seeded: Path) -> None:
 
 
 def test_amount_rule_is_strictly_greater_than_three_times_the_baseline(seeded: Path) -> None:
-    """阈值边界：恰好 3 倍不算，3 倍多 1 分才算（口径来源：卡 04 第 3 条，测试里写字面量不自证）。"""
+    """阈值边界：恰好 3 倍不算，3 倍多 1 分才算（口径来源：卡 04 第 3 条，测试里写字面量不自证）。
+
+    注：卡 06b 起 T4 多了「陌生商户」规则，这两个商户名是新的 → 必定命中那条；
+    故这里只钉**金额规则**本身在不在 reason 里（`in` 而非 `==`），别的规则照旧放过。
+    """
     moment = "2026-08-20T12:00:00"
     baseline = baseline_raw(seeded, moment)
     assert baseline > 0
@@ -149,8 +153,9 @@ def test_amount_rule_is_strictly_greater_than_three_times_the_baseline(seeded: P
                    counterparty="边界商户甲", id="txn-bound-at")
     dao.insert_txn(ACCOUNT, moment, -(baseline * 3 + 1), "out", 1,
                    counterparty="边界商户乙", id="txn-bound-over")
-    found = {item["txn_id"] for item in query.detect_anomalies("2026-08").data["items"]}
-    assert "txn-bound-at" not in found and "txn-bound-over" in found
+    reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
+    assert "金额显著高于近期均值" not in reasons["txn-bound-at"]                  # 恰好 3 倍不算
+    assert "金额显著高于近期均值" in reasons["txn-bound-over"]                   # 3 倍多 1 分才命中
     assert query.AMOUNT_RATIO_THRESHOLD == 3 and query.BASELINE_DAYS == 90      # 阈值常量与卡 04 一致
 
 
@@ -158,9 +163,9 @@ def test_night_rule_hour_boundaries(seeded: Path) -> None:
     stamps = ("2026-08-20T22:59:00", "2026-08-20T23:00:00", "2026-08-21T05:59:00", "2026-08-21T06:00:00")
     for index, stamp in enumerate(stamps):
         dao.insert_txn(ACCOUNT, stamp, -100, "out", 1, counterparty=f"时段商户{index}", id=f"txn-n-{index}")
-    found = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
-    assert "txn-n-0" not in found and "txn-n-3" not in found
-    assert found["txn-n-1"] == found["txn-n-2"] == "凌晨时段交易"
+    reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
+    assert "凌晨时段交易" not in reasons.get("txn-n-0", "") and "凌晨时段交易" not in reasons.get("txn-n-3", "")
+    assert "凌晨时段交易" in reasons["txn-n-1"] and "凌晨时段交易" in reasons["txn-n-2"]
 
 
 def test_velocity_rule_needs_three_payments_to_one_merchant_within_an_hour(seeded: Path) -> None:
@@ -168,9 +173,10 @@ def test_velocity_rule_needs_three_payments_to_one_merchant_within_an_hour(seede
         dao.insert_txn(ACCOUNT, f"2026-08-20T{at}", -100, "out", 1, counterparty="高频商户", id=f"txn-v-{index}")
     for index, at in enumerate(("14:00:00", "14:05:00")):
         dao.insert_txn(ACCOUNT, f"2026-08-20T{at}", -100, "out", 1, counterparty="安静商户", id=f"txn-q-{index}")
-    found = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
-    assert found["txn-v-0"] == found["txn-v-1"] == found["txn-v-2"] == "同商户短时密集交易"
-    assert "txn-q-0" not in found and "txn-q-1" not in found
+    reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
+    assert all("同商户短时密集交易" in reasons[f"txn-v-{index}"] for index in range(3))
+    assert "同商户短时密集交易" not in reasons.get("txn-q-0", "")
+    assert "同商户短时密集交易" not in reasons.get("txn-q-1", "")
 
 
 def test_severity_follows_the_number_of_rules_hit(seeded: Path) -> None:
@@ -184,15 +190,54 @@ def test_severity_follows_the_number_of_rules_hit(seeded: Path) -> None:
 
 def test_amount_rule_also_flags_the_fixed_monthly_repayment_known_consequence(seeded: Path) -> None:
     """已知后果（口径取自卡 04 第 3 条，未自行加规则）：每月固定信用卡还款金额远高于日常支出均值，
-    会命中"金额偏离"。是否按 category 排除固定周期性交易需人类定口径 —— 交付说明里已登记。"""
+    会命中"金额偏离"。是否按 category 排除固定周期性交易需人类定口径 —— 交付说明里已登记。
+
+    注：卡 06b 起只统计**金额规则**命中数（此前用「命中集合」计数，会把 06b 新增的陌生商户命中算进来）。
+    """
     periods = [f"{year}-{month:02d}" for year in (2025, 2026) for month in range(1, 13)]
     hits = 0
     for period in periods:
-        ids = {item["txn_id"] for item in query.detect_anomalies(period).data["items"]}
+        reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies(period).data["items"]}
         repayments = {row["id"] for row in raw(
             seeded, "SELECT id FROM txn WHERE counterparty = '信用卡还款' AND substr(ts, 1, 7) = ?", (period,))}
-        hits += len(ids & repayments)
+        hits += sum(1 for txn_id in repayments if "金额显著高于近期均值" in reasons.get(txn_id, ""))
     assert hits == 12
+
+
+# ---------------- T4 第 4 条：陌生商户（规格 §2 T4 备注，SPEC-CHANGE b84ac38） ----------------
+
+def test_new_merchant_rule_fires_for_a_first_time_counterparty(seeded: Path) -> None:
+    """过去 90 天该 counterparty 无交易 → 命中「陌生商户」（口径里的 90 天写字面量，不复用被测常量）。"""
+    dao.insert_txn(ACCOUNT, "2026-08-20T12:00:00", -100, "out", 1,
+                   counterparty="从未见过的商户", id="txn-new-1")
+    result = query.detect_anomalies("2026-08")
+    reasons = {item["txn_id"]: item["reason"] for item in result.data["items"]}
+    assert "陌生商户交易" in reasons["txn-new-1"]
+    assert result.facts["new_merchant_days"] == 90
+
+
+def test_new_merchant_rule_does_not_fire_for_a_repeat_counterparty(seeded: Path) -> None:
+    """同一商户 15 天内已交易过 → 第二笔不算陌生商户（正反两面都钉住，防空实现）。"""
+    dao.insert_txn(ACCOUNT, "2026-08-05T12:00:00", -100, "out", 1, counterparty="常客商户", id="txn-repeat-1")
+    dao.insert_txn(ACCOUNT, "2026-08-20T12:00:00", -100, "out", 1, counterparty="常客商户", id="txn-repeat-2")
+    reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
+    assert "陌生商户交易" in reasons["txn-repeat-1"]                     # 第一笔确实是陌生
+    assert "陌生商户交易" not in reasons.get("txn-repeat-2", "")         # 第二笔不是（未命中任何规则就不在 items 里）
+
+
+def test_new_merchant_rule_skips_rows_without_a_counterparty(seeded: Path) -> None:
+    """没有对手方名的流水（工资/内部划转）不参与陌生商户判定。"""
+    dao.insert_txn(ACCOUNT, "2026-08-21T12:00:00", -100, "out", 1, id="txn-no-counterparty")
+    reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-08").data["items"]}
+    assert "陌生商户交易" not in reasons.get("txn-no-counterparty", "")
+
+
+def test_new_merchant_rule_uses_the_baseline_pool_not_the_period(seeded: Path) -> None:
+    """基准池覆盖「分析期起点往前 90 天」：4 月 1 日的交易，会让分析期 2026-06 的交易不再算陌生。"""
+    dao.insert_txn(ACCOUNT, "2026-04-01T12:00:00", -100, "out", 1, counterparty="老客户商户", id="txn-pool-1")
+    dao.insert_txn(ACCOUNT, "2026-06-20T12:00:00", -100, "out", 1, counterparty="老客户商户", id="txn-pool-2")
+    reasons = {item["txn_id"]: item["reason"] for item in query.detect_anomalies("2026-06").data["items"]}
+    assert "陌生商户交易" not in reasons.get("txn-pool-2", "")           # 80 天前交易过 → 不是陌生
 
 
 def test_anomaly_reasons_never_contain_digits(seeded: Path) -> None:
