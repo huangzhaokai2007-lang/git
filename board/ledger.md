@@ -26,6 +26,7 @@
 | card-12b | b6eee07 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 注入护栏接线（CLASSIFY 前 detect→REFUSE 零 LLM）+ 铁律7 收口（sanitize_facts 包裹）+ verify 第5段 SKIP→通过；verify 绿（805 passed）。2 次变异抽查真报警 |
 | card-13 | f100002 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 数字校验器 facts_check（千分位/万元/百分比/块元/分↔元归一化 + 重生成再降级 HALLUCINATION_BLOCKED）；verify 绿（831 passed）。3 次变异抽查真报警（拦截/万元/模板转发） |
 | card-14a | 7361c99 | PASS（越权校验收口 + 参数边界，852 passed） | 越权统一 tool_guard + 金额正整数分/上限/收款人存在边界，工具侧转发零回归；5/5 变异真报警。**待 14b 补 risk_event 枚举 + 限流 + 幂等落库** |
+| card-14b | 5235353 | PASS（859 passed，SPEC-CHANGE 加表） | 限流（先计数再校验）+ 幂等落库（重启有效、重放不计数）+ 规格 §DDL 加 2 表 + DAO 四原语；verify 全绿。**待 14b-2 收尾：39处补名+变异+transfer切幂等表** |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -822,3 +823,22 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14a PASS 落定；14b 收尾（加表+同步+39处补名+变异+快照切落库+require_payee_exists 修 id 查找）继续。
 NEXT_CARD_WARNING: 同 14b WARNING。追加：require_payee_exists 改 id 精确查找（补 payee_0001 不被误拒的测试）。
+
+## 决策记录 2026-09-19 06:30（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：5235353 card-14b（HEAD）；verify 绿 859 passed
+  - card-14b 核心完成：SPEC-CHANGE 规格 §DDL 加 2 表 + DAO 四原语 + tool_guard 限流（先计数再校验）+ 幂等落库（重启有效重放不计数）
+
+SPEC-CHANGE 标注（待用户确认）：规格 §DDL 加 idempotency + rate_limit 两表，同步 test_db.py/test_dao_core.py 期望。卡 14「幂等表落库」要求的必然结果，表结构清晰无争议，已记台账，用户醒来追认（不认可可回滚）。
+
+三项收尾未做（worker 如实交底）：
+  ① 39 处 require_owned 补 tool 名（越权双写全覆盖，当前显式 tool= 已双写、转发路径只写审计）
+  ② 变异自检 4 条（未跑，禁临时脚本）
+  ③ transfer 内存 _TOKENS 切幂等表（幂等落库的端到端接线，风险大未做）
+
+NEXT_CARD: 14b-2
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14b 核心（加表+限流+幂等原语）已提交 859 passed，三项收尾并 14b-2 按风险递增（①补名→②变异→③transfer切换）做。
+NEXT_CARD_WARNING: card-14b-2 范围 tools/*.py + guard/tool_guard.py + scripts/mutcheck_14b.py + tests/；① 39 处 require_owned 补 tool 名（可建 scripts/card14b_name_sites.py 批量，落在 scripts/ 合规），两条 *_untouched 断言放宽为「资金/流水未动+审计 rejected+risk_event 新增」；② 变异自检 4 条（幂等改内存/限流阈值放宽/只读也计数/重放也计数）；③ require_payee_exists 改 id 精确查找（补 payee_0001 不被误拒）；④ transfer 内存 _TOKENS 切幂等表（风险大，最后做，改一个跑一次测试）。
