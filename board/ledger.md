@@ -1126,3 +1126,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-16 PASS 入库；16b 除 4 底层坑外，追加界面分层守卫（填铁律无守卫的缺口）。
 NEXT_CARD_WARNING: 16b 追加：① tests 里 import components 断言 parse_bill 逐字回显回执数字；② grep 断言 interfaces/** 无 import tools|data|guard、无 SQL 关键字。这两条要真能被变异触发（改数字即红）。
+
+## 决策记录 2026-09-20 03:00（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：bdbe818 card-16b（HEAD）；verify 绿 895 passed（基线 864 + 31）
+  - card-16b 完成 4 坑：data 线程安全（threading.local 每线程连接 + BEGIN IMMEDIATE + 5s timeout）、结构漂移自检（SchemaDriftError）、槽位归一化、分类器 history role-separated（实测 0/6→6/6）；界面回归 18 OK
+
+裁决（worker 8 条待拍板）：
+  - agent/llm.py 越界（范围外第 4 文件）→ **接受**（role-separated 需 message 数组，user 扩 str|list[dict] 向后兼容）
+  - tests/test_classifier.py 改 1 条旧断言（钉串味行为的）→ **接受**（卡第3条要求修）
+  - 其余（interfaces workaround 删/WAL/SQLITE_BUSY 重试/缺列自动迁移/顺手清理）→ 记台账待后续
+
+NEXT_CARD: 16c（界面守卫）+ 17
+MODEL: deepseek-flash
+ACTION: run
+REASON: 16b 提交+派审；16c 补界面守卫（填 card-16 挖出的铁律无守卫缺口）；随后 17(IM)/18(工程化)/19(演示)。
+NEXT_CARD_WARNING: 16c 范围 tests/（新增 test_web_layering.py）：① parse_bill 逐字回显断言 ② interfaces/** 禁 import tools/data/guard+SQL grep；真能被变异触发。
