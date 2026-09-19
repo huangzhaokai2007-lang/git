@@ -7,7 +7,9 @@
    （Streamlit rerun / FastAPI 请求线程的等价场景）；
 ③ 多线程**真并发写**同一库：账不错、钱不串（每线程自己的事务互不干扰，写竞争由 SQLite 写锁 +
    `busy_timeout` 串行化）；
-④ `close()` 只关本线程，关掉后自动重开（换库/测试复位口径不变）。
+④ `close()` 只关本线程，关掉后自动重开（换库/测试复位口径不变）；
+⑤ `transaction()` 一进事务就**持写锁**（`BEGIN IMMEDIATE`）：退化回 deferred BEGIN 会让"先读后写"
+   的两条连接各持 SHARED 再同时升级 → SQLite 升级死锁（`busy_timeout` 救不了）。
 
 线程里的断言与异常都回传到主线程 —— 否则线程内失败会变成假绿。
 """
@@ -16,14 +18,13 @@ from __future__ import annotations
 
 import sqlite3
 import threading
-import time
 from pathlib import Path
 from typing import Callable
 
 import pytest
 
 from data import dao
-from data.db import transaction
+from data.db import connect, transaction
 from data.seed import SAVINGS_ID
 
 from tests.conftest import balance, count, raw
@@ -110,22 +111,26 @@ def test_close_is_per_thread_and_reconnects(seeded: Path) -> None:
         first.execute("SELECT 1")                                 # 旧连接真的被关掉了
 
 
-def test_two_threads_reading_then_writing_do_not_deadlock(seeded: Path) -> None:
-    """两条连接都"先读后写"时不得僵死 —— `transaction()` 一进事务就拿写锁（`BEGIN IMMEDIATE`）。
+def test_transaction_takes_the_write_lock_at_begin(seeded: Path) -> None:
+    """`transaction()` 用 `BEGIN IMMEDIATE`：**一进事务就持写锁**（确定性判据，不靠睡眠竞速）。
 
-    时序用 `sleep` 固定（不靠 CPU 竞速）：A 进事务→读→按住 200ms；B 在 A 读过之后进事务→读→写。
-    用默认的 deferred BEGIN，两边会各持 SHARED 再同时要升级成写锁 = SQLite 的经典**升级死锁**，
-    `busy_timeout` 也救不了（卡 16b 实测四线程用例 ~12% 报 `database is locked`）；IMMEDIATE 下
-    B 只会在写锁上排队等 A 提交。
+    为什么必须一进事务就持写锁：两条连接都"先读后写"时，deferred BEGIN 会让两边先各拿 SHARED、
+    再同时想升级成写锁 —— SQLite 经典的**升级死锁**，`busy_timeout` 救不了（卡 16b 实测 ~12%）。
+
+    判据：holder 进事务并读一次之后，另一条连接的 `BEGIN IMMEDIATE`（busy_timeout=50ms）**必须**
+    排队超时；若退回 deferred BEGIN，写锁此刻还没被谁拿，它能顺利开事务 → 用例变红。
+    （原先这里写的是"两线程 sleep 竞速"版，落在整库跑时偶发 `database is locked` —— 时序用例不能
+    进验收闸门，改成这条确定性判据。）
     """
-
-    def read_then_write(start_after: float, hold: float) -> None:
-        time.sleep(start_after)
-        with transaction(dao.connection()):                        # 一进事务就拿写锁（IMMEDIATE）
-            dao.connection().execute("SELECT COUNT(*) AS n FROM txn").fetchone()   # 先读
-            time.sleep(hold)                                                     # 让 B 也读到
-            dao.update_account_balance(ACCOUNT, -100)                             # 再写
-
-    _threads([lambda: read_then_write(0.0, 0.2), lambda: read_then_write(0.05, 0.0)])
-    assert balance(seeded) >= 0
+    holder = dao.connection()
+    other = connect(seeded)
+    other.execute("PRAGMA busy_timeout = 50")             # 只等 50ms：判"写锁被占"要快
+    try:
+        with transaction(holder):
+            holder.execute("SELECT COUNT(*) AS n FROM txn").fetchone()   # 先读（deferred 下也拿 SHARED）
+            begin = transaction(other)
+            with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+                begin.__enter__()        # 显式进：钉住"被挡的是 BEGIN 本身"，不是它后面的写
+    finally:
+        other.close()                    # 若 BEGIN 真的过了（变异版），顺手把那个事务回滚掉
 
