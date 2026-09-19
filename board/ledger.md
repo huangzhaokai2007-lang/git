@@ -1245,3 +1245,17 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 17b 提交+派审；进工程化 card-18（README 架构图/工具表/权限矩阵/注入攻防表 + Dockerfile 离线 + bootstrap.sh + 评测入口 POST /api/chat + verify 加红队/IM自检段）。
 NEXT_CARD_WARNING: card-18 范围 README.md + Dockerfile + docker-compose.yml + scripts/bootstrap.sh + docs/ + scripts/verify.sh；verify 加第6段红队+IM自检（离线 rc 可判）；Docker 离线可起 LLM 不可用降级；评测入口复用 agent/ 不泄露密钥。
+
+## 决策记录 2026-09-20 04:15（夜间托管，@analyst 自主）
+
+card-17b = PASS（无 MUST_FIX）；3 变异全真报警（含 16c AST 守卫抓 namespace 借取回归、period never_guesses 12 failed）；agent→guard 单向；period 认不出走 CLARIFY；orchestrator 285 ≤300。
+
+3 RISK 记台账：① agent/period.py `from data.seed import AS_OF` 越层（属既存模式，同 card-09 RISK，建议按 card-09 TODO 收口：AS_OF 走 tools 访问器）；② RELATIVE_PERIOD_ALIASES 手工维护；③ 16c borrows 判据略宽。
+
+注：reviewer 观测 card-18 在进行（interfaces/api/{app,__main__}.py + Dockerfile + docker-compose.yml + docs/03-运行与评测.md + scripts/{api_smoke,bootstrap,docker-entrypoint}.sh；已改 verify.sh，970 仍绿）。
+
+NEXT_CARD: 18（进行中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 17b PASS 入库；card-18 工程化在跑。
+NEXT_CARD_WARNING: 同 card-18 WARNING。待办：agent 直调 dao/AS_OF 越层收口（card-09 TODO，AS_OF 走 tools 访问器）。
