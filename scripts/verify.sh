@@ -39,9 +39,14 @@ else
   skip "还没有用例集（请做卡 11）"
 fi
 
-step "4/6 冒烟对话（清空 LLM key → 走离线确定链路，不依赖外网）"
+step "4/6 冒烟对话（--offline 替身 + 真实工具层：离线、确定、约 2 秒，断言回执含 2026-08）"
 if [ -f app/cli.py ]; then
-  LLM_API_KEY= $PY -m app.cli "帮我看看上个月花了多少" || FAIL=1
+  SMOKE="$(LLM_API_KEY= $PY -m app.cli --offline "帮我看看上个月花了多少" 2>&1)" || FAIL=1
+  printf '%s\n' "$SMOKE"
+  case "$SMOKE" in
+    *2026-08*) echo "   断言通过：回执含 2026-08（真实工具 + 事实包，不是编的）" ;;
+    *)         echo "   断言失败：回执里没有 2026-08"; FAIL=1 ;;
+  esac
 else
   skip "app/cli.py 未实现（请做卡 09）"
 fi

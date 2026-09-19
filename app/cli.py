@@ -28,6 +28,8 @@ from agent.orchestrator import Turn
 
 #: 离线替身的规则表：关键词 → (意图, 槽位)。命中即用；都不命中 → `out_of_scope`（编排层按低置信度追问）。
 #: 这里**只做"从话里认意图/槽位"**（LLM 的活），不碰任何金额/权限/执行判断。
+#: 转账那条固定用**新收款人**（张小美，非白名单）：基础档 L2 + OTP —— 现场白天/夜间都一样，
+#: 用白名单收款人则会因"夜间因子"在夜里变 L2、白天变 L1，演示与断言会随时刻漂移。
 OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
     (("余额", "多少钱"), "balance_query", {}),
     (("花了多少", "账单", "消费", "支出"), "bill_analysis", {}),
@@ -35,7 +37,7 @@ OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
     (("流水", "交易记录"), "txn_query", {}),
     (("异常", "可疑"), "anomaly_check", {}),
     (("理财", "推荐"), "wealth_recommend", {}),
-    (("转",), "transfer_single", {"payee": "王五", "amount": 100}),
+    (("转",), "transfer_single", {"payee": "张小美", "amount": 100}),
 )
 #: 相对时间词（替身"抽槽位"用；归一化仍由 `agent/period.py` 做，替身不重复判断）
 PERIOD_WORDS = ("上个月", "上月", "本月", "这个月", "上上个月")
@@ -54,10 +56,15 @@ def offline_verdict(text: str) -> tuple[str, dict]:
 
 @contextlib.contextmanager
 def offline_llm() -> Iterator[None]:
-    """把 `agent.llm.chat_json` 换成替身：意图分类给规则结果，其余调用一律不可用（润色退回模板原文）。"""
+    """把 `agent.llm.chat_json` 换成替身：意图分类给规则结果，其余调用一律不可用（润色退回模板原文）。
+
+    离线模式下"润色不可用"是**预期行为**（模板原文本身就是最终回执口径），所以顺手把
+    `agent.templates` 的日志级别压到 ERROR —— 否则演示/验收时会被那条 warning 刷屏。
+    """
+    import logging
     from unittest import mock                              # 仅离线演示路径用到（标准库）
 
-    from agent import classifier, llm
+    from agent import classifier, llm, templates
 
     def chat_json(system: str, user: object, schema: type) -> object:
         if schema is classifier.IntentOut:
@@ -66,8 +73,14 @@ def offline_llm() -> Iterator[None]:
                           slots=slots, missing_slots=[], unsafe_reason=None)
         raise llm.LLMUnavailable("离线演示：除意图分类外不给 LLM 输出")
 
-    with mock.patch.object(llm, "chat_json", chat_json):
-        yield
+    quiet = logging.getLogger(templates.__name__)
+    previous = quiet.level
+    quiet.setLevel(logging.ERROR)
+    try:
+        with mock.patch.object(llm, "chat_json", chat_json):
+            yield
+    finally:
+        quiet.setLevel(previous)
 
 
 def render(turn: Turn) -> str:
