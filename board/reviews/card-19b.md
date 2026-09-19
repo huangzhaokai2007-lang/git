@@ -21,3 +21,13 @@ EVIDENCE:
   - verify 第 4 段实跑：`LLM_API_KEY= uv run python -m app.cli "帮我看看上个月花了多少"` → `意图=out_of_scope 工具=- 已执行=否`、rc=0（**降级链路，未碰工具**）
   - `grep -rn "变异 M" app/ tests/ scripts/` → 无残留；`wc -l README.md` → 290
 VERDICT_REASON: card-19b 自身 6 文件基本达标（守卫扩 app/ 且变异真红、26 条新单测有牙、README 290≤300、.dockerignore 硬化），但**红线性质的两处未闭环**：① 本卡的 verify 第 4 段把「真实工具链」换成「降级链路」，verify 从此抓不到 CLI→工具体系的回归；② card-19 的 MUST_FIX（答辩提纲 §1.3 的 600元→L2）在 HEAD 中仍未修，项目不能算「收尾」。两条补丁都是 1~2 行，落地后我复跑即可 PASS。
+
+---
+
+## 复跑（2 条 MUST_FIX 闭环后 · 提交 83b0c5b）
+VERDICT: PASS
+- MUST_FIX 1（verify 第 4 段）**已闭环**：改为 `--offline`（离线替身但**真跑工具层**）+ rc-only 升级为**内容断言**。独立复跑第 4 段：回执 `2026-08 共支出 9,152.00 元，环比 -32%。`、轨迹 `工具=analyze_spending`、verify 打印「断言通过：回执含 2026-08（真实工具 + 事实包，不是编的）」。**断言有牙**（变异抽查）：把 `agent/period.py` 的 `上个月` 偏移改成 0（复现「错月」缺陷）→ 第 4 段输出变 `2026-09 共支出 0.00 元` → 断言**变红**（已还原）。既恢复了「CLI→编排层→工具体系」的回归覆盖，又保持离线（不再依赖 .env key）。
+- MUST_FIX 2（答辩提纲 §1.3）**已闭环**：见 `board/reviews/card-19.md` 的复跑节——按实测真值表重写，我逐条复核一致。
+- 补丁无新引入问题：README §2 表头改「回执示例」+ 两行回执改真；`scripts/demo.py` 时段性缺陷修复（`frozen_clock()` 钉白天 + TRANSFER 换新收款人张小美 + `quiet_logs()` 消噪，analyst 追认的越界项⑥）——实测 `demo.py` **12/12**、`demo.py --quick` rc=0；`app/cli.py` 113 行、`scripts/demo.py` 209 行（均 ≤300）。
+- 复核命令：`uv run pytest` → 997 passed；`bash scripts/verify.sh` → 6/6 全绿、rc 0；`uv run python scripts/demo.py` → 12/12。
+- 剩余 RISK（非阻塞）：`scripts/demo.py` 的 `frozen_clock` 只钉 `transfer._now`/`subscription._now`（够演示用；若将来演示路径再引入别的时间源需同步）；规格 §5 矛盾仍待人类 SPEC-CHANGE。

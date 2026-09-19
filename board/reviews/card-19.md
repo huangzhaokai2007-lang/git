@@ -26,3 +26,12 @@ EVIDENCE:
   - 实测档位：`100元 → tier=L2 / preview_transfer / executed=False`；`600元 → err=OVER_LIMIT / tier=None / reply='…超过单笔转账上限'`
   - 规则数 `len(injection.RULES)==10`；`get_balance` 实回 `储蓄账户余额 46,634.00 元…`
 VERDICT_REASON: 两条功能红线（app/cli 分层、verify 第 4 段真跑）与 demo 12/12、README 工具表/合规均过，但**红线 4「答辩提纲内容准确」未满足**——§1.3 的「现场转 600 元 → L2」与实测（600 元先撞 OVER_LIMIT、`tier=None`）矛盾，属可复现的文档-代码不一致，现场演示会当场露怯；按"任一 MUST_FIX 未闭环不许 PASS"，判 FAIL（1 条 MUST_FIX，改 1 行即可；根因是规格 §5 内部矛盾，另走 SPEC-CHANGE）。
+
+---
+
+## 复跑（MUST_FIX 闭环后 · 提交 83b0c5b）
+VERDICT: PASS
+- MUST_FIX 1（答辩提纲 §1.3）**已闭环**：§1.3 按实测真值表重写——删掉了「>500元→L2」与「转 600 元 → L2」；新增真值表「100 元给新收款人（张小美）→ L2 + OTP」「100 元给白名单（王五）→ 基础 L1」「**600 元 → OVER_LIMIT、tier=None、余额不变**（硬约束先于档位）」「档位表『>500元→L2』被单笔上限遮蔽、代码不可达」「**L3 现场不可达**，不宣称可演」。我逐条实测复核（时钟钉白天）：张小美100元→L2 ✓ / 王五100元→L1 ✓ / 600元→tier=None·OVER_LIMIT ✓ / 工具层连做 4 笔 500 元成功后第 5 笔→`OVER_LIMIT`「超过单日累计转账上限」✓。全部与文档一致。
+- 补丁无新引入问题：README §2 表头改「**回执示例**（数字均来自合成库实测；措辞随模型润色略有差异）」+ 余额/转账两行回执改为与真实模板逐字一致（46,634.00 / 已向张小美转账 100.00 / 46,534.00）；README 291 行（≤300）。
+- 复核命令：`uv run pytest` → 997 passed；`uv run python scripts/demo.py` → 12/12；`bash scripts/verify.sh` → 6/6 全绿、rc 0。
+- 剩余 RISK（非阻塞，非本卡）：规格 §5 的 L2「>500元」/L3「单笔 ≥50000元」与硬约束「单笔 ≤500元」自相矛盾（已如实写进答辩提纲，仍待人类 SPEC-CHANGE）。

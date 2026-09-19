@@ -1386,3 +1386,23 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 两条 MUST_FIX 补丁已提交并自验闭环；等 reviewer 复跑 PASS → 总验收。
 NEXT_CARD_WARNING: 收官待办：2 SPEC-CHANGE（§2 计数、§5 L2/L3 与单笔上限）+ Docker 真机构建 + httpx 提运行时 + 飞书真机验证 + agent 直调 dao/AS_OF 收口 + BUSY 重试层。
+
+## 决策记录 2026-09-20 05:00（夜间托管，@analyst 自主）—— 全项目收官
+
+**全部 20 张卡（00–19b）最终 VERDICT: PASS，无未闭合 MUST_FIX。**
+
+card-19 + card-19b 复跑双双 PASS（83b0c5b）：
+  - MUST_FIX 1 闭环：verify 第4段 --offline（真跑工具层）+ 内容断言；reviewer 变异抽查（period 偏移→断言变红）证断言有牙
+  - MUST_FIX 2 闭环：答辩提纲 §1.3 按实测真值表重写（张小美100→L2 / 王五100→L1 / 600→OVER_LIMIT / 日累计），reviewer 逐条实测一致
+
+最终门禁：uv run pytest = 997 passed；bash scripts/verify.sh = 6/6 全绿 rc 0；scripts/demo.py = 12/12；git 干净；124 commits。
+
+## 待人类拍板（SPEC-CHANGE，2 条）
+  1. 规格 §2 标题「15 个」vs 表内 T1–T16 → A 改 16（推荐）/ B T16 移出契约
+  2. 规格 §5 L2「>500元」/L3「单笔 ≥50000元」与硬约束「单笔 ≤500元」自相矛盾 → A 改档位表（推荐）/ B 调限额（已如实写进答辩提纲）
+
+## 待办（非阻塞）
+  - Docker 三件套未真机构建（本机无 docker；静态 + 等价命令已验）
+  - httpx 在 dev 组（出消息降级回环）；飞书未真机验证
+  - agent 直调 dao / from data.seed import AS_OF 越层收口（card-09 遗留）
+  - 跨进程 BUSY 重试层；去重进程内；单用户 demo 口径
