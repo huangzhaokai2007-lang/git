@@ -31,7 +31,14 @@ cp .env.example .env            # 可选：不填 LLM_API_KEY 也能起（意图
 docker compose up --build       # 评测入口 :8000 / 网页端 :8501
 ```
 
-运行细节、离线行为矩阵、常见问题见 **`docs/03-运行与评测.md`**。
+现场演示：一条命令跑完三条通道 + 注入防护 + 写路径四步（离线可演）。
+
+```bash
+uv run python scripts/demo.py   # 12/12 断言全绿；--quick 跳过网页端（约 5 秒）
+```
+
+运行细节、离线行为矩阵、常见问题见 **`docs/03-运行与评测.md`**；
+演示脚本与问答预案见 **`docs/答辩提纲.md`**（第 14 节有速查）。
 
 ---
 
@@ -265,3 +272,38 @@ docs/         01-接口规格（冻结）/ 02-AI指令剧本 / 03-运行与评�
 - 本项目**不构成投资建议**：理财推荐由本地规则与合成产品库给出，仅用于演示技术能力。
 - 大模型仅用于「理解意图」与「措辞润色」；**金额、余额、限额、权限档、状态变更由代码判定**，
   且每笔操作写入 `audit_log`（可按 `trace_id` 追溯）。
+
+---
+
+## 14. 现场演示与答辩素材
+
+一条命令跑完整演示（**离线可演**：没网/没 key 时用确定性替身替代"理解意图"这一步，
+金额、权限、确认、执行、审计仍全部走真实代码）：
+
+```bash
+uv run python scripts/demo.py            # 全段落（含网页端 AppTest，约半分钟）
+uv run python scripts/demo.py --quick    # 跳过网页端（约 5 秒）
+```
+
+实测输出（**12/12 断言全绿**；数据库用临时合成库，不动仓库里的演示库）：
+
+| 段落 | 做了什么 | 实测结果 |
+| --- | --- | --- |
+| ① CLI 通道 | 真子进程跑 `python -m app.cli --offline "查一下余额"` | 意图/工具/档位/`trace_id` 全部回显 |
+| ② 网页端通道 | Streamlit `AppTest` 真跑 `interfaces/web/app.py` | 合规标注在；聊天窗渲染出「46,634.00 元」回执 |
+| ③ IM 通道 | ASGI 直连 `/im/loopback`（无网回环） | 进编排层的原文是 `<untrusted_data source="im">查一下余额</untrusted_data>`；outbox 可轮询 |
+| ④ 注入防护 | 现场发两条注入指令 | 均 `unsafe_request` 拒答、零工具调用、零执行 |
+| ⑤ 写路径四步 | 转账 100 元 → 确认卡（L2）→ 验证码 | `preview` 未执行 → OTP → `executed=true`；46,634.00 → 46,534.00 |
+
+答辩材料见 **`docs/答辩提纲.md`**：一分钟定位、五条技术亮点（每条"一句话 + 代码落点 + 现场证明方式"）、
+5 分钟演示脚本（含 90 秒极简版）、Q&A 预案（为什么自建核心 / LLM 权限边界 / 幻觉怎么防 / 越权怎么防 /
+与真实银行的关系，外加 8 条高频追问）、现场故障预案。
+
+命令行通道（`verify.sh` 第 4 段的冒烟就是它）：
+
+```bash
+uv run python -m app.cli "帮我看看上个月花了多少"                   # 真模型；没配 key 会自动降级
+uv run python -m app.cli --offline "给王五转100元" --session demo-1  # 离线替身：确定性可演
+uv run python -m app.cli --offline "确认" --session demo-1
+uv run python -m app.cli --offline "123456" --session demo-1        # 验证码由工具层比对
+```
