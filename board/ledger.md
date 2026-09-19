@@ -27,6 +27,7 @@
 | card-13 | f100002 | PASS（无 MUST_FIX，4 条非阻塞 RISK） | 数字校验器 facts_check（千分位/万元/百分比/块元/分↔元归一化 + 重生成再降级 HALLUCINATION_BLOCKED）；verify 绿（831 passed）。3 次变异抽查真报警（拦截/万元/模板转发） |
 | card-14a | 7361c99 | PASS（越权校验收口 + 参数边界，852 passed） | 越权统一 tool_guard + 金额正整数分/上限/收款人存在边界，工具侧转发零回归；5/5 变异真报警。**待 14b 补 risk_event 枚举 + 限流 + 幂等落库** |
 | card-14b | 5235353 | PASS（859 passed，SPEC-CHANGE 加表） | 限流（先计数再校验）+ 幂等落库（重启有效、重放不计数）+ 规格 §DDL 加 2 表 + DAO 四原语；verify 全绿。**待 14b-2 收尾：39处补名+变异+transfer切幂等表** |
+| card-14b-6 | f4d89e7 | 提交（864 passed）；**变异自检顺延未验** | transfer 切幂等表端到端：_transfer_token 薄壳 + 权威读 + CAS 守卫 + 端到端重启用例；MUST_FIX（假守卫 CAS）已修。**变异自检锚点待 14b-7 随新实现重挂** |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
@@ -1002,3 +1003,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: MUST_FIX 已修（864），只差 mutcheck 锚点同步 + 提交。
 NEXT_CARD_WARNING: 修 scripts/mutcheck_14b.py 锚点（get_idempotent 现 2 处、update_idempotent 的 expect 已改名 expect_json）；补后 8/8 真红；然后分析师精准提交 14b-6 六文件。
+
+## 决策记录 2026-09-19 13:25（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：f4d89e7 card-14b-6（HEAD）；verify 绿 864 passed
+  - worker 更正：汇报会话 = 20260919_125947_496763（非 WOKER2）；active_sessions 已涨到 8 个 worker 会话
+
+裁决：
+  - ① 14b-6 **先提交**（f4d89e7）：8 路并发下未提交的绿版本随时可能被覆盖（13:07 已发生一次），先落 commit 保护已验证修订。账本行已注明「变异自检顺延未验」，不得读成已接受。
+  - ② 补锚点 + 残余并发 RISK（CAS 在扣款事务之外）→ 并进 14b-7。
+  - ③ 并发收口：**请用户关掉多余 worker 会话（8 个→1），别在收口前派补锚点**（否则两会话同时改 mutcheck 又撞）。
+
+NEXT_CARD: 14b-7
+MODEL: deepseek-flash
+ACTION: run
+REASON: 14b-7 = 补 mutcheck 锚点（随新实现重挂，get_idempotent 现 2 处、旧 CAS 0 处）+ 4 条变异对着新代码重新验红 + 残余并发 RISK（CAS 挪进扣款事务内）评估。
+NEXT_CARD_WARNING: 14b-7 非机械改字符串——锚点重挂到新代码 + 4 变异对新实现重新验红；残余 RISK（CAS 在事务外，真多进程窗口输家钱已扣）评估是否把 CAS 挪进扣款事务（命中0行→回滚整笔）。开工前确认只有 1 个 worker 会话活跃。
