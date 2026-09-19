@@ -1223,3 +1223,25 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-17 PASS 入库；17b 修 agent/薄函数 + period bug。
 NEXT_CARD_WARNING: 同 17b WARNING。待办：verify 第 6 段 IM 离线自检（随 card-18）。
+
+## 决策记录 2026-09-20 04:05（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：258b5c2 card-17b（HEAD）；verify 绿 970 passed
+  - card-17b = agent 薄函数（agent/channel.py 干净分层，替换 namespace 借取）+ period 归一化（agent/period.py：英文别名 + 认不出走 CLARIFY）；orchestrator 285 行 ≤300
+
+裁决（worker 8 条待拍板）：
+  - ① 改 2 个声明范围外文件（interfaces/im/channel.py 3 行 = 卡正文要求；agent/classifier.py 1 行注释）→ **接受**
+  - ② period 拆 agent/period.py（≤300 铁律）→ **接受**
+  - ③ 别名表放 agent/period.py（period→YYYY-MM 在编排层，防漂移）→ **接受**
+  - ④ 认不出→CLARIFY 只针对「给了值却认不出」；没给仍取锚点当月（卡09口径，有回归）→ **保持**
+  - ⑤ 日期槽位顺带修好（date_from/date_to 认英文/连字符）→ **接受**
+  - ⑥ resolve_period 签名 str→None → **接受**
+  - ⑦ 16c 守卫边界（不改成任何 guard 字样）→ **不加严**
+  - ⑧ 17 报告未拍板（自检进 verify / httpx dev / 飞书未验证 / 用户绑定 / BUSY 重试）→ 记待办
+
+NEXT_CARD: 18
+MODEL: deepseek-flash
+ACTION: run
+REASON: 17b 提交+派审；进工程化 card-18（README 架构图/工具表/权限矩阵/注入攻防表 + Dockerfile 离线 + bootstrap.sh + 评测入口 POST /api/chat + verify 加红队/IM自检段）。
+NEXT_CARD_WARNING: card-18 范围 README.md + Dockerfile + docker-compose.yml + scripts/bootstrap.sh + docs/ + scripts/verify.sh；verify 加第6段红队+IM自检（离线 rc 可判）；Docker 离线可起 LLM 不可用降级；评测入口复用 agent/ 不泄露密钥。
