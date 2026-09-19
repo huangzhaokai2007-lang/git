@@ -1108,3 +1108,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-16 提交+派审；4 个底层坑必须收口（#3 会砸 card 17/18 的多线程），派 card-16b。
 NEXT_CARD_WARNING: card-16b 范围 data/_dao_core.py + data/dao.py + data/db.py + agent/classifier.py；修 #1/#2/#3/#4；不改规格；不破坏 864 基线。
+
+## 决策记录 2026-09-20 02:35（夜间托管，@analyst 自主）
+
+card-16 = PASS（无 MUST_FIX，5 红线全过）；interfaces/ 分层干净独立核对属实。
+
+**关键发现（reviewer 变异抽查）**：把 `_yuan` 加 +1.0（界面偷改数字）→ pytest 仍 864 全绿，无一条变红 → 界面「禁写业务逻辑/禁改数字」铁律**无机器守卫**（card-16 零测试 + verify 红线不查分层）。交付物本身正确，判 RISK，但**必须补守卫**。
+
+裁决：追加卡 16b —— 补两条轻量守卫：
+  ① import components，断言 parse_bill 逐字回显回执数字（证"只解析不重算"）
+  ② grep 式断言 interfaces/** 不含 import tools|data|guard 与 SQL 关键字
+
+其余 RISK 记台账：18 项自检未落盘不可复现、bootstrap subprocess 灰区、Turn 不带 facts 图表靠解析、OTP 真值进编排层（卡10口径）。
+
+NEXT_CARD: 16b（追加界面守卫）
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-16 PASS 入库；16b 除 4 底层坑外，追加界面分层守卫（填铁律无守卫的缺口）。
+NEXT_CARD_WARNING: 16b 追加：① tests 里 import components 断言 parse_bill 逐字回显回执数字；② grep 断言 interfaces/** 无 import tools|data|guard、无 SQL 关键字。这两条要真能被变异触发（改数字即红）。
