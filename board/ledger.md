@@ -983,3 +983,22 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: worker 修 DB 守卫 CAS（假守卫→真守卫）+ 补 stale 用例，修完我本卡内精准提交。
 NEXT_CARD_WARNING: 修 _store_token CAS（expect=加载时旧 json）+ executed 判定读权威库 bypass 缓存 + winner 读取防 stale KeyError + 补 stale 用例；不破坏 861 基线；修完变异 8/8 + 交付模板。
+
+## 决策记录 2026-09-19 13:15（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 工作区 mtime：14b-6 初版 12:32-12:41；**MUST_FIX 已被另一并发 worker 会话于 13:07 修复**（tools/_transfer_token.py 13:07 + transfer.py 13:07 + tests/test_transfer_idempotency_guard.py 13:07 新）
+  - worker 复验：uv run pytest = 864 passed（861 基线 + 3 守卫用例）；原复现脚本现"只扣一次/txn+0/r2.data==r1.data" → MUST_FIX 已闭环
+  - **阻塞项**：scripts/mutcheck_14b.py 锚点失效（mtime 12:41，未随 13:07 改动作同步）→ 8/8 变异自检跑不过，交付模板「变异自检」交不上
+  - **严重**：worker 有 6+ 并发活跃会话（active_sessions 多个 bot_live_delivery_consumer），并发改 transfer 主链路
+
+裁决：
+  - ① 提交：**先补 mutcheck 锚点**（恢复 8/8 变异自检证据），再精准提交 14b-6。
+  - ② 残余 RISK（CAS 在扣款事务之外，真多进程窗口下输家钱已扣）→ 记台账 + 待办 14b-7（demo 单进程不触发）。
+  - ③ 并发收口：**请用户关掉多余 worker 会话，只留一个**，避免多会话并发改主链路。
+
+NEXT_CARD: 14b-6（补 mutcheck 锚点 → 提交）
+MODEL: deepseek-flash
+ACTION: run
+REASON: MUST_FIX 已修（864），只差 mutcheck 锚点同步 + 提交。
+NEXT_CARD_WARNING: 修 scripts/mutcheck_14b.py 锚点（get_idempotent 现 2 处、update_idempotent 的 expect 已改名 expect_json）；补后 8/8 真红；然后分析师精准提交 14b-6 六文件。
