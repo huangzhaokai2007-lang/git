@@ -242,6 +242,21 @@ def insert_idempotent(token: str, tool: str, user_id: str, result_json: str, cre
                       _stamp(created_at, "created_at")))
 
 
+def update_idempotent(token: str, result_json: str, expect_result_json: str) -> int:
+    """条件更新幂等快照：仅当当前 `result_json` 仍等于 `expect_result_json` 时才覆盖为新值。
+
+    「DB 级守卫」（卡 14b-6）：多进程同时执行同一 token 时，只有先提交的 UPDATE 命中，
+    后者受影响行 0 → 调用方走幂等返回赢家结果。与 `insert_idempotent`（首次登记）互补，
+    本函数只做「preview → executed」的条件翻转，不做无条件的覆盖。
+    """
+    with _writing() as conn:
+        cursor = conn.execute(
+            "UPDATE idempotency SET result_json = ? WHERE token = ? AND result_json = ?",
+            (_json_text(result_json, "result_json"), str(token),
+             _json_text(expect_result_json, "expect_result_json")))
+    return cursor.rowcount
+
+
 def incr_rate_limit(user_id: str, tool: str, ts: str) -> None:
     """记一次**写操作尝试**（含被拒的越权/非法参数尝试——先计数、再校验）。"""
     with _writing() as conn:

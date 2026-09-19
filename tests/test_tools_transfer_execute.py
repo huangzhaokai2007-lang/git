@@ -186,3 +186,38 @@ def test_execute_is_idempotent_under_real_concurrency(seeded: Path,
     txn_id = results[0].data["txn_id"]
     assert balance(seeded) == before - 10_000                   # 只扣一次款
     assert raw(seeded, "SELECT COUNT(*) AS n FROM txn WHERE id = ?", (txn_id,))[0]["n"] == 1
+
+
+# ---------------- 卡 14b-6：幂等落库端到端（重启后重放仍有效） ----------------
+
+
+def test_execute_survives_a_restart_and_replays_identically(seeded: Path) -> None:
+    """preview → execute → 重启(清内存 + 换新连接) → 重放同 token 逐字相同，且只扣一次款。
+
+    重启的等价模拟：清空进程内 `_TOKENS` 内存缓存 + 丢弃 DAO 连接后重连同一库文件——
+    内存归零、只剩 `idempotency` 落库快照，重放必须从这里取回同一份结果。
+    """
+    token = preview_ok(PAYEE, 10_000).data["preview_token"]
+    start_balance, txn_before, audit_before = balance(seeded), count(seeded, "txn"), count(seeded, "audit_log")
+    first = transfer.execute_transfer(token)
+    assert first.ok and balance(seeded) == start_balance - 10_000
+    transfer._TOKENS.clear()                                    # 内存快照清零（模拟进程重启）
+    dao.close()
+    dao.connect_db(seeded)                                      # 全新连接，只读库文件
+    second = transfer.execute_transfer(token)
+    assert second.ok
+    assert second.data == first.data and second.facts == first.facts and second.message == first.message
+    assert balance(seeded) == start_balance - 10_000            # 余额只扣一次
+    assert count(seeded, "txn") == txn_before + 1               # 流水只 +1
+    assert count(seeded, "audit_log") == audit_before + 1       # 审计只 +1
+    row = raw(seeded, "SELECT result_json FROM idempotency WHERE token = ?", (token,))[0]
+    assert json.loads(row["result_json"])["state"] == "executed"   # 落库快照已翻转到 executed
+
+
+def test_execute_replay_does_not_count_toward_the_rate_limit(seeded: Path) -> None:
+    """幂等重放不算一次写操作：只有真正的新执行才进 `rate_limit` 表（卡 14b-6 铁律）。"""
+    token = preview_ok(PAYEE, 1_000).data["preview_token"]
+    before = count(seeded, "rate_limit")
+    transfer.execute_transfer(token)                            # 新执行 → 计 1 次
+    transfer.execute_transfer(token)                            # 重放 → 不计数
+    assert count(seeded, "rate_limit") == before + 1
