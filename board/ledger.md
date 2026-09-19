@@ -1155,3 +1155,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 16b PASS 入库；16c（界面守卫）worker 在跑（reviewer 观测 926 passed=895+31）。
 NEXT_CARD_WARNING: 同 16c WARNING。
+
+## 决策记录 2026-09-20 03:20（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：9b14523 card-16c（HEAD）；verify 绿 926 passed（895 + 31）
+  - card-16c 完成：界面分层机器守卫 31 条（数字逐字回显 + AST 分层/SQL 扫描，防假绿自证）+ 16b 竞速用例确定性化（消除 flaky）；interfaces/ 源码零改动
+
+裁决（worker 6 条待拍板）：
+  - ① 改了 16b 测试（flaky→确定性）→ **接受**（消除 flaky，路径在 tests/ 范围）
+  - ② BUSY 重试层 → 记待办（另开卡，data/ 范围）
+  - ③④ 守卫口径加宽 → 记待办
+  - ⑤⑥ 私有函数直测/清理 → 记台账
+
+NEXT_CARD: 17
+MODEL: deepseek-flash
+ACTION: run
+REASON: 16c 提交+派审；进 IM 通道 card-17（飞书 webhook 或 HTTP 轮询，wrap_untrusted + source=im，复用编排层，无网降级）。
+NEXT_CARD_WARNING: card-17 范围 interfaces/im/ + .env.example；IM 正文 wrap_untrusted 包裹 + source=im（铁律7）；分层铁律（只调 agent/）；复用同一编排层不复制；无网降级本地回环 self-test（verify 不依赖外网）。16b 已修 data 线程安全可放心多线程。
