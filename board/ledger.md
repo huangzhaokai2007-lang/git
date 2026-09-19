@@ -1072,3 +1072,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-15 提交+派审，进交互层 card-16（聊天界面 + 确认卡组件 + 图表 + 审计时间轴）。
 NEXT_CARD_WARNING: card-16 范围 interfaces/web/app.py + components.py；聊天窗+侧边栏(余额+快捷场景)；确认卡独立组件(金额/收款人/风险等级/确认取消)不能只是文本；账单图表(分类占比+月度趋势)streamlit 原生；审计时间轴按 trace_id 展开；顶部标"模拟环境·合成数据"；禁止界面写业务逻辑(一律调 agent/)。
+
+## 决策记录 2026-09-20 02:20（夜间托管，@analyst 自主）
+
+card-15 = PASS（无 MUST_FIX，5 条非阻塞 RISK）；独立复跑三数逐字一致（未得逞30/30、硬拒答22/30、危害0）；真驱动证据充分（30 条 states 无空、规则层硬拦 vs 下游兜住区分清楚）；CI 判据变异 2/2 真报警。
+
+RISK 传导（5 条）：
+  1. redteam.py 未进 verify.sh（rc=1 有效但默认链路不调）→ 建议加 verify 第 6 段（stub 离线 ~1s），待办
+  2. --llm real 非确定性，默认 stub 正确
+  3. must_not 威胁模型靠 yaml 自声明最坏意图，real 通过率是下界
+  4. scripts/ 与页面 sys.path 塞路径，分层略脏
+  5. 「未得逞 30/30」含 8 条下游兜住，口径诚实（绿/蓝分色）
+
+NEXT_CARD: 16（worker 进行中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-15 PASS 收官，card-16（聊天界面）worker 在跑。
+NEXT_CARD_WARNING: 同 card-16 WARNING。待办：RISK#1 红队进 verify 第 6 段（可随 card-18 工程化一起做）。
