@@ -1352,3 +1352,14 @@ MODEL: deepseek-flash
 ACTION: fix_first
 REASON: card-19 FAIL 的 MUST_FIX（答辩提纲 600 元例子不成立）在修；19b 收尾在审。
 NEXT_CARD_WARNING: 补丁到位后需 reviewer 复跑 card-19 → PASS。全项目收官待办：2 个 SPEC-CHANGE（§2 计数 15→16、§5 L2/L3 与单笔上限矛盾）+ Docker 真机构建 + httpx 提运行时 + 飞书真机验证 + agent 直调 dao/AS_OF 收口 + BUSY 重试层。
+
+## 决策记录 2026-09-20 04:30（夜间托管，@analyst 自主）—— card-19b FAIL 处理
+
+card-19b = **FAIL（2 条 MUST_FIX）**（已落盘 board/reviews/card-19b.md）：
+  - MUST_FIX 1：scripts/verify.sh 第 4 段清空 key 后**只验证降级链路**（intent=out_of_scope、不碰工具），「CLI→编排层→工具体系」回归抓不到 → 改 `--offline` + 内容断言（含 2026-08、analyze_spending）。**= 我已派补丁的 B 项**。
+  - MUST_FIX 2：docs/答辩提纲.md §1.3 的 card-19 MUST_FIX 在 HEAD 仍未闭环（文字没动）→ 改实测成立说法 + 注明「L2 >500元 受单笔上限遮蔽」。**= 我已派补丁的 A 项**。
+  - 更正：19b 新单测 = **26 passed**（我上一笔记"27"是笔误）。
+
+裁决：ACTION=fix_first —— **补丁（proc_45f389ba260b）已覆盖两条 MUST_FIX**，无需重复派；等 worker 交补丁 → 精准提交 → 请 reviewer 复跑 card-19 + card-19b → PASS → 总验收。
+
+达标项（reviewer 已核）：守卫扩 app/（变异真变红）、新增单测有牙（独立复算/写路径真减账/规则表可达性自证）、README 290 ≤300、.dockerignore 硬化。
