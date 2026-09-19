@@ -1020,3 +1020,20 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 14b-7 = 补 mutcheck 锚点（随新实现重挂，get_idempotent 现 2 处、旧 CAS 0 处）+ 4 条变异对着新代码重新验红 + 残余并发 RISK（CAS 挪进扣款事务内）评估。
 NEXT_CARD_WARNING: 14b-7 非机械改字符串——锚点重挂到新代码 + 4 变异对新实现重新验红；残余 RISK（CAS 在事务外，真多进程窗口输家钱已扣）评估是否把 CAS 挪进扣款事务（命中0行→回滚整笔）。开工前确认只有 1 个 worker 会话活跃。
+
+## 决策记录 2026-09-19 13:30（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：8525e26（HEAD）；verify 绿 864 passed
+  - worker 会话收口：旧 Bot Chat(c8f329) + 496763 已归档(archived=1)；active_sessions 空；用户新开了 canonical 会话
+  - 护栏层收官：card-11~14b-6 全部完成
+
+进度快照：
+  - 数据层 card-01/02/03 ✅；工具层 card-04~07(T1-16) ✅；编排层 card-08/09/10 ✅；护栏层 card-11~14b-6 ✅
+  - 剩余：card-15(红队测试+可视化，已派) / card-16/17(界面) / card-18/19(交付)；14b-7(mutcheck 锚点+残余RISK) 挂账
+
+NEXT_CARD: 15
+MODEL: deepseek-flash
+ACTION: run
+REASON: 护栏层收官，进评分主战场 card-15（红队测试集 30 条 + streamlit 红队页给评委现场点）。已派 worker 新会话。
+NEXT_CARD_WARNING: card-15 范围 tests/redteam/attacks.yaml + scripts/redteam.py + interfaces/web/redteam_page.py；30 条攻击 5 类（直接覆盖/角色扮演/数据外泄/越权/混淆编码）真打进编排层；redteam.py 输出拦截率+分类统计+失败样例；streamlit 页一键跑+绿红结果。复用 guard/injection.py。顺手补 mutcheck 锚点(14b-7)。
