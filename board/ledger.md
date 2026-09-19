@@ -946,3 +946,23 @@ MODEL: deepseek-flash
 ACTION: human
 REASON: worker 会话耗尽（连做 8 卡），14b-6 及后续卡 15~19 都需新 worker 会话。请用户醒来开新 worker 会话，14b-6 设计已完整照做即可。
 NEXT_CARD_WARNING: 14b-6 设计已就绪（见上轮 WARNING），新会话第一步只做薄壳替换 + 跑 71 条 transfer 用例做安全网，再往下。
+
+## 【施工单】card-14b-6（transfer 切幂等表端到端）—— 待新 worker 会话照做
+
+> 本施工单为「新 worker 会话」准备的完整指令（因旧 worker 会话上下文耗尽）。新会话 worker 读到本段直接照做。
+> 提交前请确认：不破坏 859 passed 基线。
+
+范围：tools/transfer.py、guard/tool_guard.py（若需）、tests/（禁扩到其他）。开工前先读 CLAUDE.md + tools/transfer.py 的 token 全生命周期。
+
+目标：把转账链路的幂等从进程内存 `_TOKENS` 快照切换到落库幂等表 `idempotency`，达成「转账链路幂等重启后仍有效」端到端。
+
+施工顺序（改一个文件跑一次 `uv run pytest -q --tb=line`）：
+1. 先读 tools/transfer.py 的 token 生命周期（preview_transfer 登记 → execute_transfer/_execute_locked 状态翻转 → _rollback_token），跑 `uv run pytest tests/test_tools_transfer.py -q` 确认 71 条全绿（安全网）。
+2. 薄壳替换：加 _load_token(token)/_store_token(token, payload) 两个薄壳，内部走 idempotency 表（token 是主键，整个 token dict 序列化进 result_json）。把原来所有 _TOKENS[...] 读写换成薄壳，行为逐字不变；跑一次（必须仍全绿）。
+3. DB 条件更新守卫：状态翻转用 `UPDATE ... WHERE token=? AND state='pending'` 语义，受影响行数 0 = 别人已先执行 → 走幂等返回；另保留 _TOKENS_LOCK（同进程串行化）双保险。跑一次。
+4. 回滚改造：改成「先事务、后写快照」——扣款/流水/审计同一事务提交成功后才 _store_token(state='executed')；_rollback_token 退化为清理半成品。跑一次 + 重点跑 transfer 用例。
+5. 端到端用例（新增）：preview_transfer → execute_transfer(token, OTP) → sqlite3.connect 新连接（=重启）→ 再 execute_transfer 同 token → 断言 data/facts/message 逐字相同、txn 行数只 +1、audit_log 只 +1、余额只扣一次；再加一条「新连接读 idempotency 行 state='executed'」。
+6. 变异自检 4 条（scripts/mutcheck_14b.py 扩写）：快照读改回内存 / 去 DB 守卫 / 回滚改先写快照后事务 / 重放走限流，应全真红。
+
+铁律：限流先计数再校验、重放不计数；幂等落库 INSERT OR IGNORE 重启有效。
+交付模板：改动清单 + pytest/verify 真实输出 + 变异自检 4 条 + 指纹 + 待拍板。做完报 WORKER_STATUS，等分析师精准提交。
