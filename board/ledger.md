@@ -1331,3 +1331,24 @@ card-19 = **FAIL（1 条 MUST_FIX）**（已落盘 board/reviews/card-19.md）�
   - 其余 4 RISK（非阻塞）：① README 309 行——reviewer 判**可接受**（该规范是代码模块规范，文档不严格适用）；② README §2 表头「真实回执摘录」但余额行是改写（数字全真）→ 建议照抄或改表头；③ verify 第4段 rc-only 弱断言 + 非离线 → 建议 --offline + 断言含 2026-08；④ app/ 未纳入守卫（19b 在做）。
 
 裁决：ACTION=fix_first —— 先修 MUST_FIX（答辩提纲 §1.3），规格矛盾记 SPEC-CHANGE 待人类。19b 继续（不受影响，不同文件）。
+
+## 决策记录 2026-09-20 04:20（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：3ca70d4 card-19b（HEAD）；verify 全绿 997 passed（970 + 27 新单测）+ 6/6 段
+  - card-19b = 守卫扩 app/ + verify第4段离线 + tests/test_cli.py(98) + tests/test_demo.py(82) + README 精简 290 + .dockerignore 硬化 21
+
+裁决（worker 5 条待拍板）：
+  - ① verify 第4段清空 key 后只验证降级链路（intent=out_of_scope、不碰工具）→ **削弱验证力**，采纳 worker 建议改 `--offline` flag（保留真实工具链 + 回执 9,152.00 + 加断言含 2026-08）
+  - ② 网页端慢测试 → 不加（已有覆盖）
+  - ③ demo 接 verify 第7段 → 不接（保持 6 段）
+  - ④ Docker 真机构建 / §2 计数 → 仍待人类
+  - ⑤ app/ 命名空间包 → 接受
+
+已派 MUST_FIX 补丁（A 答辩提纲 §1.3 + B --offline + C README 表头）；19b 已派审。
+
+NEXT_CARD: 19-fix（MUST_FIX 补丁 + 19b 收尾）
+MODEL: deepseek-flash
+ACTION: fix_first
+REASON: card-19 FAIL 的 MUST_FIX（答辩提纲 600 元例子不成立）在修；19b 收尾在审。
+NEXT_CARD_WARNING: 补丁到位后需 reviewer 复跑 card-19 → PASS。全项目收官待办：2 个 SPEC-CHANGE（§2 计数 15→16、§5 L2/L3 与单笔上限矛盾）+ Docker 真机构建 + httpx 提运行时 + 飞书真机验证 + agent 直调 dao/AS_OF 收口 + BUSY 重试层。
