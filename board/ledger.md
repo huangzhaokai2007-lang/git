@@ -1037,3 +1037,23 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 护栏层收官，进评分主战场 card-15（红队测试集 30 条 + streamlit 红队页给评委现场点）。已派 worker 新会话。
 NEXT_CARD_WARNING: card-15 范围 tests/redteam/attacks.yaml + scripts/redteam.py + interfaces/web/redteam_page.py；30 条攻击 5 类（直接覆盖/角色扮演/数据外泄/越权/混淆编码）真打进编排层；redteam.py 输出拦截率+分类统计+失败样例；streamlit 页一键跑+绿红结果。复用 guard/injection.py。顺手补 mutcheck 锚点(14b-7)。
+
+## 事故记录 2026-09-19 13:52（worker profile 误删 + 恢复）
+
+事故：用户在桌面 app 点「Delete bot and profile」误删 worker profile（本意是换干净会话）。
+  - Hermes 层面成功注销：写墓碑 profiles/.deleted/worker + 删了 config.yaml/.env/SOUL.md/skills/memories/runtime/sessions
+  - 幸存的：state.db（17 会话历史）、cron、workspace
+
+恢复（@analyst 执行）：
+  1. 备份 state.db → C:/Users/Allergic/hermes-recovery/worker-state.db.bak
+  2. 删除墓碑 profiles/.deleted/worker（关键！Hermes 靠它判「已删除」）
+  3. 补 config.yaml + .env（从 analyst 复制）+ bash scripts/sync-soul.sh worker（重建 SOUL.md）
+  4. 验证：hermes profile list 重新出现 worker；profile show worker = flash + .env/SOUL.md exists
+
+副产：worker 会话投递目标问题也一并解决——旧 c8f329 改名（不再占 "Bot Chat"），新派活 create-if-missing 创建了全新干净 "Bot Chat"（20260919_135157_a4b4bc）。
+
+NEXT_CARD: 15（已重派到新干净会话）
+MODEL: deepseek-flash
+ACTION: run
+REASON: worker profile 恢复，card-15 派给全新 "Bot Chat"（a4b4bc）。
+NEXT_CARD_WARNING: 同 card-15 WARNING。注意 worker Skills=0（技能目录被删，不影响它从仓库读卡干活）；若后续发现缺技能再补。
