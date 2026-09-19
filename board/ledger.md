@@ -1363,3 +1363,26 @@ card-19b = **FAIL（2 条 MUST_FIX）**（已落盘 board/reviews/card-19b.md）
 裁决：ACTION=fix_first —— **补丁（proc_45f389ba260b）已覆盖两条 MUST_FIX**，无需重复派；等 worker 交补丁 → 精准提交 → 请 reviewer 复跑 card-19 + card-19b → PASS → 总验收。
 
 达标项（reviewer 已核）：守卫扩 app/（变异真变红）、新增单测有牙（独立复算/写路径真减账/规则表可达性自证）、README 290 ≤300、.dockerignore 硬化。
+
+## 决策记录 2026-09-20 04:40（夜间托管，@analyst 自主）—— MUST_FIX 补丁闭环
+
+事实：
+  - 最新存档点：83b0c5b（card-19/19b fix）；verify 全绿 997 passed + 6/6 段
+  - 补丁 5 文件：app/cli.py(113，--offline flag)、scripts/demo.py(209，时段性缺陷修复)、scripts/verify.sh(86，第4段--offline+断言)、README.md(291，表头)、docs/答辩提纲.md(175，§1.3 按实测真值表重写)
+  - 第 4 段实测：回执「2026-08 共支出 9,152.00 元，环比 -32%」+ 工具 analyze_spending + **断言通过：回执含 2026-08**（MUST_FIX 1 闭环）
+  - §1.3 已按实测真值表重写（600 元=OVER_LIMIT、tier=None；注明 L2>500元 不可达）（MUST_FIX 2 闭环）
+
+裁决（worker 5 条待拍板）：
+  - ① 越界项⑥ scripts/demo.py（时段性缺陷，白天上台会红）→ **追认**（卡19交付物）
+  - ② app/cli 离线替身收款人王五→张小美（稳落 L2）→ **接受**
+  - ③ --offline 不钉时钟（CLI 忠于真实时间）→ **接受**
+  - ④ Docker 真机构建 / §2 计数 → 仍待人类
+  - ⑤ verify 第6段照实打印 8 条「兜」案例 → **接受**（体现两层防御，非假象）
+
+已请 reviewer 一次复跑 card-19 + card-19b（补丁是否闭环）。
+
+NEXT_CARD: none（待复验）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 两条 MUST_FIX 补丁已提交并自验闭环；等 reviewer 复跑 PASS → 总验收。
+NEXT_CARD_WARNING: 收官待办：2 SPEC-CHANGE（§2 计数、§5 L2/L3 与单笔上限）+ Docker 真机构建 + httpx 提运行时 + 飞书真机验证 + agent 直调 dao/AS_OF 收口 + BUSY 重试层。
