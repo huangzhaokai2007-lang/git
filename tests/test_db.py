@@ -11,7 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from data.db import TABLES, connect, init_db, reset_db, schema_sql, statements, transaction
+from data.db import (SchemaDriftError, TABLES, connect, init_db, reference_columns, reset_db, schema_drift,
+                     schema_sql, statements, transaction)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SPEC_PATH = REPO_ROOT / "docs" / "01-接口规格.md"
@@ -242,3 +243,47 @@ def test_connect_does_not_create_schema(db_path: Path) -> None:
         assert table_names(connection) == set()
     finally:
         connection.close()
+
+
+# ---------------- 卡 16b：旧库结构漂移与自检 ----------------
+
+def test_init_db_repairs_a_partially_stale_database(db_path: Path) -> None:
+    """**部分过期**的库（少了卡 14b 的 idempotency / rate_limit）必须被补齐，而不是崩。
+
+    修前的实现只判断"有没有表缺"，缺了就对**全量** DDL 无条件执行 → `table user already exists`。
+    这条就是卡 16 现场踩到的那个坑的回归。
+    """
+    stale = db_path
+    connection = connect(stale)
+    kept_tables = [name for name in TABLES if name not in ("idempotency", "rate_limit")]
+    with transaction(connection):
+        for statement in statements(schema_sql()):
+            if re.search(r"CREATE TABLE\s+(\w+)", statement).group(1) in kept_tables:
+                connection.execute(statement)
+    connection.close()
+
+    repaired = init_db(stale)
+    try:
+        assert table_names(repaired) == set(TABLES)
+        assert schema_drift(repaired) == {}
+    finally:
+        repaired.close()
+
+
+def test_init_db_reports_schema_drift_with_an_actionable_hint(db_path: Path) -> None:
+    """缺列（表在但列不全）无法安全补建 → 报 `SchemaDriftError`，消息里带上重建命令。"""
+    connection = init_db(db_path)
+    with transaction(connection):
+        connection.execute("ALTER TABLE audit_log DROP COLUMN error_code")
+    connection.close()
+
+    assert schema_drift(connect(db_path)) == {"audit_log": ["error_code"]}
+    with pytest.raises(SchemaDriftError, match="audit_log") as caught:
+        init_db(db_path)
+    assert "data.seed --reset" in str(caught.value)
+
+
+def test_schema_drift_is_empty_for_a_fresh_database(conn: sqlite3.Connection) -> None:
+    """负向对照：刚建好的库必须零漂移（防"自检永远报警"这种假红）。"""
+    assert schema_drift(conn) == {}
+    assert set(reference_columns()) == set(TABLES)

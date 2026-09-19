@@ -195,9 +195,17 @@ def test_system_prompt_lists_every_intent_and_never_contains_user_text() -> None
     assert text not in system and user == text
 
 
-def test_build_messages_keeps_history_as_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    system, user = classifier.build_messages("第二句", history=["第一句"])
-    assert "第一句" not in system and user == "第一句\n第二句"
+def test_build_messages_sends_history_as_separate_turns() -> None:
+    """卡 16b：history 每轮各成 user/assistant 两条消息（role-separated + 边界标记），当前话单独一条。
+
+    为什么不是"两条光秃秃的 user 消息"：实测那样**仍然 0/6 串味**（模型会答第一条历史），补上边界
+    标记才 6/6 —— 见 `classifier.build_messages` 文档里的对照表。
+    """
+    system, turns = classifier.build_messages("第二句", history=["第一句"])
+    assert "第一句" not in system and "第二句" not in system
+    assert turns == [{"role": "user", "content": "第一句"},
+                     {"role": "assistant", "content": classifier.HISTORY_MARKER},
+                     {"role": "user", "content": "第二句"}]
 
 
 # ---------------- classifier.py：正常 / 重试 / 兜底 ----------------

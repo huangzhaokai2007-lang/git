@@ -32,6 +32,10 @@ DEFAULT_MODEL = "deepseek-chat"                  # 来源：`.env.example` 里�
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
+#: 一条聊天消息（OpenAI 兼容格式）。`chat_json` 的 `user` 既接受**字符串**（单条用户消息），
+#: 也接受**消息列表**（role-separated，多轮；卡 16b 给分类器的 history 用）。
+Message = dict[str, str]
+
 
 class LLMUnavailable(RuntimeError):
     """LLM 不可用：缺配置 / 超时 / 网络异常 / 连续多次拿不到合法 JSON。
@@ -60,14 +64,24 @@ def build_client() -> OpenAI:
                   timeout=TIMEOUT_SECONDS)
 
 
-def _complete(system: str, user: str) -> str:
+def messages_of(system: str, user: str | list[Message]) -> list[Message]:
+    """`(system, user)` → OpenAI 兼容的 message 数组。
+
+    `user` 是字符串 → `[system, user]`（与旧行为逐字一致）；是列表 → `[system, *user]`
+    （role-separated 多轮：分类器把 history 每轮各放一条独立消息，卡 16b）。
+    """
+    turns = [{"role": "user", "content": user}] if isinstance(user, str) else [dict(turn) for turn in user]
+    return [{"role": "system", "content": system}, *turns]
+
+
+def _complete(system: str, user: str | list[Message]) -> str:
     """单次调用，返回**原始 JSON 文本**；传输层异常统一归一化为 `LLMUnavailable`。"""
     settings = load_settings()
     try:
         response = build_client().chat.completions.create(
             model=settings["model"], temperature=TEMPERATURE, timeout=TIMEOUT_SECONDS,
             response_format={"type": "json_object"},
-            messages=[{"role": "system", "content": system}, {"role": "user", "content": user}])
+            messages=messages_of(system, user))
     except OpenAIError as exc:            # 超时 / 连接失败 / HTTP 状态码异常都在这条基类之下
         raise LLMUnavailable(f"LLM 调用失败：{type(exc).__name__}") from exc
     choices = getattr(response, "choices", None) or []
@@ -77,7 +91,7 @@ def _complete(system: str, user: str) -> str:
     return content
 
 
-def chat_json(system: str, user: str, schema: type[ModelT]) -> ModelT:
+def chat_json(system: str, user: str | list[Message], schema: type[ModelT]) -> ModelT:
     """取回 JSON 文本并用 `schema` 做**二次校验**，返回模型实例。
 
     重试语义（卡 08 第 1 条）：总尝试 `1 + MAX_RETRIES` 次；「传输失败」与「JSON 非法 / 不符合 schema」

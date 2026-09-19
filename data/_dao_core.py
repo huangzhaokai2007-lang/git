@@ -3,10 +3,16 @@
 依赖方向**单向**：`data/dao.py` → 本模块；本模块只 import 标准库 + `data/db.py`，**绝不反向** import
 `data.dao`（否则形成回边，卡 05b 明文禁止）。
 
-⚠ 为什么连接全局（`_connection`/`_connection_path`）必须跟 `connect_db/close/connection/_one/_many/_writing`
+⚠ 为什么连接状态（线程局部 `_local` + `_connection_path`）必须跟 `connect_db/close/connection/_one/_many/_writing`
 以及写原语 `_insert/_apply_update` **一起**待在这里：把它们拆开就会出现**两份连接状态**，
 `test_writes_join_an_outer_transaction_and_roll_back_together`（外层事务内不重复 BEGIN）会当场变红
 —— 卡 05b 验收门 ① 钉的就是这条边界。
+
+卡 16b：连接从"进程级单例"改成**线程局部**（`threading.local`）。`sqlite3` 的连接有线程亲和，
+而调用方天然多线程（Streamlit 每次 rerun 一个线程、FastAPI 每个请求一个线程）—— 单例连接在第二个
+线程上就抛 `ProgrammingError: SQLite objects created in a thread can only be used in that same thread`。
+线程各持一份连接后：事务互相独立、谁也不串谁；同一文件的并发写由 SQLite 写锁 +
+`data.db.connect` 的 `busy_timeout` 串行化。线程结束时其连接随线程局部变量被回收并关闭。
 
 本模块不做任何业务判断：金额一律整数分、枚举越界 → `ValueError`、写按主键幂等、不代写审计。
 """
@@ -18,6 +24,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 import uuid
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta
@@ -50,14 +57,19 @@ _AUDIT_COLUMNS = ("id", "trace_id", "session_id", "ts", "actor", "intent", "tool
 _RISK_COLUMNS = ("id", "trace_id", "ts", "user_id", "factor", "detail", "action_taken")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _PERIOD_RE = re.compile(r"^(\d{4})(?:-(\d{2}))?$")
-_connection: sqlite3.Connection | None = None
+#: 线程局部的连接（`conn` / `path`）：**每个线程一份**，见模块头「卡 16b」。
+_local = threading.local()
+#: 当前生效的库文件路径（`connect_db` 设置；未设置时取环境变量 / 默认路径）。
 _connection_path: Path | None = None
 
 
 
 
 def connect_db(db_path: str | Path | None = None) -> Path:
-    """指定本进程 DAO 使用的库文件（先关掉旧连接）；缺省取环境变量 `DB_PATH`。返回生效路径。"""
+    """指定本进程 DAO 使用的库文件（先关掉**本线程**的旧连接）；缺省取环境变量 `DB_PATH`。返回生效路径。
+
+    其它线程的连接在下一次 `connection()` 时按新路径重开（线程各自持有路径，不需要全局登记表）。
+    """
     global _connection_path
     close()
     _connection_path = Path(db_path or os.environ.get("DB_PATH") or DEFAULT_DB_PATH)
@@ -65,19 +77,37 @@ def connect_db(db_path: str | Path | None = None) -> Path:
     return _connection_path
 
 
+def db_path() -> Path:
+    """当前生效的库文件（未 `connect_db` 时取环境变量 `DB_PATH`，再退到默认路径）。"""
+    return _connection_path or Path(os.environ.get("DB_PATH") or DEFAULT_DB_PATH)
+
+
 def close() -> None:
-    global _connection
-    if _connection is not None:
-        _connection.close()
-        _connection = None
+    """关掉**本线程**的连接（其余线程各持一份，各自按需重连）。"""
+    conn = getattr(_local, "conn", None)
+    _local.conn, _local.path = None, None
+    if conn is not None:
+        conn.close()
 
 
 def connection() -> sqlite3.Connection:
-    """共享连接（自动提交 + 外键开启，建表幂等）；工具层组合多步事务时用它。"""
-    global _connection
-    if _connection is None:
-        _connection = init_db(_connection_path or Path(os.environ.get("DB_PATH") or DEFAULT_DB_PATH))
-    return _connection
+    """**当前线程**的连接（自动提交 + 外键开启 + 建表幂等）；工具层组合多步事务时用它。
+
+    为什么按线程（卡 16b）：`sqlite3` 的连接有线程亲和（默认 `check_same_thread=True`），而调用方
+    天然多线程（Streamlit 每次 rerun 一个线程、FastAPI 每个请求一个线程）—— 进程级单例连接在第二个
+    线程上就会抛 `ProgrammingError`。线程各持一份后：事务互相独立、`_writing()` 的"是否已在外层事务里"
+    永远看到本线程的事务；跨线程写竞争由 SQLite 写锁 + `data.db.connect` 的 `busy_timeout` 串行化。
+    库文件被 `connect_db` 换掉时，本线程的旧连接会被关掉重开。
+    """
+    path = db_path()
+    conn = getattr(_local, "conn", None)
+    if conn is not None and getattr(_local, "path", None) == path:
+        return conn
+    if conn is not None:                                    # 换库了：丢掉本线程的旧连接
+        conn.close()
+    conn = init_db(path)
+    _local.conn, _local.path = conn, path
+    return conn
 
 
 def _one(sql: str, params: tuple = ()) -> dict | None:
