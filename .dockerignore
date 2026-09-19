@@ -1,0 +1,13 @@
+# 构建上下文瘦身 + 绝不把密钥/本地库/缓存打进镜像
+.venv/
+.git/
+.gitignore
+.pytest_cache/
+**/__pycache__/
+*.py[cod]
+logs/
+board/
+agents/
+.env
+data/*.db
+data/*.db-*

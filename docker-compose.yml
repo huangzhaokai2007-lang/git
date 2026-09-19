@@ -1,0 +1,54 @@
+# 一键起两件事（同一镜像、共享一份合成数据卷）：
+#   评测入口  http://127.0.0.1:8000/api/chat   （POST {"text": "查一下余额"}）
+#   网页端    http://127.0.0.1:8501
+#
+# 用法：
+#   cp .env.example .env      # 可选：填 LLM_API_KEY 才会真的走大模型；不填也能起（降级演示）
+#   docker compose up --build
+#   验收：docker compose exec api bash scripts/verify.sh
+#
+# 注：`env_file` 用的是 compose ≥ 2.24 的长语法（required: false，.env 缺失也不报错）；
+#     老版本 compose 可把这两段 env_file 删掉，改用 `docker compose --env-file .env up`。
+services:
+  api:
+    build: .
+    image: ai-banking-agent:latest
+    container_name: banking-api
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: "8000"
+      DB_PATH: data/bank.db
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - bankdata:/app/data          # 与网页端共享：在网页端转的账，评测入口也看得到
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  web:
+    image: ai-banking-agent:latest
+    container_name: banking-web
+    depends_on:
+      - api
+    environment:
+      DB_PATH: data/bank.db
+      STREAMLIT_SERVER_HEADLESS: "true"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - bankdata:/app/data
+    ports:
+      - "8501:8501"
+    command:
+      - streamlit
+      - run
+      - interfaces/web/app.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+    restart: unless-stopped
+
+volumes:
+  bankdata:
