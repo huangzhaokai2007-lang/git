@@ -1259,3 +1259,23 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 17b PASS 入库；card-18 工程化在跑。
 NEXT_CARD_WARNING: 同 card-18 WARNING。待办：agent 直调 dao/AS_OF 越层收口（card-09 TODO，AS_OF 走 tools 访问器）。
+
+## 决策记录 2026-09-20 04:30（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：6a67a7a card-18（HEAD）；verify 绿 970 passed + RC=0（6 段）
+  - card-18 = 工程化 11 文件（README 267 + docs/03 127 + Dockerfile 38 + compose 54 + dockerignore 13 + bootstrap/docker-entrypoint/api_smoke + verify 81(5→6段) + interfaces/api 2）；评测入口真机验证 POST /api/chat 正确
+
+裁决（worker 10 条待拍板）：
+  - ① interfaces/api/ 落点 → **接受**（只调 agent/orchestrator，过 16c 守卫）
+  - ② Docker 未真机构建（本机无 docker）→ **接受**（静态核对 + 等价命令序列验证）
+  - ③ **SPEC-CHANGE 待人类**：规格 §2 标题「15 个」vs 表内 T1–T16（16 行，T16 plan_gift 后加）→ README 照 16 行 + 脚注（正确）；规格标题改 16 还是 T16 移出契约 = **人类拍板**
+  - ④ verify 第 4 段 SKIP（app/cli.py 未实现）→ 并进 card-19 补，目标 verify 6/6
+  - ⑤ 第 6 段③评测入口冒烟 → **保留**（核心交付需机器守卫）
+  - ⑥⑦⑧⑨⑩（--quiet / API_HOST/PORT / httpx 提运行时 / 瘦镜像 / README-docs 重复）→ 记待办不阻塞
+
+NEXT_CARD: 19（最后一张）
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-18 提交+派审；派最后一张 card-19（demo + 答辩提纲 + README 演示段 + app/cli.py 补 verify 6/6）。
+NEXT_CARD_WARNING: card-19 范围 scripts/demo.py + docs/答辩提纲.md + README 演示段 + app/cli.py（分层：只调 agent/）；目标 verify 6/6 全绿；不破坏 970 基线。全项目收官后需：SPEC-CHANGE（§2 标题）+ 待办清单汇总 + 用户总验收。
