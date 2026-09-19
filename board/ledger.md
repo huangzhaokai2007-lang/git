@@ -1089,3 +1089,22 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-15 PASS 收官，card-16（聊天界面）worker 在跑。
 NEXT_CARD_WARNING: 同 card-16 WARNING。待办：RISK#1 红队进 verify 第 6 段（可随 card-18 工程化一起做）。
+
+## 决策记录 2026-09-20 02:30（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：2750d4f card-16（HEAD）；verify 绿 864 passed
+  - card-16 完成：interfaces/web/app.py(246) + components.py(253) + 3 截图；18 项端到端自检（AppTest 真跑）+ 真浏览器 live + 分层自检干净
+
+card-16 挖出 4 个底层坑（会阻碍 17/18）→ 派 card-16b 修：
+  - #1 分类器 history 串味（6/6 被带偏）→ role-separated messages
+  - #2 槽位不归一化（account_type 中文/变体）→ 归一化表
+  - #3 data/ SQLite 线程绑定（Streamlit/FastAPI 换线程崩）→ 线程安全方案【最高优先】
+  - #4 旧库结构漂移 → CREATE TABLE IF NOT EXISTS
+  - 其余待拍板（截图位置/OTP口径/Turn 不带 facts）记台账
+
+NEXT_CARD: 16b
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-16 提交+派审；4 个底层坑必须收口（#3 会砸 card 17/18 的多线程），派 card-16b。
+NEXT_CARD_WARNING: card-16b 范围 data/_dao_core.py + data/dao.py + data/db.py + agent/classifier.py；修 #1/#2/#3/#4；不改规格；不破坏 864 基线。
