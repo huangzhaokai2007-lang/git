@@ -8,6 +8,14 @@
 logs/
 board/
 agents/
-.env
 data/*.db
 data/*.db-*
+
+# 凭据硬防线：任何环境文件变体、私钥、凭证文件都不进构建上下文
+.env
+.env.*
+.env.local
+*.key
+*.pem
+credentials*
+**/credentials*

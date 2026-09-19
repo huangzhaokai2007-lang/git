@@ -1,18 +1,19 @@
-"""卡 16c 单测：交互层（`interfaces/`）的两条**机器守卫** —— 之前这两条铁律没有守卫。
+"""卡 16c / 19b 单测：**交互层**（`interfaces/` 与 `app/`）的机器守卫 —— 这些铁律之前只靠人眼 review。
 
-背景（reviewer 审 card-16 时发现）：把 `components._yuan` 加 `1.0`，864 条用例**全绿**、没有一条变红 ——
-"界面不写业务逻辑 / 不改数字"（CLAUDE.md 铁律 1+2、卡 16 禁止项）此前只靠人眼 review。本文件补两条：
+背景（reviewer 审 card-16 时发现）：把 `components._yuan` 加 `1.0`，864 条用例**全绿**、没有一条变红。
+本文件守三件事：
 
 ① **数字只解析不重算**：`components.parse_bill` 解析出来的每个数字，都必须**逐字等于**回执文本里的那个
    数字。期望值来自本文件手写的回执串（独立于被测实现），任何"+1 / ×100 / 四舍五入"都会被逐字比对抓住。
-② **分层与 SQL**：`interfaces/**` 不得 import `tools` / `data` / `guard` / `sqlite3`，不得出现 SQL 语句。
+② **分层与 SQL**：`interfaces/**` 与 `app/**`（卡 19 新增的命令行入口同属交互层）不得 import
+   `tools` / `data` / `guard` / `sqlite3`，不得出现 SQL 语句。
+③ **IM 的包裹入口**（卡 17b）：不可信文本包裹必须走 `agent.channel.wrap_untrusted` 这个 agent/ 侧薄函数
+   （`interfaces → agent → guard` 单向），不许"借"别的模块命名空间去掏 `guard/`。
 
-两条都自证"不是假绿"：
-- ① 附**元用例** `test_a_recomputed_number_would_be_caught`：把 `_yuan` 换成"加 1"的假实现，逐字比对必须发现；
-- ② 断言扫描**真的覆盖**了已知界面文件、且确实读到了允许的 `agent` import（空扫描 → 直接判红），
-  并把探测函数喂给合成的违规/干净源码，证明它能抓 `import tools` 与 `SELECT ... FROM`；
-- ③ **卡 17b**：IM 层的不可信文本包裹必须走 `agent.channel.wrap_untrusted` 这个 agent/ 侧通道薄函数
-  （`interfaces → agent → guard` 单向），不许"借"别的模块命名空间去掏 `guard/`。
+三条都自证"不是假绿"：① 附**元用例** `test_a_recomputed_number_would_be_caught`（把 `_yuan` 换成
+"加 1"的假实现，逐字比对必须发现）；② 断言扫描**真的覆盖**两个根目录下的已知文件、且确实读到了
+允许的 `agent` import（空扫描 → 直接判红），并把探测器喂给合成的违规/干净源码，证明它能抓
+`import tools` 与 `SELECT ... FROM`；③ 见 `test_im_channel_wraps_through_the_agent_seam`。
 """
 
 from __future__ import annotations
@@ -25,12 +26,15 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-UI_DIR = REPO_ROOT / "interfaces"
+#: 交互层（只允许调 `agent/` 的两个根目录）：网页/IM/评测入口 + 命令行入口
+INTERFACES = REPO_ROOT / "interfaces"
+APP_DIR = REPO_ROOT / "app"
+LAYER_DIRS = (INTERFACES, APP_DIR)
 
 
 def _load_ui_module(name: str):
     """按**文件路径**加载界面模块：`interfaces/` 没有 `__init__.py`，不往 `sys.path` 里塞路径。"""
-    path = UI_DIR / "web" / f"{name}.py"
+    path = INTERFACES / "web" / f"{name}.py"
     spec = importlib.util.spec_from_file_location(f"ui_{name}", path)
     assert spec is not None and spec.loader is not None, f"加载不到界面模块：{path}"
     module = importlib.util.module_from_spec(spec)
@@ -167,29 +171,34 @@ def sql_hits(source: str) -> list[str]:
                    for match in SQL_PATTERNS.finditer(node.value)})
 
 
-def ui_sources() -> dict[Path, str]:
-    """`interfaces/**/*.py` 的源码（按路径排序，便于逐条报平安/报问题）。"""
-    return {path: path.read_text(encoding="utf-8") for path in sorted(UI_DIR.rglob("*.py"))}
+def layer_sources() -> dict[Path, str]:
+    """交互层两个根目录下 `**/*.py` 的源码（按路径排序，便于逐条报平安/报问题）。"""
+    paths = sorted(path for root in LAYER_DIRS for path in root.rglob("*.py"))
+    return {path: path.read_text(encoding="utf-8") for path in paths}
 
 
-def test_the_scan_really_covers_the_interface_tree() -> None:
-    """防空扫描假绿：必须真扫到已知界面文件，且确实读到了**允许**的 `agent` import。"""
-    sources = ui_sources()
+def test_the_scan_really_covers_both_layer_roots() -> None:
+    """防空扫描假绿：**两个根目录**都要真扫到已知文件，且各自确实读到了允许的 `agent` import。"""
+    sources = layer_sources()
     names = {path.name for path in sources}
-    assert {"app.py", "components.py", "redteam_page.py"} <= names, f"扫描没覆盖界面文件：{sorted(names)}"
-    assert any("from agent import" in text for text in sources.values()), \
-        "扫描没读到允许的 `from agent import …` —— 扫描逻辑本身失效了"
+    assert {"app.py", "components.py", "redteam_page.py", "cli.py"} <= names, f"扫描没覆盖：{sorted(names)}"
+    for root in LAYER_DIRS:
+        found = [path for path in sources if path.is_relative_to(root)]
+        assert found, f"扫描没进这个根目录：{root}"
+        assert any("from agent import" in sources[path] for path in found), \
+            f"{root.name}/ 里没读到允许的 `from agent import …` —— 扫描逻辑本身失效了"
 
 
-def test_interface_tree_never_imports_tools_data_guard_or_sqlite3() -> None:
-    problems = [f"{path.name}: {root}" for path, text in ui_sources().items()
+def test_layer_tree_never_imports_tools_data_guard_or_sqlite3() -> None:
+    problems = [f"{path.relative_to(REPO_ROOT)}: {root}" for path, text in layer_sources().items()
                 for root in forbidden_imports(text)]
-    assert not problems, "界面层越层 import（只能调 agent/）：\n  " + "\n  ".join(problems)
+    assert not problems, "交互层越层 import（只能调 agent/）：\n  " + "\n  ".join(problems)
 
 
-def test_interface_tree_never_writes_sql() -> None:
-    problems = [f"{path.name}: {hit!r}" for path, text in ui_sources().items() for hit in sql_hits(text)]
-    assert not problems, "界面层出现 SQL 语句（读数据一律走 agent/ → tools/）：\n  " + "\n  ".join(problems)
+def test_layer_tree_never_writes_sql() -> None:
+    problems = [f"{path.relative_to(REPO_ROOT)}: {hit!r}" for path, text in layer_sources().items()
+                for hit in sql_hits(text)]
+    assert not problems, "交互层出现 SQL 语句（读数据一律走 agent/ → tools/）：\n  " + "\n  ".join(problems)
 
 
 @pytest.mark.parametrize("bad", [
@@ -222,8 +231,15 @@ def test_detector_catches_sql_in_code(bad: str) -> None:
 
 # ---------------- ③ IM 通道的包裹入口（卡 17b） ----------------
 
-#: IM 层的通道模块：它是 interfaces/ 里唯一调包裹的地方
-IM_CHANNEL = UI_DIR / "im" / "channel.py"
+#: IM 层的通道模块：它是交互层里唯一调包裹的地方
+IM_CHANNEL = INTERFACES / "im" / "channel.py"
+
+
+def test_the_scan_also_covers_the_app_root() -> None:
+    """卡 19b：命令行入口（`app/cli.py`）同属交互层，必须在扫描范围内（否则它就成了守卫盲区）。"""
+    sources = layer_sources()
+    assert APP_DIR / "cli.py" in sources, f"没扫到命令行入口：{sorted(path.name for path in sources)}"
+    assert forbidden_imports(sources[APP_DIR / "cli.py"]) == []
 
 
 def test_im_channel_wraps_through_the_agent_seam() -> None:

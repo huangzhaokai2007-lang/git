@@ -39,9 +39,9 @@ else
   skip "还没有用例集（请做卡 11）"
 fi
 
-step "4/6 冒烟对话"
+step "4/6 冒烟对话（清空 LLM key → 走离线确定链路，不依赖外网）"
 if [ -f app/cli.py ]; then
-  $PY -m app.cli "帮我看看上个月花了多少" || FAIL=1
+  LLM_API_KEY= $PY -m app.cli "帮我看看上个月花了多少" || FAIL=1
 else
   skip "app/cli.py 未实现（请做卡 09）"
 fi

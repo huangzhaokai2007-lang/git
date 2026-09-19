@@ -15,30 +15,16 @@
 
 ## 1. 30 秒跑起来
 
-本地（推荐给评委现场）：
-
 ```bash
-bash scripts/bootstrap.sh                      # 一条命令：装依赖 → 造合成数据 → 跑一键验收
+bash scripts/bootstrap.sh                      # 一条命令：装依赖 → 造合成数据 → 跑一键验收（离线）
 uv run streamlit run interfaces/web/app.py     # 网页端      → http://127.0.0.1:8501
 uv run python -m interfaces.api                # 评测入口    → POST http://127.0.0.1:8000/api/chat
 uv run python -m interfaces.im                 # IM 通道     → POST http://127.0.0.1:8090/im/loopback
+uv run python scripts/demo.py                  # 现场演示：三通道 + 注入 + 写路径（12/12 断言，离线）
+docker compose up --build                      # 容器：评测入口 :8000 / 网页端 :8501（可选先 cp .env.example .env）
 ```
 
-容器（同一镜像、共享一份合成数据卷）：
-
-```bash
-cp .env.example .env            # 可选：不填 LLM_API_KEY 也能起（意图识别降级，业务数字照常）
-docker compose up --build       # 评测入口 :8000 / 网页端 :8501
-```
-
-现场演示：一条命令跑完三条通道 + 注入防护 + 写路径四步（离线可演）。
-
-```bash
-uv run python scripts/demo.py   # 12/12 断言全绿；--quick 跳过网页端（约 5 秒）
-```
-
-运行细节、离线行为矩阵、常见问题见 **`docs/03-运行与评测.md`**；
-演示脚本与问答预案见 **`docs/答辩提纲.md`**（第 14 节有速查）。
+运行细节与离线行为矩阵见 **`docs/03-运行与评测.md`**；演示脚本与 Q&A 预案见 **`docs/答辩提纲.md`**（§14 有速查）。
 
 ---
 
@@ -192,13 +178,8 @@ L2 工具层（白名单 + 归属断言 + 限额 + 幂等 + 限流）→ L3 交�
 一键验收（**全程离线**，6 段）：
 
 ```bash
-bash scripts/verify.sh
-# 1/6 依赖与环境（本地库不存在则造合成数据）
-# 2/6 单元测试            970 passed
-# 3/6 评测用例            用例通过率: 30/30（100.0%）
-# 4/6 冒烟对话            app/cli.py 未实现 → SKIP（卡 09 未做）
-# 5/6 红线检查            84 passed（注入检测 + 数字校验器）
-# 6/6 通道/红队/评测入口   红队 30 条、IM 自检 7/7、评测入口冒烟 4/4
+bash scripts/verify.sh   # 2/6 单测 970 passed · 3/6 评测用例 30/30 · 4/6 冒烟对话（CLI，清空 key 走离线确定链路）
+                         # 5/6 红线 84 passed · 6/6 红队未得逞 30/30 + IM 自检 7/7 + 评测入口冒烟 4/4
 ```
 
 **HTTP 评测入口**（契约字段冻结）：
