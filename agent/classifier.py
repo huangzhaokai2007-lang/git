@@ -107,7 +107,7 @@ def _slot_table() -> str:
 
 # ---------------- 槽位取值归一化（卡 16b） ----------------
 
-#: 枚举型槽位的**取值归一化表**（口径同 `orchestrator.resolve_period`：LLM 填什么都可以，代码说了算）。
+#: 枚举型槽位的**取值归一化表**（口径同 `agent/period.resolve_period`：LLM 填什么都可以，代码说了算）。
 #: 实测分类器会填中文/变体（'储蓄卡' / '储蓄账户' / 'credit_card'），而工具层的 `account_type`
 #: 只认 `savings|credit` —— 不归一化就是 `INVALID_ARGUMENT`，用户看到"参数不合法"。
 SLOT_VALUE_ALIASES: dict[str, dict[str, str]] = {

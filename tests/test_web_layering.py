@@ -10,7 +10,9 @@
 两条都自证"不是假绿"：
 - ① 附**元用例** `test_a_recomputed_number_would_be_caught`：把 `_yuan` 换成"加 1"的假实现，逐字比对必须发现；
 - ② 断言扫描**真的覆盖**了已知界面文件、且确实读到了允许的 `agent` import（空扫描 → 直接判红），
-  并把探测函数喂给合成的违规/干净源码，证明它能抓 `import tools` 与 `SELECT ... FROM`。
+  并把探测函数喂给合成的违规/干净源码，证明它能抓 `import tools` 与 `SELECT ... FROM`；
+- ③ **卡 17b**：IM 层的不可信文本包裹必须走 `agent.channel.wrap_untrusted` 这个 agent/ 侧通道薄函数
+  （`interfaces → agent → guard` 单向），不许"借"别的模块命名空间去掏 `guard/`。
 """
 
 from __future__ import annotations
@@ -216,6 +218,32 @@ def test_detector_allows_the_permitted_imports(clean: str) -> None:
 ])
 def test_detector_catches_sql_in_code(bad: str) -> None:
     assert sql_hits(bad), f"漏掉了：{bad!r}"
+
+
+# ---------------- ③ IM 通道的包裹入口（卡 17b） ----------------
+
+#: IM 层的通道模块：它是 interfaces/ 里唯一调包裹的地方
+IM_CHANNEL = UI_DIR / "im" / "channel.py"
+
+
+def test_im_channel_wraps_through_the_agent_seam() -> None:
+    """卡 17b：IM 层包裹不可信文本必须走 `agent.channel.wrap_untrusted`（interfaces→agent→guard）。
+
+    反例（卡 17 的原写法 `orchestrator.injection.wrap_untrusted`）：能过"只查 import 语句"的分层守卫，
+    但脆弱（编排层哪天不再 import `injection` 就静默失效），语义上也等于接口层直接掏护栏层。
+    """
+    assert IM_CHANNEL.exists(), f"没有 IM 通道模块：{IM_CHANNEL}"
+    source = IM_CHANNEL.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    imported = {alias.name for node in ast.walk(tree)
+                if isinstance(node, ast.ImportFrom) and (node.module or "") == "agent.channel"
+                for alias in node.names}
+    assert "wrap_untrusted" in imported, \
+        "interfaces/im/channel.py 必须 import agent.channel.wrap_untrusted（不许各层自己去掏 guard/）"
+    borrows = [node.value.id for node in ast.walk(tree)                # 形如 `<某模块>.injection`
+               if isinstance(node, ast.Attribute) and node.attr == "injection"
+               and isinstance(node.value, ast.Name)]
+    assert not borrows, f"不许借别的模块的命名空间掏护栏层（发现 {borrows}；用 agent.channel.wrap_untrusted）"
 
 
 def test_detector_does_not_flag_chinese_prose_or_docstrings() -> None:

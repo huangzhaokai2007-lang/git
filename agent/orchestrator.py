@@ -18,8 +18,10 @@
 - §4 的 `SLOT_FILL` 在本卡落地为「代码补齐 + 校验」：复用 classifier 已给出的 `slots`，
   **不额外调一次 LLM**（少一次网络往返、也少一次幻觉机会）；是否追问由本层的 `REQUIRED_SLOTS` 决定
   （classifier 的 `missing_slots` 只作参考 —— 铁律 1：代码说了算）。
-- 相对时间（「上个月」/「本月」）由**代码**解析（剧本第 206 行的验收要求「上个月花了多少」必须真的调到
-  `analyze_spending`）：时间锚 = `data.seed.AS_OF`；分析类意图的 `period` 认不出时取锚点当月；
+- 相对时间（「上个月」/「本月」/`last_month` 等变体）由**代码**解析（剧本第 206 行的验收要求
+  「上个月花了多少」必须真的调到 `analyze_spending`）：时间锚 = `data.seed.AS_OF`；分析类意图
+  **完全没给** `period` 时取锚点当月（卡 09 口径），而**给了却认不出**（表外写法/其它相对说法）
+  则判缺失 → CLARIFY 追问 —— 卡 17b 实测旧实现会静默回落当月，把「上个月」答成「本月 0.00 元」；
   `txn_query` 的显式区间**不猜** —— 缺了就用 `REQUIRED_SLOTS` 触发 CLARIFY 追问。
 - CLARIFY 上限 2 轮（卡 09 第 3 条），超出回「转人工」话术；每请求一条 `audit_log`（编排层 AUDIT 状态；
   工具层的只读工具本身不写审计，两者不冲突）。
@@ -28,15 +30,14 @@
 
 from __future__ import annotations
 
-import calendar
 import logging
-import re
 import uuid
 from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
 from agent import classifier, confirm_card, templates, write_flow
+from agent.period import anchor_period, resolve_day, resolve_period
 from data import dao
 from data.seed import AS_OF
 from guard import injection, permission
@@ -58,14 +59,18 @@ RANGE_FIELDS = ("date_from", "date_to")
 #: 卡 09 第 2 条点名的 8 个只读意图（其余意图本卡不执行）
 READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
                 "subscription_list", "card_query", "wealth_recommend")
-#: 缺槽即追问（代码判定）；其余只读意图的槽位都可确定性缺省或本就可选
-REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {"txn_query": RANGE_FIELDS}
+#: 分析类意图：period 的缺省/解析口径（**完全没给**时取锚点当月；给了却认不出 → 追问，卡 17b）
+PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
+#: 缺槽即追问（代码判定）：`txn_query` 的显式区间不猜；分析类意图的 `period` 认不出也不猜
+REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {"txn_query": RANGE_FIELDS,
+                                             **{intent: ("period",) for intent in PERIOD_INTENTS}}
 
 #: 写意图清单定义在 `agent/write_flow.py`（写路径的唯一归属）；这里是引用别名，避免两份清单漂移
 WRITE_INTENTS = write_flow.WRITE_INTENTS
 #: 分析类意图的 period 缺省/解析口径（锚点当月）
 PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
-RELATIVE_PERIOD_OFFSETS = {"上个月": -1, "上月": -1, "本月": 0, "这个月": 0, "当月": 0, "上上个月": -2}
+
+#: 相对时间的别名表 / 偏移 / 解析实现见 `agent/period.py`（卡 17b 拆出去：纯函数，也为守住单文件 ≤300 行）
 
 #: 意图 → (工具名, 调用器)。**只读意图在这里，写操作一概不在**（卡 09 禁止项）。
 TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
@@ -123,34 +128,9 @@ class _Ctx:
 
 
 # ---------------- 时间口径（代码判定，非 LLM） ----------------
-
-def _month_shift(offset: int) -> str:
-    """锚点月偏移 → `YYYY-MM`。"""
-    total = AS_OF.year * 12 + (AS_OF.month - 1) + offset
-    return f"{total // 12:04d}-{total % 12 + 1:02d}"
-
-
-def resolve_period(value: object) -> str:
-    """把 `period` 槽位归一化成工具接受的 `YYYY-MM` / `YYYY`；认不出 → 锚点当月。"""
-    text = str(value or "").strip()
-    if re.fullmatch(r"\d{4}-\d{2}", text) or re.fullmatch(r"\d{4}", text):
-        return text
-    offset = RELATIVE_PERIOD_OFFSETS.get(text)
-    return _month_shift(offset if offset is not None else 0)
-
-
-def resolve_day(value: object, *, edge: str) -> str | None:
-    """把日期槽位归一化成 `YYYY-MM-DD`：ISO 原样；相对月份 → 该月首/末日；其它 → `None`（判为缺失）。"""
-    text = str(value or "").strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        return text
-    offset = RELATIVE_PERIOD_OFFSETS.get(text)
-    if offset is None:
-        return None
-    period = _month_shift(offset)
-    year, month = int(period[:4]), int(period[5:])
-    day = 1 if edge == "start" else calendar.monthrange(year, month)[1]
-    return f"{period}-{day:02d}"
+# 实现见 `agent/period.py`（卡 17b 拆出：纯函数 + 守住单文件 ≤300 行）；
+# 这里 import 进来的 `anchor_period / resolve_period / resolve_day` 同时也是**再导出**
+# （历史调用点写 `orchestrator.resolve_period` 仍然有效，指向同一份实现）。
 
 
 # ---------------- 主状态机 ----------------
@@ -160,11 +140,21 @@ def _with_date_context(text: str) -> str:
     return f"{text}\n（当前日期：{AS_OF.isoformat()}）"
 
 
+def _fill_period_slot(filled: dict) -> None:
+    """period 槽位：**没给** → 锚点当月（卡 09 口径，未变）；**给了但认不出** → 清掉（→ CLARIFY）。"""
+    raw = filled.get("period")
+    resolved = anchor_period() if raw in (None, "") else resolve_period(raw)
+    if resolved is None:
+        filled.pop("period", None)
+    else:
+        filled["period"] = resolved
+
+
 def _fill_slots(intent: str, slots: Mapping) -> tuple[dict, list[str]]:
     """代码补齐时间槽位，然后算缺失项（缺 → CLARIFY）。"""
     filled = {key: value for key, value in slots.items() if value not in (None, "")}
     if intent in PERIOD_INTENTS:
-        filled["period"] = resolve_period(filled.get("period"))
+        _fill_period_slot(filled)
     if intent == "txn_query":
         for field, edge in (("date_from", "start"), ("date_to", "end")):
             resolved = resolve_day(filled.get(field), edge=edge)

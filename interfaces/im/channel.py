@@ -17,8 +17,10 @@
 两个群同时转账也不会互相顶掉确认卡。
 
 `wrap_untrusted` 的实现归 `guard/`，而 `interfaces/` 禁止 import `guard/`（CLAUDE.md 分层铁律 +
-卡 16c 的机器守卫），所以这里从 `agent.orchestrator` 取**同一个函数对象**（编排层 CLASSIFY 前
-也用它做检测/包裹）。更干净的落点是 agent/ 侧加一个"通道入口"薄函数，见交付说明「需要人类决定①」。
+卡 16c 的机器守卫）—— 包裹的唯一入口是 `agent.channel.wrap_untrusted`（卡 17b 的通道入口薄函数），
+它再转发 `guard.injection.wrap_untrusted`，于是依赖是干净的 `interfaces → agent → guard` 单向链，
+也不必再"借"编排层的命名空间（卡 17 的 `orchestrator.injection.…` 写法脆弱：编排层哪天不再
+import `injection` 就静默失效）。
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from agent import orchestrator, write_flow
+from agent.channel import wrap_untrusted as wrap_channel_text      # 通道入口（卡 17b）
 from agent.orchestrator import Turn
 
 from interfaces.im import feishu
@@ -46,8 +49,9 @@ SEEN_LIMIT = 512
 #: 回环 outbox 记忆条数（HTTP 轮询 demo 用）
 OUTBOX_LIMIT = 100
 
-#: 不可信文本包裹函数（铁律 7 的数据层）。见模块 docstring：agent/ 侧同一个函数对象，不是复制实现
-WRAP: Callable[[str, object], str] = orchestrator.injection.wrap_untrusted
+#: 不可信文本包裹函数（铁律 7 的数据层）：**唯一入口**是 `agent.channel.wrap_untrusted`
+#: （它再转发 `guard.injection.wrap_untrusted`）—— 本层不掏护栏层、也不借编排层的命名空间。
+WRAP: Callable[[str, object], str] = wrap_channel_text
 
 
 def session_for(peer_id: str) -> str:
