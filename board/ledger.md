@@ -1173,3 +1173,17 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 16c 提交+派审；进 IM 通道 card-17（飞书 webhook 或 HTTP 轮询，wrap_untrusted + source=im，复用编排层，无网降级）。
 NEXT_CARD_WARNING: card-17 范围 interfaces/im/ + .env.example；IM 正文 wrap_untrusted 包裹 + source=im（铁律7）；分层铁律（只调 agent/）；复用同一编排层不复制；无网降级本地回环 self-test（verify 不依赖外网）。16b 已修 data 线程安全可放心多线程。
+
+## 决策记录 2026-09-20 03:30（夜间托管，@analyst 自主）
+
+card-16c = PASS（无 MUST_FIX）；守卫真能被触发（reviewer 3 处独立抽验：_yuan+1→7 红、加 import tools→红、加 SQL→红）；AST 精确（非 grep）+ 自证完备；16b 竞速用例确定性化方向正确（12 连跑零 flaky）。
+
+2 RISK 记台账：① AST 只覆盖静态 import（importlib/__import__/subprocess 动态绕层不拦）→ 建议加动态探测+subprocess 白名单；② forbidden_imports 未含 requests/urllib/http（铁律6不联网）→ 建议并入。
+
+注：reviewer 观测 card-17 已在进行（interfaces/im/{channel,config,feishu,server}.py）；16c 守卫按 interfaces/** 全树扫描，card-17 落地后会被覆盖，17 交付时复跑守卫。
+
+NEXT_CARD: 17（进行中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 16c PASS 入库；card-17（IM 通道）worker 在跑。
+NEXT_CARD_WARNING: 同 card-17 WARNING。追加：17/18 交付后复跑 16c 界面守卫（interfaces/** 全树）。
