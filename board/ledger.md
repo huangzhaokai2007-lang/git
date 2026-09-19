@@ -1320,3 +1320,14 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 19 张卡全部完成+提交；19b 收尾（守卫扩 app/ + verify 第4段离线 + app/cli/demo 单测 + README ≤300 + dockerignore 硬化）。
 NEXT_CARD_WARNING: 19b 收尾后进入总验收——需汇总：SPEC-CHANGE（§2 标题 15→16）、待办清单（Docker 真机构建 / httpx 提运行时 / 飞书真机验证 / agent 直调 dao+AS_OF 收口 / BUSY 重试层）、全项目绿证据。
+
+## 决策记录 2026-09-20 05:10（夜间托管，@analyst 自主）—— card-19 FAIL 处理
+
+card-19 = **FAIL（1 条 MUST_FIX）**（已落盘 board/reviews/card-19.md）：
+  - MUST_FIX：docs/答辩提纲.md §1.3「现场转 600 元 → 升 L2 且要求 OTP」**实测不成立**——600 元 > 单笔上限 500 元 → 永远先撞 OVER_LIMIT（error_code=OVER_LIMIT, tier=None, 不落库），到不了 L2。现场照念会与回执当场矛盾。
+  - 改法：例子换成「转 100 元 → 新收款人 → L2 + OTP；转 600 元 → 单笔超限 OVER_LIMIT（不落库，验证硬约束先于档位）」；§1.3 档位行「L2 金额 >500元」注明「受单笔上限遮蔽、代码不可达」。
+  - **根因是规格矛盾（SPEC-CHANGE 待人类）**：规格 §5 表 L2 行「金额 >500元」 vs §5 硬约束「单笔上限 5 万分/笔（=500元）超限 OVER_LIMIT」—— >500 元写操作永远先 OVER_LIMIT，L2">500元"分支不可达（L3"单笔 ≥50000元"同理）。需人类拍板：改规格表 or 调限额。
+
+  - 其余 4 RISK（非阻塞）：① README 309 行——reviewer 判**可接受**（该规范是代码模块规范，文档不严格适用）；② README §2 表头「真实回执摘录」但余额行是改写（数字全真）→ 建议照抄或改表头；③ verify 第4段 rc-only 弱断言 + 非离线 → 建议 --offline + 断言含 2026-08；④ app/ 未纳入守卫（19b 在做）。
+
+裁决：ACTION=fix_first —— 先修 MUST_FIX（答辩提纲 §1.3），规格矛盾记 SPEC-CHANGE 待人类。19b 继续（不受影响，不同文件）。
