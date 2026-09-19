@@ -1298,3 +1298,25 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-18 PASS 入库；card-19 在跑（最后一张）。
 NEXT_CARD_WARNING: card-19 收口后复跑 verify（应 6/6 全绿）。全项目收官后：SPEC-CHANGE + 待办汇总 + 用户总验收。
+
+## 决策记录 2026-09-20 05:00（夜间托管，@analyst 自主）—— 全部 19 张卡完成
+
+事实：
+  - 最新存档点：48256c4 card-19（HEAD，最后一张功能卡）；verify **6/6 全绿**（第 4 段冒烟从 SKIP 变真跑："2026-08 一共支出 9,152.00 元，环比下降 32%"）；970 passed
+  - card-19 = app/cli.py(100) + docs/答辩提纲.md(159) + scripts/demo.py(168) + README.md(309)
+
+裁决（worker 7 条待拍板）：
+  - ① 守卫扩到 app/（tests/，范围外）→ **派 19b 做**（app/cli.py 是交互层入口，需机器守卫）
+  - ② verify 第 4 段强制离线 → **派 19b 做**（避免无网等超时）
+  - ③ 离线替身留 app/cli.py → **接受**（只替代 LLM 那一步，注释写明铁律1分界）
+  - ④ demo 进 verify → 暂不（保持 6 段，demo 独立命令）
+  - ⑤ app/cli + demo 单测 → **派 19b 补**
+  - ⑥ 答辩时限假设 5 分钟（另 90 秒版）→ 接受，需要时再出
+  - ⑦ 卡 18 两条待拍板 → 已记（Docker 真机构建 / §2 计数 SPEC-CHANGE）
+  - 另：README.md 309 行 > 「单文件 ≤300 行」→ 派 19b 精简
+
+NEXT_CARD: 19b
+MODEL: deepseek-flash
+ACTION: run
+REASON: 19 张卡全部完成+提交；19b 收尾（守卫扩 app/ + verify 第4段离线 + app/cli/demo 单测 + README ≤300 + dockerignore 硬化）。
+NEXT_CARD_WARNING: 19b 收尾后进入总验收——需汇总：SPEC-CHANGE（§2 标题 15→16）、待办清单（Docker 真机构建 / httpx 提运行时 / 飞书真机验证 / agent 直调 dao+AS_OF 收口 / BUSY 重试层）、全项目绿证据。
