@@ -966,3 +966,20 @@ NEXT_CARD_WARNING: 14b-6 设计已就绪（见上轮 WARNING），新会话第�
 
 铁律：限流先计数再校验、重放不计数；幂等落库 INSERT OR IGNORE 重启有效。
 交付模板：改动清单 + pytest/verify 真实输出 + 变异自检 4 条 + 指纹 + 待拍板。做完报 WORKER_STATUS，等分析师精准提交。
+
+## 决策记录 2026-09-19 12:47（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：6bb4819（施工单）；worker 在 'WOKER2' 新会话做了 14b-6 实现（未提交）：tools/_transfer_token.py(新) + tools/transfer.py + data/dao.py(+update_idempotent) + tests/test_tools_transfer_execute.py + scripts/mutcheck_14b.py；verify 861 passed
+  - worker 实测复现 MUST_FIX：DB 级守卫不成立——_store_token 的 CAS 把「刚读到的库值」当 expect，UPDATE 永远命中返回 True；_load_token 先读进程内存缓存，executed 判定读 stale 内存。多进程下同 token 双重扣款。
+
+裁决 MUST_FIX = **A（本卡内修）**：
+  - 理由：DB 守卫是我明确要求加的；CAS 永远命中=「假守卫」是明确实现缺陷（非"多进程没做到"）。资金主链路不留假守卫。
+  - 修法：① executed 判定读权威库 bypass 缓存；② CAS expect 用「加载时捕获的旧 json」，命中 0 行→从库取赢家快照返回（也 bypass）；③ 补「stale 内存+库已 executed→不得二次扣款」用例。
+  - 范围：只动 tools/_transfer_token.py + tools/transfer.py + tests/。
+
+NEXT_CARD: 14b-6（修 MUST_FIX 中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: worker 修 DB 守卫 CAS（假守卫→真守卫）+ 补 stale 用例，修完我本卡内精准提交。
+NEXT_CARD_WARNING: 修 _store_token CAS（expect=加载时旧 json）+ executed 判定读权威库 bypass 缓存 + winner 读取防 stale KeyError + 补 stale 用例；不破坏 861 基线；修完变异 8/8 + 交付模板。
