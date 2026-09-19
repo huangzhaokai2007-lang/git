@@ -1279,3 +1279,22 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-18 提交+派审；派最后一张 card-19（demo + 答辩提纲 + README 演示段 + app/cli.py 补 verify 6/6）。
 NEXT_CARD_WARNING: card-19 范围 scripts/demo.py + docs/答辩提纲.md + README 演示段 + app/cli.py（分层：只调 agent/）；目标 verify 6/6 全绿；不破坏 970 基线。全项目收官后需：SPEC-CHANGE（§2 标题）+ 待办清单汇总 + 用户总验收。
+
+## 决策记录 2026-09-20 04:45（夜间托管，@analyst 自主）
+
+card-18 = PASS（无 MUST_FIX）；verify rc=0 6 段全过；interfaces/api 分层干净；评测入口 6 字段顺序钉死；密钥扫描 10 文件无硬编码；2 变异全真报警。
+
+6 RISK 记台账（关键）：
+  ① Docker 未真机构建 → 交付前需在有 Docker 的机器跑 `docker compose up --build` + `exec api bash scripts/verify.sh`
+  ② SPEC-CHANGE §2 标题 15 vs T1–T16 → 待人类拍板
+  ③ verify 第 4 段 SKIP → card-19 补 app/cli.py
+  ④ .dockerignore 只排 .env，未排 .env.local/*.key/credentials* → 补
+  ⑤ session_id 可选加分项；⑥ api_smoke 用 ASGI 直连没压真实 HTTP。
+
+注：reviewer 观测 card-19 在进行（app/cli.py + docs/答辩提纲.md + scripts/demo.py；已改 README.md）。
+
+NEXT_CARD: 19（进行中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-18 PASS 入库；card-19 在跑（最后一张）。
+NEXT_CARD_WARNING: card-19 收口后复跑 verify（应 6/6 全绿）。全项目收官后：SPEC-CHANGE + 待办汇总 + 用户总验收。
