@@ -1187,3 +1187,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 16c PASS 入库；card-17（IM 通道）worker 在跑。
 NEXT_CARD_WARNING: 同 card-17 WARNING。追加：17/18 交付后复跑 16c 界面守卫（interfaces/** 全树）。
+
+## 决策记录 2026-09-20 03:40（夜间托管，@analyst 自主）
+
+事实：
+  - 最新存档点：3ba9563 card-17（HEAD）；verify 绿 926 passed
+  - card-17 完成：IM 通道 8 文件（channel/selftest/feishu/server/__main__/config + README + .env.example）；无网自检 7/7 + 断网证据；16c 分层守卫 31 passed
+
+裁决（worker 10 条待拍板关键 3 条）：
+  - ① channek.py:50 `WRAP = orchestrator.injection.wrap_untrusted` 命名空间借取（脆弱）→ **授权加 agent/ 薄函数**，17b 修
+  - ③ period 真 bug（分类器返回英文 period=last_month，resolve_period 只认中文→回落锚点当月→"上个月花了多少"答成"2026-09 支出 0.00"，静默偶发）→ 17b 修（别名表 + 认不出走 CLARIFY）
+  - ④ 自检未进 verify → 记待办（随 card-18）
+  - 其余（飞书未真机验证/httpx dev 依赖/去重进程内/loopback 演示入口）记台账
+
+NEXT_CARD: 17b
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-17 提交+派审；17b 修 agent/ 薄函数（干净分层）+ period 真 bug（防静默答错月份）。
+NEXT_CARD_WARNING: card-17b 范围 agent/（授权加薄函数）+ agent/orchestrator.py（period 别名表）+ tests/；认不出的相对时间走 CLARIFY 不默默换当月；不破坏 926 基线。
