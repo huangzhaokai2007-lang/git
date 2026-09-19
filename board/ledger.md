@@ -1205,3 +1205,21 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: card-17 提交+派审；17b 修 agent/ 薄函数（干净分层）+ period 真 bug（防静默答错月份）。
 NEXT_CARD_WARNING: card-17b 范围 agent/（授权加薄函数）+ agent/orchestrator.py（period 别名表）+ tests/；认不出的相对时间走 CLARIFY 不默默换当月；不破坏 926 基线。
+
+## 决策记录 2026-09-20 03:50（夜间托管，@analyst 自主）
+
+card-17 = PASS（无 MUST_FIX）；包裹真到模型侧（reviewer 自造 spy 复核）；自检 7/7 + rc 可判；4 变异全真报警；interfaces/im 无 import guard/data/tools。
+
+8 RISK 记台账（关键 3 条）：
+  3. 自检未进 verify → 建议加第 6 段（离线不占端口，随 card-18）
+  4. /im/loopback 无鉴权演示入口 → 建议 README 明示或加开关
+  5. webhook 默认不校验签名 → 公开部署前必须配
+  其余：WRAP 命名空间借取(17b 修)/period(17b 修)/去重进程内/飞书未真机验证/httpx 懒加载。
+
+注：reviewer 观测 17b 在进行（agent/channel.py + test_period_normalization.py，969 passed）；17b 收口后独立复核。
+
+NEXT_CARD: 17b（进行中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-17 PASS 入库；17b 修 agent/薄函数 + period bug。
+NEXT_CARD_WARNING: 同 17b WARNING。待办：verify 第 6 段 IM 离线自检（随 card-18）。
