@@ -1143,3 +1143,15 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 16b 提交+派审；16c 补界面守卫（填 card-16 挖出的铁律无守卫缺口）；随后 17(IM)/18(工程化)/19(演示)。
 NEXT_CARD_WARNING: 16c 范围 tests/（新增 test_web_layering.py）：① parse_bill 逐字回显断言 ② interfaces/** 禁 import tools/data/guard+SQL grep；真能被变异触发。
+
+## 决策记录 2026-09-20 03:10（夜间托管，@analyst 自主）
+
+card-16b = PASS（无 MUST_FIX）；线程安全独立验证 15/15 不 flaky、5 变异全真报警；范围外 agent/llm.py 经审核确认向后兼容可接受。
+
+5 RISK 记台账：线程局部连接无显式 close（靠 GC）、reference_columns lru_cache（改 schema 需重启）、5s busy_timeout 长事务仍可能 BUSY、界面 HISTORY=None 跨轮指代无上下文（有意取舍）、缺列只报错需手动 --reset。
+
+NEXT_CARD: 16c（进行中）
+MODEL: deepseek-flash
+ACTION: run
+REASON: 16b PASS 入库；16c（界面守卫）worker 在跑（reviewer 观测 926 passed=895+31）。
+NEXT_CARD_WARNING: 同 16c WARNING。
