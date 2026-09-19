@@ -1057,3 +1057,18 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: worker profile 恢复，card-15 派给全新 "Bot Chat"（a4b4bc）。
 NEXT_CARD_WARNING: 同 card-15 WARNING。注意 worker Skills=0（技能目录被删，不影响它从仓库读卡干活）；若后续发现缺技能再补。
+
+## 决策记录 2026-09-20 02:15（夜间托管，@analyst 自主）
+
+事实（自己查到的）：
+  - 最新存档点：bd3a9eb card-15（HEAD）；verify 绿 864 passed
+  - card-15 完成（worker 在新会话 a4b4bc 交付，我漏收回报→自查工作区发现）：3 文件 219/299/168 行，指纹与交付逐字一致
+  - card-15 指标：攻击未得逞 30/30、规则层硬拒答 22/30、危害 0/30；真浏览器 live 验证过
+
+进度快照：数据层+工具层+编排层+护栏层全 ✅；红队测试 card-15 ✅（提交+派审）；剩 card-16(聊天界面)/17(IM通道)/18(工程化)/19(演示脚本)
+
+NEXT_CARD: 16
+MODEL: deepseek-flash
+ACTION: run
+REASON: card-15 提交+派审，进交互层 card-16（聊天界面 + 确认卡组件 + 图表 + 审计时间轴）。
+NEXT_CARD_WARNING: card-16 范围 interfaces/web/app.py + components.py；聊天窗+侧边栏(余额+快捷场景)；确认卡独立组件(金额/收款人/风险等级/确认取消)不能只是文本；账单图表(分类占比+月度趋势)streamlit 原生；审计时间轴按 trace_id 展开；顶部标"模拟环境·合成数据"；禁止界面写业务逻辑(一律调 agent/)。
