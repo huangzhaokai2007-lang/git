@@ -1467,3 +1467,16 @@ card-19 + card-19b 复跑双双 PASS（83b0c5b）：
   - 已派 worker 修（compose 两 service 各加 healthcheck；web 用 `/_stcore/health`）
 
 结论：**card-18 RISK①「Docker 真机构建未验证」闭环**。工程化交付物真机跑通，只差健康检查这一处（在修）。
+
+## 决策记录（Docker 真机闭环 + 进度图判据修复）
+
+事实：
+  - 真机 `docker compose up --build -d` 成功；**banking-api 与 banking-web 均 healthy**（修复后）
+  - 容器内 `bash scripts/verify.sh` = 6/6 全绿、1013 passed；评测入口 POST /api/chat 真机返回正确 6 字段
+  - **抓到并修好 1 个真 bug**：Dockerfile 全局 HEALTHCHECK 探 127.0.0.1:8000（API 口），web 容器（Streamlit 8501）继承 → 永远 unhealthy。修复：Dockerfile 删全局探针（留注释说明），docker-compose.yml 按 service 各定义（api→8000/healthz、web→8501/_stcore/health）。commit 见下。
+  - **card-18 RISK①「Docker 未真机构建」正式闭环**
+  - 环境备注：Docker Hub 直连超时 → 已配国内镜像源到 ~/.docker/daemon.json（原文件 .bak）；Docker Desktop 中途自退一次，已拉起
+
+**进度图修复**：`Desktop/AI-Banking-Agent-施工进度图.build.py` 的「安装包」判据 = 本台账「已接受的卡（存档点）」表。该表原先只到 card-14b-6，导致 card-15 之后的框全显示 🔒。已补 card-15/16/16b/16c/17/17b/18/19/19b + 2 条 SPEC-CHANGE，重跑生成器 → 图上 20/20 框全部挂上安装包。**改卡要同步这张表，否则图永远落后。**
+
+提交：Dockerfile+docker-compose.yml（健康检查按 service 定义）、board/ledger.md（存档点表补齐）。
