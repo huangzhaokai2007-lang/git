@@ -4,6 +4,10 @@
 ① 归一化：千分位 / 万元 / 百分比 / 块·元 / 整数分↔元 / 日期时间**不算业务数字**（卡 09 定下的语义）；
 ② 拦截：回执里出现 facts 里没有的数字 → `(False, [越界数字])`；
 ③ 端到端：让假 LLM 在润色时**改数字** → 重生成一次 → 仍改 → 降级为模板回执 + 审计记 `HALLUCINATION_BLOCKED`。
+
+SPEC-CHANGE（§7 口径收窄）：容差**由回执数字的单位决定** —— 裸数字只做精确匹配，只有带单位
+（元/块、分、%、万元）才允许跨单位表达。旧口径对裸数字也套 ×100 / ÷100，回执写 `10000`
+（想说 1 万元）能对上事实 `1000000`（分），等于给幻觉留后门；②里的裸数字用例就是这条收窄的回归钉。
 """
 
 from __future__ import annotations
@@ -31,7 +35,8 @@ from tests.conftest import count, raw
     ("收益 1.2万元。", {"amount": 1_200_000}, "万元"),
     ("环比 -32%。", {"vs_prev_pct": -32}, "百分比"),
     ("环比 32%。", {"vs_prev_pct": -32}, "§7 容差：绝对值相等"),
-    ("占比 0.32。", {"ratio_pct": 32}, "百分数表达的另一种写法"),
+    ("占比 32%。", {"ratio_pct": 32}, "百分数表达的另一种写法（带 % 才认百分数）"),
+    ("占比 32%。", {"ratio": "0.32"}, "带 % 的回执 ↔ 小数事实（×100）"),
     ("2026-09-12 的余额为 100.00 元。", {"balance_yuan": "100.00"}, "日期不算业务数字"),
     ("2026年9月账单：支出 300.00 元。", {"total_yuan": "300.00"}, "年月日不算业务数字"),
     ("截至 2026-09-12T12:00:00，余额 100.00 元。", {"balance_yuan": "100.00"}, "ISO 时刻不算业务数字"),
@@ -49,8 +54,41 @@ def test_normalization_passes(reply: str, facts: dict, why: str) -> None:
     ("支出 1.3万元。", {"amount": 1_200_000}, "1.3万元"),
     ("环比 -42%。", {"vs_prev_pct": -32}, "-42%"),
     ("余额 100 元，可用 200 元。", {"balance_yuan": "100.00"}, "200元"),      # 一个对一个错 → 仍拦
+    ("占比 0.32。", {"ratio_pct": 32}, "0.32"),        # SPEC-CHANGE：裸数字不跨单位（旧口径曾放行）
 ])
 def test_fabricated_numbers_are_blocked(reply: str, facts: dict, expected_token: str) -> None:
+    passed, offenders = facts_check.verify_numbers(reply, facts)
+    assert passed is False and expected_token in offenders, f"越界数字应为 {expected_token!r}，实际 {offenders}"
+
+
+# ---------------- ②b 容差由单位决定（SPEC-CHANGE：带单位照旧 / 裸数字只精确） ----------------
+
+@pytest.mark.parametrize(("reply", "facts", "why"), [
+    ("余额 46,634.00 元。", {"balance_yuan": "46,634.00"}, "元 ↔ 元"),
+    ("余额 46,634.00 元。", {"balance_cents": 4_663_400}, "元 ↔ 分（带单位才允许跨单位）"),
+    ("支出 100块。", {"amount": 10_000}, "块 = 元 ↔ 分"),
+    ("支出 12000 分。", {"amount_yuan": "120.00"}, "分 ↔ 元"),
+    ("环比 -32%。", {"vs_prev_pct": -32}, "百分数 ↔ 百分数"),
+    ("环比 32%。", {"vs_prev_pct": "-0.32"}, "百分数 ↔ 小数（事实为小数时 ×100）"),
+    ("收益 1.2万元。", {"amount": 1_200_000}, "万元：×10000 后 ↔ 分"),
+    ("共 3 笔。", {"total_count": 3}, "裸数字：精确相等照旧通过（正整数计数）"),
+])
+def test_tolerance_is_chosen_by_the_reply_unit(reply: str, facts: dict, why: str) -> None:
+    """带单位的回执 → 允许跨单位表达；裸数字 → 只精确匹配（口径见 guard/facts_check 模块文档）。"""
+    passed, offenders = facts_check.verify_numbers(reply, facts)
+    assert passed is True and offenders == [], f"{why} 未通过：{offenders}"
+
+
+@pytest.mark.parametrize(("reply", "facts", "expected_token"), [
+    ("支出 10000。", {"amount_cents": 1_000_000}, "10000"),      # 卡里点名：裸数字不得跨单位放行
+    ("共 3 笔。", {"total": 300}, "3"),                          # 旧口径会靠 ×100 蒙过去
+    ("余额 12000 元。", {"balance_yuan": "120.00"}, "12000元"),   # 元 ↔ 元 方向不得 ×100
+    ("支出 12000分。", {"amount": 100}, "12000分"),               # 分值不得再被 ÷100
+    ("环比 32。", {"vs_prev_pct": "0.32"}, "32"),                 # 不带 % → 不当百分数
+    ("收益 2万元。", {"amount": 1_200_000}, "2万元"),             # 万元仍需先 ×10000 再比
+])
+def test_bare_or_wrong_unit_numbers_are_blocked(reply: str, facts: dict, expected_token: str) -> None:
+    """收窄后的红线：单位不明（裸数字）或用错单位，一律判越界。"""
     passed, offenders = facts_check.verify_numbers(reply, facts)
     assert passed is False and expected_token in offenders, f"越界数字应为 {expected_token!r}，实际 {offenders}"
 
