@@ -1618,3 +1618,9 @@ analyst 亲自核验：
   - ④ 受保护文件 CLAUDE.md/.hermes.md 16→17 → **analyst 代改**（已提交）
 
 **追加（要求7 POST /api/payee + 订阅措辞去行话）**：投递被 target_busy 卡了 13 次，worker 交付后投递口空出 → 已送达（proc_f9c2b911f3e4）；自动重试循环已 kill（防重复投递）。等 worker 交 A+B 再提交。
+
+## 决策记录（人类：离线替身规则「暂时不需要」）
+
+worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_add → 断网演示走不到表单」。
+人类裁定：**暂时不需要**（本轮不做），留作待办备查 —— 评委若断网演示，「加收款人」这条演示不出来。
+（不改判为风险，仅记录。）
