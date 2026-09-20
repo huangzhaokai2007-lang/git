@@ -14,9 +14,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
     DB_PATH=data/bank.db \
     API_HOST=0.0.0.0 \
-    API_PORT=8000
+    API_PORT=8000 \
+    TZ=Asia/Shanghai
 
 WORKDIR /app
+
+# 0) 时区数据 + 钉住进程时区（**必须**，否则业务判定会反）：
+#    业务时间走 `datetime.now()`（= 进程本地时间）—— `tools/transfer._now()` 的 night(23:00–06:00) 降级因子、
+#    「单日累计」的日界、确认凭证与订阅生效的 TTL、审计与回执里的时间戳，全都读它。
+#    容器默认 UTC：CST 白天 11:54 会被算成 UTC 03:54 → 误判「夜间」升档；CST 真夜间 23:00 = UTC 15:00 → 反而判白天。
+#    `python:3.11-slim` 不带 /usr/share/zoneinfo，所以显式装 tzdata（构建期联网，运行期依旧不需要外网）。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && rm -rf /var/lib/apt/lists/*
 
 # 1) 冻结依赖（**不** --no-dev：容器内要能跑 scripts/verify.sh 的一键验收）
 RUN pip install --no-cache-dir "uv==0.12.10"

@@ -12,6 +12,9 @@
 # 注：健康检查按 **service** 定义（镜像里故意没有全局 HEALTHCHECK）—— 两个服务端口/端点不同，
 #     探针写进共享镜像会让另一个服务继承到错端口的探针、永远 unhealthy（真机踩过的坑）。
 #     探针只用 stdlib `urllib`：python:3.11-slim 里没有 curl，也不为此引入新依赖。
+# 注：时区由**镜像**统一钉住（Dockerfile：`ENV TZ=Asia/Shanghai` + 装 tzdata）——「夜间时段」降级因子、
+#     单日累计的日界、审计/回执时间戳都读进程本地时间；容器默认 UTC 会把 CST 用户的昼夜判反（真机踩过）。
+#     要按服务覆盖就加 `environment: {TZ: Asia/Tokyo}`（compose 的 environment 优先于镜像 ENV）。
 services:
   api:
     build: .
