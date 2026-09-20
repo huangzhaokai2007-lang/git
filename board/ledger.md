@@ -1530,3 +1530,27 @@ reviewer 独立复跑（board/reviews/container-tz.md）：
   4. 宿主与容器同为 CST 故"与宿主一致"成立；异时区宿主上 verify 不受影响（单测走假时钟）
 
 **⇒ 时区坑闭环。全项目 20 张卡 + 6 项 SPEC-CHANGE + Docker 真机 + 容器 TZ 全部无 MUST_FIX、零挂账。**
+
+## 决策记录（人类新需求 → 开 card-20「收款人自助添加」）
+
+需求原文（人类）：「在聊天框提到增加收款人相关时 跳出一个界面添加用户名和卡号 添加到名单之后就可以实现转账」
+
+人类拍板（我给的选项 + 他的选择）：
+  1. **契约变更批了**（加第 17 个工具 T17 add_payee + payee_add 意图 + §5 定档）
+  2. **表单只收 姓名 + 手机号，不收卡号**（人类：只要姓名+手机号）→ 原「卡号脱敏存」一条自然作废
+  3. **新收款人 = 非白名单（is_whitelist=0）→ 之后转账走 L2 + OTP**（人类选推荐项）
+  4. **添加本身不发确认卡、不要 OTP**（表单提交本身即确认；只加联系人、不动钱）
+  5. **触发词**：加/添加/新增 收款人 + 加个联系人
+  6. 手机号**必填** + 按铁律 8 脱敏为 138****0001；转账按 姓名/脱敏手机号 匹配（find_payee 已支持，无需额外工具）
+
+关键事实：`payee` 表**本就有 phone 列** → **DDL 不用改**；契约变更只需「§2 加 T17 + §3 加意图 + §5 定档」三条。
+
+交付设计要点（写进卡）：界面靠 `turn.intent == payee_add` 判断弹表单（**不加响应字段**，POST /api/chat 的 6 字段钉死）；表单提交经 agent/ 层落库（interfaces 不直连 tools）。
+
+已开卡并提交（3f7b659：docs/cards/card-20.md + 剧本源 + 卡索引）；已派 worker（proc_970838369f54）。
+
+NEXT_CARD: 20
+MODEL: deepseek-flash
+ACTION: run
+REASON: 人类新功能需求，契约变更已批，卡已建并派工；worker 实现（T17 工具 + 意图 + 表单 + 单测 + 截图）。
+NEXT_CARD_WARNING: card-20 范围 docs/01-接口规格.md + data/dao.py + tools/payee.py（新）+ agent/{classifier,orchestrator}.py + interfaces/web/{app,components}.py + tests/；不收卡号、手机号必填脱敏、新收款人 is_whitelist=0（L2+OTP）、添加不要确认卡/OTP、界面靠 intent 判断不加响应字段、提交经 agent/ 层、不破 1013 基线、verify 6/6。
