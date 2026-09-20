@@ -34,7 +34,7 @@ docker compose up --build                      # 容器：评测入口 :8000 / �
 | --- | --- | --- |
 | 查一下余额 | `get_balance` | 您的储蓄账户余额为 **46,634.00** 元，可用余额 46,634.00 元（截至 2026-09-20T03:46:25） |
 | 上个月花了多少 | `analyze_spending` | **2026-08** 一共支出 **9,152.00** 元，环比下降 **32%** |
-| 我有哪些订阅？ | `list_subscriptions` | 目前共有 **4** 个订阅，其中 **1** 个疑似僵尸订阅 |
+| 我有哪些订阅？ | `list_subscriptions` | 当前有 **4** 个订阅；其中 **1** 个仍在「进行中」，但最近 **3** 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅，建议核对一下 |
 | 给张小美转 100 元（新收款人，白天口径） | `preview_transfer` → 确认卡（L2） | 【转账确认卡】收款人：张小美（136\*\*\*\*3004）；金额：**100.00** 元；权限档：**L2**（需输入短信验证码）；风险提示：首次向该收款人转账 |
 | （回复「确认」后输入验证码） | `execute_transfer`（幂等） | 已向张小美转账 **100.00** 元，账户余额为 **46,534.00** 元（46,634.00 → 46,534.00） |
 | 给王五转 600 元 | `preview_transfer` → **拒绝** | 超过单笔转账上限（`OVER_LIMIT`）—— 单笔 ≤500 元是硬约束，先于档位判定，不落库 |
@@ -115,7 +115,7 @@ flowchart TB
 | T7 | `preview_transfer` | 收款人、金额、`schedule` | L0 | 只算不执行；`preview_token` TTL 300s |
 | T8 | `execute_transfer` | `preview_token`、`otp` | L1–L3 | **幂等**：同 token 重复调用同结果 |
 | T9 | `create_aa_request` | 收款人列表、金额 | L1 | AA 收款 |
-| T10 | `list_subscriptions` | `status` | L0 | 含僵尸订阅识别 |
+| T10 | `list_subscriptions` | `status` | L0 | 标注「仍在进行中、但最近几个月没有任何扣费」的订阅（回执里不说行话） |
 | T11 | `cancel_subscription` | `sub_id`、`confirm_ref` | L2 | `confirm_ref` 必须来自确认卡 |
 | T12 | `manage_card` | `card_id`、`action` | L2/L3 | `report_lost`=L3；apply 不落库（mock 待审） |
 | T13 | `assess_risk` | 问卷答案 | L0 | 风险等级由代码按规则算 |

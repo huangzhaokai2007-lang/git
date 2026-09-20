@@ -55,8 +55,16 @@ T_ANOMALY = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔
 #: 账单报告：facts 键见 T5（period / out_sum_yuan / in_sum_yuan / net_yuan；markdown 由编排层附加）
 T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yuan} 元，净支出 {net_yuan} 元。"
 
-#: 订阅列表：facts 键见 T10（subscription_count / zombie_count）
-T_SUBSCRIPTION = "当前有 {subscription_count} 个订阅，其中 {zombie_count} 个疑似僵尸订阅。"
+#: 订阅列表：facts 键见 T10（subscription_count / zombie_count / zombie_window_months / zombie_as_of）
+#: 卡 20 追加（人类口径）：面向用户**不说行话** —— 回执里不再出现"僵尸"二字，改成
+#: "仍在进行中、但最近 W 个月没有任何扣费记录"。`zombie_*` 只留在代码内部命名与 facts 键里。
+T_SUBSCRIPTION_CLEAN = "当前有 {subscription_count} 个订阅，最近 {zombie_window_months} 个月都有正常扣费记录。"
+T_SUBSCRIPTION_ZOMBIE = ("当前有 {subscription_count} 个订阅；其中 {zombie_count} 个仍在「进行中」，"
+                         "但最近 {zombie_window_months} 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅，"
+                         "建议核对一下。")
+#: `TEMPLATES` 里的默认值（实际按 `zombie_count` 分支，见 `render`）；
+#: 保留这个键位是为了"每个只读意图都有模板"这类检查不落空。
+T_SUBSCRIPTION = T_SUBSCRIPTION_ZOMBIE
 
 #: 理财推荐：facts 键见 T14（risk_level / item_count）
 T_WEALTH = "按风险等级 {risk_level} 为您推荐 {item_count} 个产品。"
@@ -116,6 +124,12 @@ class TemplateError(RuntimeError):
 
 def render(intent: str, facts: Mapping[str, object]) -> str:
     """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
+    if intent == "subscription_list":                        # 卡 20：按有没有"忘了取消"的订阅分两种说法
+        chosen = T_SUBSCRIPTION_ZOMBIE if facts.get("zombie_count") else T_SUBSCRIPTION_CLEAN
+        try:
+            return chosen.format(**facts)
+        except KeyError as exc:
+            raise TemplateError(f"{intent!r} 模板缺少 facts 键：{exc}") from exc
     template = TEMPLATES.get(intent)
     if template is None:
         raise TemplateError(f"没有为 {intent!r} 定义回执模板")

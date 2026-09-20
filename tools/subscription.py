@@ -238,8 +238,11 @@ def list_subscriptions(status: str = "active") -> ToolResult:
              "items": [{**item, **_money_facts(item["amount"], "amount")} for item in items]}
     if not items:
         return _ok(data.model_dump(), facts, "当前没有符合条件的订阅。")
-    message = (f"共 {facts['subscription_count']} 个订阅，其中 {facts['zombie_count']} 个疑似僵尸订阅"
-               f"（截至 {facts['zombie_as_of']} 的最近 {ZOMBIE_WINDOW_MONTHS} 个月无扣费记录）。")
+    # 卡 20：面向用户不说"僵尸订阅"这种行话（与 agent/templates.py 的模板逐字一致）
+    n, w = facts["subscription_count"], ZOMBIE_WINDOW_MONTHS
+    message = f"当前有 {n} 个订阅，最近 {w} 个月都有正常扣费记录。" if not facts["zombie_count"] else (
+        f"当前有 {n} 个订阅；其中 {facts['zombie_count']} 个仍在「进行中」，但最近 {w} 个月没有任何扣费记录"
+        f" —— 怀疑是您忘了取消的订阅，建议核对一下。")
     return _ok(data.model_dump(), facts, message)
 
 
