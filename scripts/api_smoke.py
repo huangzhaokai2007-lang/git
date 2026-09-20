@@ -35,6 +35,8 @@ from interfaces.api.app import RESPONSE_FIELDS, create_app   # noqa: E402
 
 #: 回执里的金额形态（元/两位小数）：只断言"有金额"，不写死业务数字（铁律 2）
 AMOUNT_IN_REPLY = re.compile(r"\d[\d,]*\.\d{2}\s*元")
+#: 同上但**不要求"元"字**：写路径确认卡里的金额语境已足够明确（保持 ④ 的原有判据强度）
+MONEY_IN_REPLY = re.compile(r"\d[\d,]*\.\d{2}")
 #: 本地库没数据时的可执行提示
 SEED_HINT = "先造数据：uv run python -m data.seed --reset"
 
@@ -100,10 +102,40 @@ def stub_llm(calls: list[Any]) -> Any:
     return chat_json
 
 
+def _run_checks(app: Any, calls: list[Any], record: Any) -> None:
+    """四项冒烟的本体（**断言顺序与文案即契约**，重构时勿改）。"""
+    status, health = call(app, "GET", "/healthz")
+    record("① /healthz 存活", status == 200 and health.get("status") == "ok", f"HTTP {status} {health}")
+
+    status, body = call(app, "POST", "/api/chat", {"text": BALANCE})
+    fields_ok = tuple(body) == RESPONSE_FIELDS
+    amount = bool(AMOUNT_IN_REPLY.search(str(body.get("reply"))))
+    record("② /api/chat 契约字段 + 真跑工具 + 数字来自事实包",
+           status == 200 and fields_ok and body.get("intent") == "balance_query"
+           and "get_balance" in list(body.get("tool_calls") or []) and amount,
+           f"字段={tuple(body)}；intent={body.get('intent')} tools={body.get('tool_calls')} "
+           f"reply={str(body.get('reply'))[:46]!r}" + ("" if amount else f"（{SEED_HINT}）"))
+
+    before = len(calls)
+    status, blocked = call(app, "POST", "/api/chat", {"text": INJECTION})
+    record("③ 注入正文被规则层拦下且零 LLM 调用",
+           status == 200 and blocked.get("intent") == "unsafe_request" and not blocked.get("tool_calls")
+           and blocked.get("executed") is False and len(calls) == before,
+           f"intent={blocked.get('intent')} reply={str(blocked.get('reply'))[:30]!r} "
+           f"（模型调用次数 {before} → {len(calls)}）")
+
+    status, transfer = call(app, "POST", "/api/chat", {"text": TRANSFER, "session_id": "smoke-1"})
+    record("④ 带 session_id 的写路径走到确认卡（tier=L2、executed=false）",
+           status == 200 and transfer.get("tier") == "L2" and transfer.get("executed") is False
+           and list(transfer.get("tool_calls") or []) == ["preview_transfer"]
+           and bool(MONEY_IN_REPLY.search(str(transfer.get("reply")))),
+           f"tier={transfer.get('tier')} tools={transfer.get('tool_calls')} "
+           f"trace={transfer.get('trace_id')}")
+
+
 def main() -> int:
     """跑完四项冒烟：全通过 0，任一失败 1。"""
     app, calls, results = create_app(), [], []
-    money = r"\d[\d,]*\.\d{2}"
 
     def record(title: str, ok: bool, detail: str = "") -> None:
         print(f"  [{'OK  ' if ok else 'FAIL'}] {title}" + (f" —— {detail}" if detail else ""))
@@ -111,33 +143,7 @@ def main() -> int:
 
     print("评测入口离线冒烟（ASGI 直连 + LLM 桩；不联网、不占端口）")
     with frozen_clock(), mock.patch.object(llm, "chat_json", stub_llm(calls)):
-        status, health = call(app, "GET", "/healthz")
-        record("① /healthz 存活", status == 200 and health.get("status") == "ok", f"HTTP {status} {health}")
-
-        status, body = call(app, "POST", "/api/chat", {"text": BALANCE})
-        fields_ok = tuple(body) == RESPONSE_FIELDS
-        amount = bool(AMOUNT_IN_REPLY.search(str(body.get("reply"))))
-        record("② /api/chat 契约字段 + 真跑工具 + 数字来自事实包",
-               status == 200 and fields_ok and body.get("intent") == "balance_query"
-               and "get_balance" in list(body.get("tool_calls") or []) and amount,
-               f"字段={tuple(body)}；intent={body.get('intent')} tools={body.get('tool_calls')} "
-               f"reply={str(body.get('reply'))[:46]!r}" + ("" if amount else f"（{SEED_HINT}）"))
-
-        before = len(calls)
-        status, blocked = call(app, "POST", "/api/chat", {"text": INJECTION})
-        record("③ 注入正文被规则层拦下且零 LLM 调用",
-               status == 200 and blocked.get("intent") == "unsafe_request" and not blocked.get("tool_calls")
-               and blocked.get("executed") is False and len(calls) == before,
-               f"intent={blocked.get('intent')} reply={str(blocked.get('reply'))[:30]!r} "
-               f"（模型调用次数 {before} → {len(calls)}）")
-
-        status, transfer = call(app, "POST", "/api/chat", {"text": TRANSFER, "session_id": "smoke-1"})
-        record("④ 带 session_id 的写路径走到确认卡（tier=L2、executed=false）",
-               status == 200 and transfer.get("tier") == "L2" and transfer.get("executed") is False
-               and list(transfer.get("tool_calls") or []) == ["preview_transfer"]
-               and bool(re.search(money, str(transfer.get("reply")))),
-               f"tier={transfer.get('tier')} tools={transfer.get('tool_calls')} "
-               f"trace={transfer.get('trace_id')}")
+        _run_checks(app, calls, record)
 
     passed = sum(results)
     print(f"\n冒烟结果：{passed}/{len(results)} 通过" + ("（全绿）" if passed == len(results) else "（有失败项）"))
