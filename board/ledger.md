@@ -1554,3 +1554,16 @@ MODEL: deepseek-flash
 ACTION: run
 REASON: 人类新功能需求，契约变更已批，卡已建并派工；worker 实现（T17 工具 + 意图 + 表单 + 单测 + 截图）。
 NEXT_CARD_WARNING: card-20 范围 docs/01-接口规格.md + data/dao.py + tools/payee.py（新）+ agent/{classifier,orchestrator}.py + interfaces/web/{app,components}.py + tests/；不收卡号、手机号必填脱敏、新收款人 is_whitelist=0（L2+OTP）、添加不要确认卡/OTP、界面靠 intent 判断不加响应字段、提交经 agent/ 层、不破 1013 基线、verify 6/6。
+
+## 决策记录（card-20 worker 开工前复述：5 点全批）
+
+worker 复述准确（5 行理解与卡一致）。逐条裁决：
+  1. **同意** 表单提交入口放新文件 agent/payee_flow.py（照 agent/period.py 先例，orchestrator import 后导出）；
+     签名 submit_payee(name, phone, *, session_id) -> Turn，回执走 reply、tier=L1、executed=True、tool_calls=["add_payee"]。
+  2. **同意** 聊天轮 Turn：intent=payee_add / tool_calls=[] / tier=L1 / executed=False + 引导语 reply。
+  3. **接受** 一律弹空白表单、不预填、不自动提交（自动提交会绕过「表单即确认」）。
+  4. **认可** 去重：同名同手机号不重复插入，返回既有 payee_id + message「已存在」，data 严格 3 键。
+  5. **批准** AddPayeeReq 加进 tools/schemas.py（遵循 CLAUDE.md 集中约定）—— **分析师授权范围外增列该文件**。
+     另提醒 worker：grep 全仓有无「工具数=16 / 白名单」钉死的测试，有则同步改（§2 计数 16→17 的连锁）+ §2 标题改 17。
+
+worker 不动：transfer.py 现有逻辑、已 PASS 卡的测试、write_flow.py、Turn/API 响应字段、pyproject.toml。
