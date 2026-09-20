@@ -1439,3 +1439,20 @@ card-19 + card-19b 复跑双双 PASS（83b0c5b）：
   - §7 收窄的代价（模型丢单位→降级模板）= **接受**（fail-safe，不放过编造数字）
 
 飞书：按用户要求**不引入**（适配层保留、不配置即降级回环）。
+
+## 决策记录（Docker 真机验证 —— 最后一条 RISK 闭环）
+
+用户确认 WSL 装好，授权 analyst 亲自操作装 Docker + 跑一遍。
+
+事实（真机实测）：
+  - Docker Desktop 4.91.0 装好（winget，watcher 自动接力）；docker v29.8.0；WSL2 Ubuntu Running
+  - **Docker Hub 直连超时**（国内墙）→ 配 registry-mirrors（docker.1ms.run / docker.m.daocloud.io / docker.xuanyuan.me）到 ~/.docker/daemon.json（原文件备份 .bak）→ 拉镜像成功
+  - `docker compose up --build -d` **构建成功**；banking-api **healthy** :8000、banking-web :8501
+  - 容器内 `bash scripts/verify.sh` = **6/6 全绿、1013 passed**（reviewer 要的验收）
+  - 评测入口 `POST /api/chat` 真机返回正确 6 字段（余额 46,634.00 来自事实包）；网页 `/_stcore/health`=ok、根 200
+
+**抓到 1 个真 bug**（reviewer 预言"Docker 未真机构建会踩 HEALTHCHECK 坑"命中）：
+  - `banking-web` 状态 **unhealthy**：Dockerfile 的全局 HEALTHCHECK 探 `127.0.0.1:8000/healthz`（API 口），web 跑 Streamlit 8501 → 永远 connection refused；compose 未按 service 覆盖
+  - 已派 worker 修（compose 两 service 各加 healthcheck；web 用 `/_stcore/health`）
+
+结论：**card-18 RISK①「Docker 真机构建未验证」闭环**。工程化交付物真机跑通，只差健康检查这一处（在修）。
