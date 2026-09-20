@@ -1514,3 +1514,19 @@ reviewer 独立复跑（board/reviews/docker-verify.md）：
   - ② TZ 定在镜像单一真相（compose 只加注释）→ **接受**（别让同一事实两个来源）
   - ③ 建议下一张卡「TZ 无关化」（BUSINESS_TZ + ZoneInfo + 非 CST 单测）→ **记待办**（部署层已够 demo；代码层鲁棒化留待后续）
   - ④ 时间戳一并修好（审计/回执不再差 8 小时）→ 已确认。
+
+## 决策记录（容器 TZ 修复 reviewer 独立复验 = PASS · 收官）
+
+reviewer 独立复跑（board/reviews/container-tz.md）：
+  - 容器时钟 = CST：date / datetime.now() / transfer._now() 全与宿主一致；tzname=('CST','CST')
+  - 「给王五转 100 元」→ **tier=L1**、无「夜间」✓
+  - **变异抽查**：同容器临时 `-e TZ=UTC` 跑同一笔 → now=03:59、**tier=L2**、**factors=['night']** —— 正证修复点就是 TZ；`-e` 无残留
+  - 两容器 healthy；宿主 verify 6/6、git 干净
+
+4 条非阻塞 RISK（记台账）：
+  1. 时区钉在镜像 = **固定 CST**：night(23:00–06:00) 按上海时间判，非用户本地时间。本次大赛正确；跨区多租户时 night 应随用户时区（业务口径备查）
+  2. tzdata 构建期 apt 安装 → 构建仍需外网（同 docker-verify RISK 1）
+  3. compose 未写 environment: TZ（只注释），按 service 覆盖要自己加
+  4. 宿主与容器同为 CST 故"与宿主一致"成立；异时区宿主上 verify 不受影响（单测走假时钟）
+
+**⇒ 时区坑闭环。全项目 20 张卡 + 6 项 SPEC-CHANGE + Docker 真机 + 容器 TZ 全部无 MUST_FIX、零挂账。**
