@@ -1406,3 +1406,19 @@ card-19 + card-19b 复跑双双 PASS（83b0c5b）：
   - httpx 在 dev 组（出消息降级回环）；飞书未真机验证
   - agent 直调 dao / from data.seed import AS_OF 越层收口（card-09 遗留）
   - 跨进程 BUSY 重试层；去重进程内；单用户 demo 口径
+
+## 决策记录 2026-09-20 10:59（人类在场，明确批准）
+
+用户判定：「**1-6 全批**；**先不引入飞书**，但不排除后续添加的可能性。」（#7 httpx 因飞书不引入 → 维持 dev 组，不动。）
+
+落地清单（已派 worker 执行，proc_4caf5bda7179）：
+  - #1 规格 §2 标题 15→16
+  - #2 规格 §5 档位表删「金额>500元」「单笔≥50000元」不可达分支 + 加注（不动硬约束/代码）
+  - #3 §DDL 两表 + factor 枚举 —— **已在 card-14b 落地，本次仅追认**（无需改）
+  - #4 规格 §8 补用例格式扩展（slots/now/turns/tool + expect 的 executed/requires_otp/to_human/error_code/detail_contains）
+  - #5 规格 §7 容差口径收窄（ratio 按回执数字单位选；裸数字仅精确匹配）+ 代码 guard/facts_check.py + 单测
+  - #6 CLAUDE.md 架构行（tools 16 个；tools 可调 guard；四层→五层 —— 受保护文件，用户已批准）
+
+飞书口径：**不引入**（interfaces/im/ 适配层保留、不配置即降级回环），后续要加随时可开；届时才需把 httpx 提为运行时依赖（#7 随之而定）。
+
+下一步：worker 交付 → 精准提交（注 SPEC-CHANGE）→ reviewer 审核 → 收官复核。
