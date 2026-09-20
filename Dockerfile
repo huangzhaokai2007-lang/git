@@ -30,8 +30,9 @@ COPY . .
 RUN python -m data.seed --reset
 
 EXPOSE 8000 8501
-HEALTHCHECK --interval=20s --timeout=5s --start-period=15s \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"
+# 健康检查**故意不写在镜像里**：本镜像被两个服务共用（评测入口 8000 / 网页端 8501），
+# 在镜像里写死一个端口的全局探针，另一个服务会继承到错误端口并永远 unhealthy（真机已踩）。
+# 探针由编排层按服务定义 —— 见 docker-compose.yml 里每个 service 的 healthcheck。
 
 ENTRYPOINT ["bash", "scripts/docker-entrypoint.sh"]
 # 默认起「评测入口」（POST /api/chat）；网页端是同一镜像的另一个服务，见 docker-compose.yml

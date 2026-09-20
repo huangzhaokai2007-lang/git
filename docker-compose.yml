@@ -9,6 +9,9 @@
 #
 # 注：`env_file` 用的是 compose ≥ 2.24 的长语法（required: false，.env 缺失也不报错）；
 #     老版本 compose 可把这两段 env_file 删掉，改用 `docker compose --env-file .env up`。
+# 注：健康检查按 **service** 定义（镜像里故意没有全局 HEALTHCHECK）—— 两个服务端口/端点不同，
+#     探针写进共享镜像会让另一个服务继承到错端口的探针、永远 unhealthy（真机踩过的坑）。
+#     探针只用 stdlib `urllib`：python:3.11-slim 里没有 curl，也不为此引入新依赖。
 services:
   api:
     build: .
@@ -25,6 +28,13 @@ services:
       - bankdata:/app/data          # 与网页端共享：在网页端转的账，评测入口也看得到
     ports:
       - "8000:8000"
+    # 评测入口的健康端点：GET /healthz（interfaces/api/app.py）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      start_period: 15s             # 首次启动可能要先重建合成库，留出余量
+      retries: 3
     restart: unless-stopped
 
   web:
@@ -48,6 +58,13 @@ services:
       - interfaces/web/app.py
       - --server.address=0.0.0.0
       - --server.port=8501
+    # 网页端的健康端点：Streamlit 官方的 GET /_stcore/health（正常返回 ok）
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      start_period: 30s             # Streamlit 比 uvicorn 起得慢，余量放宽
+      retries: 5
     restart: unless-stopped
 
 volumes:
