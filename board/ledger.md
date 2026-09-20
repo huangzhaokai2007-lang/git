@@ -1600,3 +1600,21 @@ analyst 分析（附实证）：
   - 范围新增 `interfaces/api/app.py`（唯一新增文件）
   - 卡文件（card-20.md）+ 剧本源（02-AI指令剧本.md）已改，commit 5c80d3d
   - 已派 worker（proc_d51a91b73f1c）：**A（要求7）+ B（订阅措辞去行话）合并一条**（之前 B 两次 target_busy 未送达，这次一并送到了）
+
+## 决策记录（card-20 交付 + 验收）
+
+worker 交付 card-20（DONE_WITH_CAVEAT）：1039 passed（1013 + 26 新）、verify 6/6 全绿；3 张真机截图（Streamlit 8502 + AppTest 双证）。
+analyst 亲自核验：
+  - 门禁：pytest 1039 passed、verify 6/6（实测）
+  - 截图三张逐张看过（真 UI）：① 表单（trace 意图 payee_add · 档位 L1）② 提交回执「已添加 王小明（138****5678）。现在可以给他转账了。」（手机号脱敏 ✓）③ 新收款人转账 → 确认卡 L2 + 验证码「需要」+ 风险「首次向该收款人转账」
+  - 行数：tools/payee.py 85 / agent/payee_flow.py 83 / tests 128+117+94 / data/dao.py 刚好 300（零余量，记待办）
+  - 分层：新增文件各归各层，未越层；Turn/API 响应零新增字段（界面靠 intent 判断）✓
+提交 307530b（card-20 主体）+ 受保护文件 commit（CLAUDE.md/.hermes.md 16→17）。
+
+裁决（worker 4 条待拍板）：
+  - ① payee_add→L1 放 agent/payee_flow.PAYEE_ADD_TIER（guard 不在本卡范围）→ 本轮**接受**，「挪进 INTENT_BASE_TIERS」**记待办**
+  - ② data/dao.py 正好 300 行 → **接受**，「拆 DAO 原语」**记待办**
+  - ③ 多做 AddPayeeData 模型 → **追认**（CLAUDE.md 要求入参出参都有模型）
+  - ④ 受保护文件 CLAUDE.md/.hermes.md 16→17 → **analyst 代改**（已提交）
+
+**追加（要求7 POST /api/payee + 订阅措辞去行话）**：投递被 target_busy 卡了 13 次，worker 交付后投递口空出 → 已送达（proc_f9c2b911f3e4）；自动重试循环已 kill（防重复投递）。等 worker 交 A+B 再提交。
