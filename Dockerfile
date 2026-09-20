@@ -12,7 +12,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     UV_LINK_MODE=copy \
     PATH="/app/.venv/bin:$PATH" \
-    DB_PATH=data/bank.db \
+    DB_PATH=var/bank.db \
     API_HOST=0.0.0.0 \
     API_PORT=8000 \
     TZ=Asia/Shanghai
@@ -34,9 +34,13 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --quiet
 
 # 2) 源码（.dockerignore 已排除 .venv / .git / .env / 本地库 / 缓存）
+#    注（卡 20-C）：库文件住 `var/`（数据目录），**不在** `data/`（代码目录）里 —— 见 docker-compose.yml 里
+#    「卷只能挂数据目录」那条注释的来龙去脉。
 COPY . .
 
 # 3) 烘焙合成数据（全合成、本地生成，运行期不再需要网络）
+#    写到 `$DB_PATH`（= var/bank.db）；父目录由 data/db.py 的 init_db/reset_db 自动创建，这里不必手动 mkdir。
+#    compose 场景下 /app/var 被命名卷盖住（首启为空）→ scripts/docker-entrypoint.sh 会在卷里重建一份。
 RUN python -m data.seed --reset
 
 EXPOSE 8000 8501

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 
 SEED = 20260912                                            # 固定随机种子
 AS_OF = date(2026, 9, 12)                                  # 数据集的"今天"（固定常量，跨天复现）
-DEFAULT_DB_PATH = Path(os.environ.get("DB_PATH") or "data/bank.db")
+DEFAULT_DB_PATH = Path(os.environ.get("DB_PATH") or "var/bank.db")   # 卡 20-C：库住 var/，不混进代码目录 data/
 DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 8, 31), 12
 USER_ID, SAVINGS_ID, CREDIT_ID = "u_zhangsan_0001", "acc_savings_0001", "acc_credit_0001"
 CREDIT_LIMIT = 3_000_000                                   # 信用额度 30,000.00 元（分）

@@ -37,7 +37,11 @@ logger = logging.getLogger(__name__)
 
 # ---------------- 常量 ----------------
 
-DEFAULT_DB_PATH = "data/bank.db"                       # 环境变量 DB_PATH 优先
+#: 库文件缺省位置（环境变量 DB_PATH 优先）。**故意放在 `var/` 而不是 `data/`**：`data/` 是代码目录
+#: （dao.py / db.py / schema.sql / seed.py），库文件混在里面会让「挂卷」把代码盖住 —— 卡 20-C 真机事故：
+#: 卷挂在 /app/data 上，容器里跑的是第一次建卷时的旧 dao.py，`POST /api/payee` 必 500。卷只能挂数据目录。
+#: 父目录由 data/db.py 的 init_db/reset_db 自动创建（`mkdir(parents=True, exist_ok=True)`）。
+DEFAULT_DB_PATH = "var/bank.db"                       # 环境变量 DB_PATH 优先；库文件住**数据目录** var/，与代码目录 data/ 分开
 MAX_LIMIT = 500                                        # 分页上限，防一次拉全表进上下文
 ACCOUNT_TYPES, CARD_STATUSES = ("savings", "credit"), ("normal", "locked", "lost", "frozen")
 SUBSCRIPTION_STATUSES, SUBSCRIPTION_CYCLES = ("active", "cancelled", "paused"), ("monthly", "yearly")

@@ -236,7 +236,7 @@ docs/         01-接口规格（冻结）/ 02-AI指令剧本 / 03-运行与评�
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` | DeepSeek / 空 / `deepseek-chat` | 意图识别与措辞润色；**缺 key 或断网自动降级** |
-| `DB_PATH` | `data/bank.db` | 合成数据库位置 |
+| `DB_PATH` | `var/bank.db` | 合成数据库位置（**数据目录**，与代码目录 `data/` 分开——挂卷只挂 `var/`） |
 | `DEMO_OTP` | `123456` | 演示验证码（规格 §5；真正比对在 `tools/transfer.py`） |
 | `API_HOST` / `API_PORT` | `127.0.0.1` / `8000` | 评测入口监听 |
 | `IM_HOST` / `IM_PORT` | `127.0.0.1` / `8090` | IM 通道监听 |

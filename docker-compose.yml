@@ -12,6 +12,12 @@
 # 注：健康检查按 **service** 定义（镜像里故意没有全局 HEALTHCHECK）—— 两个服务端口/端点不同，
 #     探针写进共享镜像会让另一个服务继承到错端口的探针、永远 unhealthy（真机踩过的坑）。
 #     探针只用 stdlib `urllib`：python:3.11-slim 里没有 curl，也不为此引入新依赖。
+# 注（卡 20-C，真机踩过的坑）：**卷只挂 /app/var，绝不挂 /app/data**。
+#     `data/` 是**代码目录**（dao.py / _dao_core.py / db.py / schema.sql / seed.py），库文件现在住 `var/bank.db`。
+#     早期把整卷挂在 /app/data 上 → 第一次建卷时的旧 `dao.py` 把 /app/data **整个盖住**：容器里跑的是旧代码，
+#     `--build` 重建镜像也救不了（卷盖在镜像之上），表现为网页端「加个收款人」一提交就
+#     500 `AttributeError: module 'data.dao' has no attribute 'insert_payee'`。
+#     铁律：**卷只能挂数据目录，不能挂任何含代码的目录**。
 # 注：时区由**镜像**统一钉住（Dockerfile：`ENV TZ=Asia/Shanghai` + 装 tzdata）——「夜间时段」降级因子、
 #     单日累计的日界、审计/回执时间戳都读进程本地时间；容器默认 UTC 会把 CST 用户的昼夜判反（真机踩过）。
 #     要按服务覆盖就加 `environment: {TZ: Asia/Tokyo}`（compose 的 environment 优先于镜像 ENV）。
@@ -23,12 +29,12 @@ services:
     environment:
       API_HOST: 0.0.0.0
       API_PORT: "8000"
-      DB_PATH: data/bank.db
+      DB_PATH: var/bank.db          # 库文件在**数据目录** /app/var，不在代码目录 /app/data
     env_file:
       - path: .env
         required: false
     volumes:
-      - bankdata:/app/data          # 与网页端共享：在网页端转的账，评测入口也看得到
+      - bankdata:/app/var           # 与网页端共享：在网页端转的账，评测入口也看得到（只挂库目录，不盖代码）
     ports:
       - "8000:8000"
     # 评测入口的健康端点：GET /healthz（interfaces/api/app.py）
@@ -46,13 +52,13 @@ services:
     depends_on:
       - api
     environment:
-      DB_PATH: data/bank.db
+      DB_PATH: var/bank.db          # 与 api 同一个卷（bankdata → /app/var）的同一份库
       STREAMLIT_SERVER_HEADLESS: "true"
     env_file:
       - path: .env
         required: false
     volumes:
-      - bankdata:/app/data
+      - bankdata:/app/var
     ports:
       - "8501:8501"
     command:

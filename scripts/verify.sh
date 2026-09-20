@@ -20,7 +20,8 @@ else
   skip "没有 pyproject.toml（请先做卡 00）"; PY=python; PT=pytest
 fi
 # 本地演示库：第 6 段的通道/评测入口自检要读合成数据（单测用自己的临时库，所以这里单独兜一下）
-if [ -f data/seed.py ] && [ ! -f "${DB_PATH:-data/bank.db}" ]; then
+# 卡 20-C：缺省库路径是 var/bank.db（数据目录），与 data/_dao_core.py 的 DEFAULT_DB_PATH 保持一致
+if [ -f data/seed.py ] && [ ! -f "${DB_PATH:-var/bank.db}" ]; then
   printf '   造合成数据（本地库不存在）：'
   $PY -m data.seed --reset >/dev/null 2>&1 && echo "OK" || { echo "失败"; FAIL=1; }
 fi

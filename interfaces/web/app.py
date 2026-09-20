@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件 + 仓库根（包导入）
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
-os.environ.setdefault("DB_PATH", str(ROOT / "data" / "bank.db"))   # 只设环境变量，不 import data/
+os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
 from agent import confirm_card, orchestrator                     # noqa: E402

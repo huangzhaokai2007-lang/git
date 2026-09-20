@@ -10,6 +10,8 @@ board/
 agents/
 data/*.db
 data/*.db-*
+var/*.db
+var/*.db-*
 
 # 凭据硬防线：任何环境文件变体、私钥、凭证文件都不进构建上下文
 .env
