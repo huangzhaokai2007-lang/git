@@ -28,6 +28,17 @@
 | card-14a | 7361c99 | PASS（越权校验收口 + 参数边界，852 passed） | 越权统一 tool_guard + 金额正整数分/上限/收款人存在边界，工具侧转发零回归；5/5 变异真报警。**待 14b 补 risk_event 枚举 + 限流 + 幂等落库** |
 | card-14b | 5235353 | PASS（859 passed，SPEC-CHANGE 加表） | 限流（先计数再校验）+ 幂等落库（重启有效、重放不计数）+ 规格 §DDL 加 2 表 + DAO 四原语；verify 全绿。**待 14b-2 收尾：39处补名+变异+transfer切幂等表** |
 | card-14b-6 | f4d89e7 | 提交（864 passed）；**变异自检顺延未验** | transfer 切幂等表端到端：_transfer_token 薄壳 + 权威读 + CAS 守卫 + 端到端重启用例；MUST_FIX（假守卫 CAS）已修。**变异自检锚点待 14b-7 随新实现重挂** |
+| card-15 | bd3a9eb | PASS（无 MUST_FIX，5 条非阻塞 RISK） | 红队用例集 30 条（5 类）+ 交互测试页；攻击未得逞 30/30、规则层硬拒答 22/30、危害 0/30；verify 绿（864 passed）。2 变异真报警 |
+| card-16 | 2750d4f | PASS（无 MUST_FIX，5 条 RISK） | 交互层聊天界面（聊天窗 + 确认卡组件 + 账单图表 + 审计时间轴）；864 passed + 18 项端到端自检 + 真浏览器截图。**关键发现：界面「禁改数字」无机器守卫 → 派 16c** |
+| card-16b | bdbe818 | PASS（无 MUST_FIX，5 条 RISK） | 底层坑收口：data 线程安全（每线程连接 + BEGIN IMMEDIATE）+ 结构漂移自检 + 槽位归一化 + 分类器 history role-separated（0/6→6/6）；895 passed。线程独立验证 15/15 不 flaky |
+| card-16c | 9b14523 | PASS（无 MUST_FIX，2 条 RISK） | 界面分层机器守卫 31 条（数字逐字回显 + AST 分层/SQL 扫描）+ 16b 竞速用例确定性化；926 passed。变异抽验（_yuan+1 → 7 条变红） |
+| card-17 | 3ba9563 | PASS（无 MUST_FIX，8 条 RISK） | IM 通道（飞书 webhook + HTTP 轮询 demo + wrap_untrusted source=im + 复用同一编排层）；无网自检 7/7 + 断网证据；926 passed。4 变异真报警 |
+| card-17b | 258b5c2 | PASS（无 MUST_FIX，3 条 RISK） | agent 薄函数（干净分层，替换命名空间借取）+ period 归一化（英文别名 + 认不出走 CLARIFY，不默默换当月）；970 passed。3 变异真报警 |
+| card-18 | 6a67a7a | PASS（无 MUST_FIX，6 条 RISK） | 工程化与提交物：README（架构图/工具表/权限矩阵/注入攻防表）+ Dockerfile + docker-compose + bootstrap.sh + 评测入口 POST /api/chat + verify 5→6 段；970 passed。**Docker 真机构建已闭环**（容器内 verify 6/6） |
+| card-19 | 48256c4 | PASS（复跑；初判 FAIL 1 MUST_FIX 已闭环于 83b0c5b） | 演示脚本（三通道 12/12）+ 答辩提纲 + README 演示段 + app/cli.py 补 verify 第 4 段；verify 6/6 全绿。MUST_FIX：答辩提纲「转 600 元 → L2」实测不成立（OVER_LIMIT）→ 按真值表重写 |
+| card-19b | 3ca70d4 | PASS（复跑；初判 FAIL 2 MUST_FIX 已闭环于 83b0c5b） | 全项目收尾：分层守卫扩到 app/ + verify 第 4 段 --offline 化（断言含 2026-08）+ 新增单测 + README 精简 + .dockerignore 凭据硬化；997 passed |
+| SPEC-CHANGE | fc9d86a | 用户全批（#1–#5） | 规格 §2 计数 15→16 · §5 删不可达档位金额分支（金额 >500元 / 单笔 ≥50000元 被单笔上限遮蔽）· §7 容差收窄（裸数字仅精确匹配）· §8 用例格式追认；红线 84→100、单测 1013 passed |
+| SPEC-CHANGE | c39c2b9 | 用户全批（#6） | CLAUDE.md + .hermes.md 架构行同步（tools 16 个 / tools 可调 guard / 架构四层→五层） |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
