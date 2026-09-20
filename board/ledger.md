@@ -1480,3 +1480,22 @@ card-19 + card-19b 复跑双双 PASS（83b0c5b）：
 **进度图修复**：`Desktop/AI-Banking-Agent-施工进度图.build.py` 的「安装包」判据 = 本台账「已接受的卡（存档点）」表。该表原先只到 card-14b-6，导致 card-15 之后的框全显示 🔒。已补 card-15/16/16b/16c/17/17b/18/19/19b + 2 条 SPEC-CHANGE，重跑生成器 → 图上 20/20 框全部挂上安装包。**改卡要同步这张表，否则图永远落后。**
 
 提交：Dockerfile+docker-compose.yml（健康检查按 service 定义）、board/ledger.md（存档点表补齐）。
+
+## 决策记录（Docker 全链路 reviewer 独立复验 = PASS）
+
+reviewer 独立复跑（board/reviews/docker-verify.md）：
+  - `docker compose ps` → banking-api + banking-web **均 healthy**（全局探针 bug 确认闭环）
+  - 容器内 `bash scripts/verify.sh` → **6/6 全绿、rc=0**（1013 passed / 用例 30/30 / 断言含 2026-08 / 红线 100 / 红队+IM+评测入口全过）
+  - `POST /api/chat`（UTF-8 文件体）→ **恰好 6 字段**，余额 46,634.00 来自事实包
+  - **变异抽查**：web 探针端口 8501→8000 → 约 130s 后 **banking-web unhealthy**（FailingStreak=7）；还原 → 回 healthy
+  - **镜像非陈旧**：宿主机与容器 sha256 逐一相同（1013/100 两侧一致；早前引用的 997/84 是旧数，已由 984c75d 对齐）
+
+  ⇒ **card-18 RISK①「Docker 未真机构建」正式闭环。20 张卡 + Docker 真机闭环。**
+
+4 条非阻塞 RISK（部署/评测口径，记台账）：
+  1. 构建期需外网（uv sync），运行期离线 → 纯断网评分环境要**预分发镜像**，别声称"完全离线可构建"
+  2. 容器继承宿主 .env：有 key 时 reply 被模型润色（数字仍来自事实包）→ **程序化断言请钉 6 字段与数字，别比 reply 原文**
+  3. 首次健康判定有延迟（web ≈130s），`up -d` 后立刻 ps 见 `health: starting` 属正常
+  4. 镜像带 docs/tests（为容器内跑 verify 的有意取舍）
+
+待办（进行中）：worker 修 **容器 TZ=Asia/Shanghai**（真机演示抓到：容器跑 UTC → night 因子判反，白天误判"夜间"升 L2）。
