@@ -1583,3 +1583,20 @@ worker 不动：transfer.py 现有逻辑、已 PASS 卡的测试、write_flow.py
   - N/M/W 全来自 facts（含 zombie_window_months），不硬编码 3（铁律 2）；模板层与工具层措辞一致
   - 代码内部命名（_zombie_ids/测试名/注释）保留；用户可见处（README 示例回执 + T10 备注 + 答辩提纲 §0:30）一并白话化
   - 范围：agent/templates.py + tools/subscription.py + README.md + docs/答辩提纲.md；门禁 1013 / verify 6/6
+
+## 决策记录（人类问「手机端要大改吗」→ 选 A：趁 card-20 未落，现在就渠道无关）
+
+人类问：后续设计成手机端会有大改动吗？
+
+analyst 分析（附实证）：
+  - **核心 5 层零改动**：分层 + 已有 `POST /api/chat`（渠道无关 JSON 入口）+ 已有 `interfaces/im/`（只调 agent 的第二通道）= 再加一个 `interfaces/mobile/` 即可
+  - **两处拖后腿**：① 后端只有 /api/chat + /healthz；**card-20 的收款人表单是 Streamlit 进程内直调 agent**（`interfaces/web/app.py::_render_payee_form`）→ 外部客户端拿不到 ② 界面态在 st.session_state
+  - 文字类交互（发话/回「确认」/OTP）手机端**已能全用**（session_id 已支持），只缺「结构化表单」这一类
+
+人类选 **A（推荐）**：趁 card-20 还在写，现在就把它做成渠道无关。
+
+落地：
+  - card-20 追加「要求 7：把提交收款人暴露成 `POST /api/payee`」（body {name,phone,session_id?} → **与 /api/chat 同形状 6 字段**，走同一个 submit_payee；/api/chat 6 字段不变）
+  - 范围新增 `interfaces/api/app.py`（唯一新增文件）
+  - 卡文件（card-20.md）+ 剧本源（02-AI指令剧本.md）已改，commit 5c80d3d
+  - 已派 worker（proc_d51a91b73f1c）：**A（要求7）+ B（订阅措辞去行话）合并一条**（之前 B 两次 target_busy 未送达，这次一并送到了）
