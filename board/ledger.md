@@ -1636,3 +1636,20 @@ worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_a
 - 修法（已派 worker，追加 C）：库文件挪出代码目录（`DB_PATH=var/bank.db` + 卷只挂 `/app/var`），并要求加「卷不许盖含源码目录」的守卫测试。
 - 教训已进技能：带容器编排的交付物，**容器内 verify + 真端点调用**是必做验收；**永不在含源码的目录上挂卷**。
 - 投递插曲：追加 C 被 `target_busy` 连挡 15 次（worker 空闲仍报忙，Bot Chat 被别处占用）→ **换新会话名投递**（`-c 'Card20-修复' --create-if-missing`）**一次成功**；已记入技能。
+
+## 决策记录（人类新增需求：多用户 + 注册登录 + 每用户聊天记录）
+
+**需求原文（人类）**：「给每人初始十万元的资金」「每个用户登录时根据登录机器的id确认用户」「注册用户时输入手机号」
++ 追加「每个用户都要保留聊天记录」＝ 人类已批**全部推荐项**。
+
+**现状勘查（真库真代码）**：`user`/`account` 表天然支持多用户、资源按 `user_id` 隔离、`require_owned` 已拦越权；
+缺的是注册/登录 + 按设备识别 + 并发正确性。库里现有 1 用户（张三，储蓄 46,634.00）。
+「当前用户」＝规格 §6 **私有约定**（`tools/_query_common.set_current_user`），**不是** 17 个冻结工具之一；⚠️ 它是**模块全局变量**。
+
+**已批 6 点**：① 设备 id = 浏览器生成 UUID 存 localStorage（接口同时收任意设备 id，手机端可传真机 id）② 无密码：device 已注册→直接进，未注册→输手机号注册 ③ 新用户初始 **100,000.00 元**（并写一笔开户流水；张三保留 46,634 历史）④ 新表 `device(device_id, user_id, bound_at)`（DDL 改动 → SPEC-CHANGE）⑤ 不加冻结工具，走 §6 私有约定（dao + agent/session.py + POST /api/session）⑥ `_SESSION_USER` 模块全局 → **改 thread-local**（否则两台设备并发互相覆盖）。
+**追加 D7**：每用户聊天记录持久化 → 新表 `conversation` + `POST /api/history`（用 device_id 解析用户，**不接受任意 user_id**，否则越权读）。
+**我自取的默认（人类未点，可推翻）**：注册**不做**短信验证码（demo 口径，文档写明）。
+**必须诚实记的一条**：设备 id 登录是**「识别」不是「认证」**（客户端可伪造）——文档写明，不得对外称"安全登录"。
+
+**拆卡**：card-21 = 多用户地基（device + 注册/登录 + 初始 10 万 + thread-local + 网页闸门）；card-22 = 聊天记录持久化（依赖 21）。
+**建卡三处已同步**：`docs/cards/card-21.md`、`card-22.md`、`docs/02-AI指令剧本.md`（§7 后插入）、`docs/cards/README.md`。

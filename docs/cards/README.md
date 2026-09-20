@@ -25,3 +25,5 @@
 | 18 | 一键启动与工程交付 | `docs/cards/card-18.md` |
 | 19 | 演示与答辩材料 | `docs/cards/card-19.md` |
 | 20 | 收款人自助添加（补充卡） | `docs/cards/card-20.md` |
+| 21 | 多用户注册/登录（设备识别 · 补充卡） | `docs/cards/card-21.md` |
+| 22 | 每用户聊天记录持久化（补充卡 · 依赖 21） | `docs/cards/card-22.md` |
