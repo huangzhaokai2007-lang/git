@@ -24,3 +24,4 @@
 | 17 | IM 通道 | `docs/cards/card-17.md` |
 | 18 | 一键启动与工程交付 | `docs/cards/card-18.md` |
 | 19 | 演示与答辩材料 | `docs/cards/card-19.md` |
+| 20 | 收款人自助添加（补充卡） | `docs/cards/card-20.md` |
