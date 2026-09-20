@@ -1427,7 +1427,7 @@ card-19 + card-19b 复跑双双 PASS（83b0c5b）：
 
 交付：
   - fc9d86a `SPEC-CHANGE(用户全批#1-5)`：规格 §2 计数 15→16 + §5 删不可达档位金额分支(加注) + §7 容差收窄(裸数字仅精确匹配，带真值表)+ guard/facts_check.py 代码 + 16 条单测 + §8 用例格式追认；顺修 api_smoke/im-selftest 时段依赖。红线 **84→100**，单测 997→1013。
-  - 提交2 ：CLAUDE.md + .hermes.md 架构行同步（tools 16 个 / tools 可调 guard / 四层→五层）——**worker 的 patch 被系统拦(审批超时)，analyst 亲自补**。
+  - c39c2b9 `SPEC-CHANGE(用户全批#6)`：CLAUDE.md + .hermes.md 架构行同步（tools 16 个 / tools 可调 guard / 四层→五层）——**worker 的 patch 被系统拦(审批超时)，analyst 亲自补**。
   - #3（§DDL 两表+枚举）**已在 card-14b 落地，本次仅追认**，无需改。
 
 裁决（worker 6 条待拍板）：
