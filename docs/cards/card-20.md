@@ -14,6 +14,7 @@
 - `agent/classifier.py`（加 `payee_add` 意图 + 触发词）
 - `agent/orchestrator.py`（识别 `payee_add` → 返回信号；**提供表单提交入口**；若逼近 300 行按既有方式拆）
 - `interfaces/web/app.py`、`interfaces/web/components.py`（表单组件 + 渲染）
+- `interfaces/api/app.py`（**人类追加**：把「提交收款人」也暴露成 HTTP 端点，见要求 7）
 - `tests/`（新增单测 + 界面/分层守卫）
 
 接口：人类已批的契约变更，**逐字照此实现，不得自行改名/加字段**：
@@ -38,6 +39,11 @@
    （`find_payee` 已按 姓名/手机号 子串匹配，别改匹配口径）。
 6. **去重**：同一 user 下同名同手机号重复提交 → 不重复插入（返回既有收款人并说明），
    或明确允许重复并说明理由 —— 二选一，写进交付说明。
+7. **渠道无关（人类追加，重要）**：把「提交收款人」**也暴露成 HTTP 端点** `POST /api/payee` ——
+   body `{"name": "...", "phone": "...", "session_id": "可选"}`，返回与 `POST /api/chat` **同形状的 6 字段**
+   （`reply/intent/tool_calls/tier/executed/trace_id`，走同一个 `submit_payee` 入口）。
+   理由：手机端 / H5 / 小程序等**外部客户端**拿不到 Streamlit 进程内入口；这样交互层各端**共用同一后端**。
+   **`POST /api/chat` 的 6 字段保持不变**（不许加字段）。Streamlit 的表单提交与这个端点**共用同一个 `agent/` 入口**。
 
 禁止：
 - 在界面里写业务逻辑（一律调 `agent/`）
