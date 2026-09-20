@@ -144,6 +144,24 @@ def otp_card(confirmation: Any) -> tuple[str, str] | None:
     return None
 
 
+def payee_form() -> tuple[str, str] | None:
+    """卡 20：添加收款人的表单（姓名 + 手机号两个输入，**不收卡号**）。
+
+    只**收集**输入并原样返回 `(name, phone)`；未提交 → `None`。校验 / 脱敏 / 落库 / 审计
+    一律在 `agent/` → `tools/`（界面不写业务逻辑）。用 `st.form`：两个输入随提交一起送到后端。
+    """
+    with st.container(border=True):
+        st.markdown("##### ➕ 添加收款人")
+        st.caption("填姓名和手机号即可（不收卡号）。手机号会脱敏保存，完整号码不入库、不回显。")
+        with st.form("payee-form", clear_on_submit=True):
+            name = st.text_input("姓名", key="payee-name", placeholder="例如：王小明")
+            phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678")
+            submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
+        if submitted:
+            return (name, phone)
+    return None
+
+
 def pending_card(text: str) -> bool:
     """L3 待复核卡：只给撤销入口（撤销本身走 agent/confirm_card，界面不改状态）。"""
     with st.container(border=True):

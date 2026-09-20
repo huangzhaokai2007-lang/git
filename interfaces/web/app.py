@@ -163,6 +163,47 @@ def _render_confirm() -> None:
         st.rerun()
 
 
+# ---------------- 卡 20：收款人自助添加（聊天触发 → 表单 → 经 agent 落库） ----------------
+
+def _render_payee_form() -> None:
+    """编排层判出 `payee_add` 时弹表单；提交**经 agent 层**落库。
+
+    界面只判断"该不该弹"（看 `turn.intent`）并把两个输入原样交出去 —— 脱敏、校验、落库、审计
+    全在 `agent/payee_flow.py` → `tools/payee.py`（界面不写业务逻辑）。
+    """
+    turn = st.session_state["messages"][-1].get("turn") or {}
+    if turn.get("intent") != "payee_add" or turn.get("executed"):
+        return                       # 提交成功（executed=True）就把表单收起来，避免重复提交；失败则保留可重试
+    submitted = ui.payee_form()
+    if submitted is None:
+        return
+    _submit_payee(*submitted)
+    st.rerun()
+
+
+def _submit_payee(name: str, phone: str) -> None:
+    """表单提交：走 `orchestrator.submit_payee`（agent 层入口），不直连 `tools/`。
+
+    手机号**只经手不记录**：聊天记录只写"（表单提交）"，脱敏后的号码由回执（agent 层）给出。
+    记账口径与 `_ask` 相同（刻意不复用：`_ask` 走的是"一句话"入口，签名与副作用都不同）。
+    """
+    state = st.session_state
+    state["messages"].append({"role": "user", "text": "（表单提交）新增收款人"})
+    try:
+        turn = _agent_executor().submit(orchestrator.submit_payee, name, phone,
+                                        session_id=state["session_id"]).result()
+    except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
+        state["messages"].append({"role": "assistant", "turn": None,
+                                  "text": f"这次提交没能完成（{type(exc).__name__}: {exc}）。"
+                                          "如果是库结构问题，在仓库根目录跑 "
+                                          "`uv run python -m data.seed --reset` 后重试。"})
+        return
+    dump = turn.model_dump()
+    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": "（表单提交）新增收款人", "turn": dump})
+    state["clarify_round"] = 0                  # 表单提交不是追问的后续
+
+
 # ---------------- 侧边栏 ----------------
 
 def _sidebar() -> str:
@@ -203,6 +244,7 @@ def _chat_page() -> None:
             ui.bill_panel(ui.bill_series(messages), latest)
     _render_pending()
     _render_confirm()
+    _render_payee_form()
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()

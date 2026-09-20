@@ -196,3 +196,27 @@ class AaRequestReq(BaseModel):
 class AaData(BaseModel):
     request_id: str
     per_person_amount: int
+
+
+# ---------- T17 add_payee（卡 20：收款人自助添加） ----------
+
+class AddPayeeReq(BaseModel):
+    """T17 入参（规格 §2 冻结：`add_payee(name, phone)`）。
+
+    这里只做结构性校验（非空）；手机号的**业务校验**（11 位数字 / 已脱敏形式）在
+    `tools/payee.py` 里做 —— 因为那一步的错误消息**绝不回显取值**，不能走 Pydantic 的报错路径
+    （`ValidationError.errors()` 会把入参原样带进日志，而完整手机号绝不允许进日志）。
+    """
+
+    model_config = STRICT
+
+    name: str = Field(min_length=1)
+    phone: str = Field(min_length=1)
+
+
+class AddPayeeData(BaseModel):
+    """T17 的 `data`（键名与个数冻结：规格 §2 只允许这 3 个键）。"""
+
+    payee_id: str
+    name: str
+    masked_phone: str

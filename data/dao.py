@@ -1,4 +1,4 @@
-"""数据层 DAO（任务卡 03；卡 05b 拆分后）：**只放 16 个公开读写函数**，一次只做一件事。
+"""数据层 DAO（任务卡 03；卡 05b 拆分后）：**只放 22 个公开读写函数**，一次只做一件事。
 
 连接状态、写原语（`_insert`/`_apply_update`）与入参校验 helper 都在 `data/_dao_core.py`；
 本模块反向 import 它们，并 re-export `connect_db` / `close` / `connection`（工具层仍从 `data.dao` 取用）。
@@ -284,3 +284,17 @@ def update_account_balance(account_id: str, delta: int) -> dict | None:
         conn.execute("UPDATE account SET balance = balance + ?, available = available + ? WHERE id = ?",
                      (change, change, account))
     return _one("SELECT * FROM account WHERE id = ?", (account,))
+
+
+def insert_payee(user_id: str, name: str, phone: str, *, bank: str | None = None,
+                 is_whitelist: int = 0, id: str | None = None) -> dict:
+    """新增收款人（卡 20），返回写入后整行；`phone` 必须是**已脱敏**形式（脱敏在工具层做）。
+
+    不写 `last_used_ts`（保持 NULL = 从未转账 → 之后转账按新收款人走 L2 + OTP）；同名同号不去重。
+    """
+    if is_whitelist not in (0, 1):
+        raise ValueError(f"is_whitelist 只能是 0 或 1，收到 {is_whitelist!r}")
+    values = (str(_text(id, "id")) if id is not None else f"payee_{uuid.uuid4().hex[:12]}",
+              _text(user_id, "user_id"), _text(name, "name"), _text(phone, "phone"),
+              _text(bank, "bank", allow_none=True), is_whitelist)
+    return _insert("payee", ("id", "user_id", "name", "phone", "bank", "is_whitelist"), values, str(values[0]))

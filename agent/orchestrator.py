@@ -36,7 +36,7 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import classifier, confirm_card, templates, write_flow
+from agent import classifier, confirm_card, payee_flow, templates, write_flow
 from agent.period import anchor_period, resolve_day, resolve_period
 from data import dao
 from data.seed import AS_OF
@@ -46,6 +46,10 @@ from tools._query_common import current_session_id
 from tools.schemas import ToolResult
 
 logger = logging.getLogger(__name__)
+
+#: 卡 20：**表单提交入口**（导出给 `interfaces/` 用 —— 界面只调 `agent/`，不直连 `tools/`）。
+#: 实现与理由见 `agent/payee_flow.py`（§5：`payee_add` → L1，不发确认卡、不要 OTP）。
+submit_payee = payee_flow.submit_payee
 
 # ---------------- 阈值与契约常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
 STATES = ("IDLE", "CLASSIFY", "CLARIFY", "SLOT_FILL", "PRECHECK", "CONFIRM_CARD", "PENDING_REVIEW",
@@ -254,6 +258,10 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
         return _finish(ctx, templates.refuse(verdict.unsafe_reason), result="rejected")
     if ctx.confidence < CONFIDENCE_FLOOR:
         return _clarify(ctx, templates.clarify_low_confidence(), reason="low_confidence")
+    if ctx.intent == payee_flow.INTENT:                                  # 卡 20：只回引导语，界面据此弹表单
+        ctx.enter("PRECHECK")
+        ctx.tier = payee_flow.PAYEE_ADD_TIER
+        return _finish(ctx, payee_flow.PROMPT, result="pending_confirm")
     if ctx.intent in WRITE_INTENTS:                                      # 卡 10：写路径
         return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id))
     return _read_flow(ctx)

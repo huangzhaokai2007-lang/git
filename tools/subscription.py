@@ -10,7 +10,7 @@
 - **`confirm_ref` 是自包含凭证**（reviewer 开工前依赖提醒的定稿口径，仿 card-05 `preview_token`）：
   本层 `issue_confirm_ref(action, target_id)` 签发、本层校验、TTL 300s、绑定（action + target_id + 当前用户），
   一次性消费并把结果快照写回 → 同 ref 重复调用返回同一结果（**幂等**）。
-  `issue_confirm_ref` 是**工具层私有约定**（非规格冻结的 15 个工具函数，对齐 §6 `set_current_user` 的认可口径）。
+  `issue_confirm_ref` 是**工具层私有约定**（非规格冻结的 17 个工具函数，对齐 §6 `set_current_user` 的认可口径）。
   错误码边界（reviewer 钉死）：**不存在 / 非本人 / 绑定不符 / AI 自造串 → `FORBIDDEN`**（越权或伪造，
   记 `audit_log.result='rejected'`）；**存在但超 TTL → `TOKEN_EXPIRED`**（良性超时，不记审计）。
   真·确认卡绑定的状态机属编排层（卡 09/10）—— 本层只保证"凭证由本层签发、且绑定本次操作"。
@@ -109,7 +109,7 @@ def _now() -> datetime:
 
 
 def issue_confirm_ref(action: str, target_id: str) -> str:
-    """签发确认凭证（**工具层私有约定，不属于规格冻结的 15 个工具函数**）。
+    """签发确认凭证（**工具层私有约定，不属于规格冻结的 17 个工具函数**）。
 
     编排层（卡 09/10）渲染确认卡、用户确认后调用本函数，把返回的 ref 交给 `cancel_subscription`
     / `manage_card`。凭证绑定（action + target_id + 当前用户 + 签发时刻），TTL `CONFIRM_TTL_SECONDS`，
