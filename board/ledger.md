@@ -1567,3 +1567,19 @@ worker 复述准确（5 行理解与卡一致）。逐条裁决：
      另提醒 worker：grep 全仓有无「工具数=16 / 白名单」钉死的测试，有则同步改（§2 计数 16→17 的连锁）+ §2 标题改 17。
 
 worker 不动：transfer.py 现有逻辑、已 PASS 卡的测试、write_flow.py、Turn/API 响应字段、pyproject.toml。
+
+## 决策记录（人类要求：订阅回执去行话「僵尸订阅」→ 白话解释）
+
+人类原话：「聊天台问订阅情况时不要直接说僵尸订阅，而是简要阐述清楚有一个订阅还在『进行中』、但最近 3 个月没有任何扣费，怀疑是你忘了取消的订阅。」
+
+现状（analyst 查）：
+  - 模板 agent/templates.py:59 `T_SUBSCRIPTION = "当前有 {subscription_count} 个订阅，其中 {zombie_count} 个疑似僵尸订阅。"`
+  - 工具层 tools/subscription.py:241 有姊妹措辞
+  - **全仓无测试断言「僵尸」二字**；用例 sub-005 只断言 must_contain ["订阅"] → 改措辞不破测试
+
+改法（已派 worker，proc_5450ef9354c3，**排在 card-20 之后**）：
+  - zombie_count>0：「当前有 {N} 个订阅；其中 {M} 个仍在「进行中」，但最近 {W} 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅，建议核对一下。」
+  - zombie_count==0：不硬套（避免「其中 0 个…」），改「最近 {W} 个月都有正常扣费记录」
+  - N/M/W 全来自 facts（含 zombie_window_months），不硬编码 3（铁律 2）；模板层与工具层措辞一致
+  - 代码内部命名（_zombie_ids/测试名/注释）保留；用户可见处（README 示例回执 + T10 备注 + 答辩提纲 §0:30）一并白话化
+  - 范围：agent/templates.py + tools/subscription.py + README.md + docs/答辩提纲.md；门禁 1013 / verify 6/6
