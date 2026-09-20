@@ -1624,3 +1624,15 @@ analyst 亲自核验：
 worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_add → 断网演示走不到表单」。
 人类裁定：**暂时不需要**（本轮不做），留作待办备查 —— 评委若断网演示，「加收款人」这条演示不出来。
 （不改判为风险，仅记录。）
+
+## 决策记录（card-20 追加 A+B 入账 + 抓到容器第二个真 bug）
+
+**A+B 交付并已提交 `ae6b81e`**（独立复跑：`1047 passed` = 1039 + 8；`bash scripts/verify.sh` 6/6 全绿）。
+- A `POST /api/payee`：与 /api/chat **共用同一份 6 字段映射 `_turn_payload`** → 形状一致是结构保证；走同一个 `orchestrator.submit_payee`；`/api/chat` 6 字段未变（有用例钉住）。
+- B 订阅回执去行话：`agent/templates.py` + `tools/subscription.py` 同措辞，真回执「其中 1 个仍在「进行中」，但最近 3 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅」，且 W 来自 facts（无硬编码 3）；`test_subscription_wording.py` 把「两处一致」变成会变红的断言。
+- 裁决 3 条：① `/healthz` 改成 `endpoints:[...]`——**接受**（非冻结契约，更准确）；② `tools/subscription.py` 顶到 300 行——**待办**，与 `data/dao.py` 一起下轮拆；③ `api_smoke.py` 纳入 /api/payee——**待办**（会写库，需先定口径）。
+
+**★ 真机抓到容器第二个真 bug（比 A/B 严重）**：`- bankdata:/app/data` 命名卷盖住整个 `data/` 目录，而该目录**代码与库文件混放**（`dao.py` + `bank.db`）→ 容器永远跑第一次建卷时的旧代码（实测：容器内 `data/dao.py` 日期 Sep 20 02:51、`grep insert_payee`=0；宿主=1），**`up --build` 也无效**。症状极具欺骗性：表单能弹（在 `interfaces/`+`agent/`），一提交就 `AttributeError: module 'data.dao' has no attribute 'insert_payee'`，而宿主全绿、容器 healthy。
+- 修法（已派 worker，追加 C）：库文件挪出代码目录（`DB_PATH=var/bank.db` + 卷只挂 `/app/var`），并要求加「卷不许盖含源码目录」的守卫测试。
+- 教训已进技能：带容器编排的交付物，**容器内 verify + 真端点调用**是必做验收；**永不在含源码的目录上挂卷**。
+- 投递插曲：追加 C 被 `target_busy` 连挡 15 次（worker 空闲仍报忙，Bot Chat 被别处占用）→ **换新会话名投递**（`-c 'Card20-修复' --create-if-missing`）**一次成功**；已记入技能。
