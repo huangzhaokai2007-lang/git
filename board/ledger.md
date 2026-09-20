@@ -1499,3 +1499,18 @@ reviewer 独立复跑（board/reviews/docker-verify.md）：
   4. 镜像带 docs/tests（为容器内跑 verify 的有意取舍）
 
 待办（进行中）：worker 修 **容器 TZ=Asia/Shanghai**（真机演示抓到：容器跑 UTC → night 因子判反，白天误判"夜间"升 L2）。
+
+## 决策记录（容器 TZ 修复 · 真机复验通过）
+
+交付：Dockerfile（ENV TZ=Asia/Shanghai + 装 tzdata）+ docker-compose.yml（注释说明时区归属）。
+真机复验（analyst 亲自跑）：
+  - `docker compose exec api date` → **Sun Sep 20 11:58:37 CST 2026**（与宿主一致；此前是 03:54 UTC）
+  - `transfer._now()` → **2026-09-20 11:58:47**（业务时钟同步；night 因子读的就是它）
+  - 重走「给王五转 100 元」→ **权限档 L1 + 「常规转账，未触发风险因子」**（此前 L2 + 「夜间时段」）
+  - 两容器均 healthy
+
+裁决（worker 4 条待拍板）：
+  - ① 补容器内实证 → **已做**（上面三条）
+  - ② TZ 定在镜像单一真相（compose 只加注释）→ **接受**（别让同一事实两个来源）
+  - ③ 建议下一张卡「TZ 无关化」（BUSINESS_TZ + ZoneInfo + 非 CST 单测）→ **记待办**（部署层已够 demo；代码层鲁棒化留待后续）
+  - ④ 时间戳一并修好（审计/回执不再差 8 小时）→ 已确认。
