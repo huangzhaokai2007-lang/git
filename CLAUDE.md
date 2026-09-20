@@ -18,17 +18,17 @@
 
 ---
 
-## 架构（四层，禁止越层调用）
+## 架构（五层，禁止越层调用）
 
 ```
 interfaces/   ① 交互层   Streamlit 聊天页 / IM(飞书) webhook / CLI
 agent/        ② 编排层   意图识别 → 槽位抽取 → 缺槽反问 → 权限预检 → 确认卡 → 执行 → 回执
 guard/        ③ 护栏     权限分级(L0-L3)、注入检测、数字校验器、降级兜底
-tools/        ④ 工具层   15 个白名单函数，入参出参均为 Pydantic 模型
+tools/        ④ 工具层   16 个白名单函数，入参出参均为 Pydantic 模型
 data/         ⑤ 数据层   SQLite + 合成数据生成器 + DAO
 ```
 
-- `agent/` 可以调 `guard/` 和 `tools/`；`tools/` **只能**调 `data/`；`interfaces/` **只能**调 `agent/`。
+- `agent/` 可以调 `guard/` 和 `tools/`；`tools/` 可以调 `guard/` 和 `data/`（14a 起 tools 调 guard 做越权/参数边界校验）；`interfaces/` **只能**调 `agent/`。
 - 反例（禁止）：`interfaces/` 直接调 `tools/`；`agent/` 直接写 SQL。
 
 ## 技术栈（不要换）
