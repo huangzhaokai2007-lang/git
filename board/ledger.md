@@ -1654,3 +1654,22 @@ worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_a
 
 **拆卡**：card-21 = 多用户地基（device + 注册/登录 + 初始 10 万 + thread-local + 网页闸门）；card-22 = 聊天记录持久化（依赖 21）。
 **建卡三处已同步**：`docs/cards/card-21.md`、`card-22.md`、`docs/02-AI指令剧本.md`（§7 后插入）、`docs/cards/README.md`。
+
+## 决策记录（实测发现：14 类意图聊天走不到 → 人类拍板先做 card-23 接通读卡）
+
+**实测（把规格 §3 的意图逐条喂给编排层，非读码推断）**：
+- **聊天可直达 10 类**：balance_query / txn_query / bill_analysis / anomaly_check / bill_report / subscription_list / wealth_recommend / transfer_single / transfer_scheduled / payee_add
+- **未接通 14 类**（回「这个功能还没接通」模板）：card_query · risk_assess · subscription_cancel · subscription_remind · card_apply/limit_adjust/lock/unlock/report_lost · wealth_buy/redeem · gift_plan · aa_collect
+- **根因**：只读映射 `TOOL_ROUTES` 只接 7 条、写路径 `WRITE_INTENTS` 只有转账 2 条；工具层 17 个都实现了、单测全绿。
+- **额外实证**：`card_query` 那条在 `agent/orchestrator.py:28` 就写着「待人类指定读法」——是**已知缺口**，只是从未汇总出来（我给人类的《能力清单》初版因此说得过头，已改诚实版）。
+
+**人类拍板：先做 card-23**（读卡，小、独立、当天见效），写路径泛化留给 card-24。
+
+**card-23 设计（已立卡，三处同步）**：
+- 新工具 **T18 `list_cards(status=None)`** → L0；`data={items:[{card_id,card_no_mask,type,status,credit_limit,single_limit,daily_limit}], total_count}`；**储蓄卡 credit_limit=null**（不编 0）
+- §2 计数 **17→18** + §6 那句同步（**SPEC-CHANGE，人类已批**）
+- DAO 原语进 `data/_dao_core.py`（**`data/dao.py` 已顶格 300 行**）；读卡工具进**新文件** `tools/card_query.py`（`tools/card.py` 已 272 行）；orchestrator 已 293 行 → 允许拆 `agent/read_routes.py`
+- 实测数据：库里 3 张卡（savings normal / credit normal 额度 30000 元 / savings **lost**）——单测与截图都要覆盖「已挂失」那张
+- 受保护文件 CLAUDE.md/.hermes.md 由 analyst 另行落地
+
+**同批发现并已修的隐患**：旧 `.env` 的 `DB_PATH=data/bank.db` 会让工具**在代码目录生野库**（实测真的生了一个、还读到空库）→ 已改 `var/bank.db`；野库已删。``.gitignore` 只忽略 `.env` 未忽略 `.env.*`` → 记待办（含 key 的备份可能被提交）。

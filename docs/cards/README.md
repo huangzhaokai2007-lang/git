@@ -27,3 +27,4 @@
 | 20 | 收款人自助添加（补充卡） | `docs/cards/card-20.md` |
 | 21 | 多用户注册/登录（设备识别 · 补充卡） | `docs/cards/card-21.md` |
 | 22 | 每用户聊天记录持久化（补充卡 · 依赖 21） | `docs/cards/card-22.md` |
+| 23 | 接通卡片查询（新增只读工具 T18 · 补充卡） | `docs/cards/card-23.md` |
