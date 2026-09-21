@@ -1659,7 +1659,8 @@ worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_a
 
 **实测（把规格 §3 的意图逐条喂给编排层，非读码推断）**：
 - **聊天可直达 10 类**：balance_query / txn_query / bill_analysis / anomaly_check / bill_report / subscription_list / wealth_recommend / transfer_single / transfer_scheduled / payee_add
-- **未接通 14 类**（回「这个功能还没接通」模板）：card_query · risk_assess · subscription_cancel · subscription_remind · card_apply/limit_adjust/lock/unlock/report_lost · wealth_buy/redeem · gift_plan · aa_collect
+- **未接通 13 类**（回「这个功能还没接通」模板）：card_query · risk_assess · subscription_cancel · subscription_remind · card_apply/limit_adjust/lock/unlock/report_lost · wealth_buy/redeem · gift_plan · aa_collect
+- **勘误（我自己的）**：初版我报「14 类」是**错的**。`transfer_single`/`transfer_scheduled` **本来就接通**——探针里它们回「请补充收款人」是**缺槽追问**、不是未接通（那次探针误用了空 `data/bank.db`，连收款人解析不出来）。worker 复述时揪出这个算错，已改。归属：**card-23 = 1（card_query）+ card-24 = 10（写类）+ 另议 2（risk_assess 问卷 / subscription_remind 无对应工具）= 13**
 - **根因**：只读映射 `TOOL_ROUTES` 只接 7 条、写路径 `WRITE_INTENTS` 只有转账 2 条；工具层 17 个都实现了、单测全绿。
 - **额外实证**：`card_query` 那条在 `agent/orchestrator.py:28` 就写着「待人类指定读法」——是**已知缺口**，只是从未汇总出来（我给人类的《能力清单》初版因此说得过头，已改诚实版）。
 

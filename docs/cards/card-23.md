@@ -17,6 +17,7 @@
 - `README.md`（§5 工具表加 T18 行 + 相关计数）
 - `tools/card_query.py`（**新文件**，放 `list_cards`；**不要**塞进 `tools/card.py`——它已 272 行，加进去必破 300）
 - `tools/schemas.py`（加 `ListCardsReq` / `ListCardsData`）
+- `agent/templates.py`（**分析师授权加**：`card_query` 回执模板 1~2 个 + 按 `total_count` / `status` 的分支；照卡 20 订阅那次先例。回执每个数字都要能在 `facts` 找到，卡号照抄 `card_no_mask`，措辞用大白话、空结果有独立句子）
 - `data/_dao_core.py`（加 `list_cards(user_id, status=None)` DAO 原语）—— **`data/dao.py` 已顶格 300 行，一个字都不许再加**
 - `agent/orchestrator.py`（把 `card_query → list_cards` 接进 `TOOL_ROUTES`；它已 **293 行**，允许按 `agent/payee_flow.py` 的先例拆出 `agent/read_routes.py` 再导出）
 - `tests/`（新增单测 + 路由测试）
