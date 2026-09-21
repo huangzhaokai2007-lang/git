@@ -39,6 +39,7 @@
 | card-19b | 3ca70d4 | PASS（复跑；初判 FAIL 2 MUST_FIX 已闭环于 83b0c5b） | 全项目收尾：分层守卫扩到 app/ + verify 第 4 段 --offline 化（断言含 2026-08）+ 新增单测 + README 精简 + .dockerignore 凭据硬化；997 passed |
 | SPEC-CHANGE | fc9d86a | 用户全批（#1–#5） | 规格 §2 计数 15→16 · §5 删不可达档位金额分支（金额 >500元 / 单笔 ≥50000元 被单笔上限遮蔽）· §7 容差收窄（裸数字仅精确匹配）· §8 用例格式追认；红线 84→100、单测 1013 passed |
 | SPEC-CHANGE | c39c2b9 | 用户全批（#6） | CLAUDE.md + .hermes.md 架构行同步（tools 16 个 / tools 可调 guard / 架构四层→五层） |
+| card-20 | 4ade9a2 | **PASS**（board/reviews/card-20.md，无 MUST_FIX；5 条变异抽查全真报警） | 收款人自助添加 + 渠道无关 + 容器卷修复。主体 `307530b`（T17 add_payee + payee_add 意图 + 表单）、A+B `ae6b81e`（POST /api/payee 共用 _turn_payload + 订阅回执去行话）、C `4ade9a2`（库文件迁出代码目录，修命名卷盖住 /app/data）；**1051 passed** + verify 6/6。真机容器内端到端：加人 → 转账走 L2+OTP |
 
 ## 已知风险台账（同类风险出现 2 次即升级为阻塞）
 
