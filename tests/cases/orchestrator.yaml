@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 6 / sub 5 / card 4 / wlt 4 / sec 6 = 30 条
+# 分组：bill 5 / trf 6 / sub 5 / card 5 / wlt 4 / sec 6 = 31 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -86,12 +86,18 @@
   slots: {status: active}
   expect: {intent: subscription_list, tool_calls: [list_subscriptions], tier: L0, executed: false, must_contain: ["订阅"]}
 
-# ---------------- 卡片 4 ----------------
+# ---------------- 卡片 5 ----------------
 - id: card-001
   input: "帮我查一下卡"
-  slots: {card_id: card_savings_0001}
-  # §2 没有读卡工具：编排层回「还没接通」模板，只读意图故档位仍 L0
-  expect: {intent: card_query, tool_calls: [], tier: L0, executed: false, must_contain: ["还没接通"]}
+  slots: {}
+  # 卡 23：只读的 card_query 已接上 T18 list_cards（L0；库里 3 张卡）
+  expect: {intent: card_query, tool_calls: [list_cards], tier: L0, executed: false, must_contain: ["张卡"]}
+- id: card-005
+  input: "我有没有挂失的卡"
+  slots: {status: lost}
+  # 卡 23：status 过滤 → 只回该状态那条；面向用户说大白话「已挂失」（不出现内部枚举 lost）
+  expect: {intent: card_query, tool_calls: [list_cards], tier: L0, executed: false,
+           must_contain: ["已挂失", "6222 **** **** 0003"], must_not_contain: ["6222 **** **** 0001", "lost"]}
 - id: card-002
   input: "我的卡挂失了"
   slots: {card_id: card_savings_0003}

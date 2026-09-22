@@ -25,23 +25,24 @@
   `txn_query` 的显式区间**不猜** —— 缺了就用 `REQUIRED_SLOTS` 触发 CLARIFY 追问。
 - CLARIFY 上限 2 轮（卡 09 第 3 条），超出回「转人工」话术；每请求一条 `audit_log`（编排层 AUDIT 状态；
   工具层的只读工具本身不写审计，两者不冲突）。
-- `card_query` 是只读意图但 §2 **没有读卡工具** → 本卡回「未接通」模板（不编数据）→ 待人类指定读法。
+- `card_query` 已由**卡 23** 接通（只读工具 T18 `list_cards` → 路由在 `agent/read_routes.py`）：
+  「我几张卡」「我的卡」「我有没有挂失的卡」都命中；§2 的**写**类卡片操作仍未接通。
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
-from typing import Callable, Mapping
+from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict
 
 from agent import classifier, confirm_card, payee_flow, templates, write_flow
 from agent.period import anchor_period, resolve_day, resolve_period
+from agent.read_routes import TOOL_ROUTES
 from data import dao
 from data.seed import AS_OF
 from guard import injection, permission
-from tools import query, subscription, transfer, wealth
 from tools._query_common import current_session_id
 from tools.schemas import ToolResult
 
@@ -57,7 +58,6 @@ STATES = ("IDLE", "CLASSIFY", "CLARIFY", "SLOT_FILL", "PRECHECK", "CONFIRM_CARD"
 CONFIDENCE_FLOOR = 0.6        # 来源：规格 §4「confidence < 0.6 → CLARIFY」
 MAX_CLARIFY_ROUNDS = 2        # 来源：卡 09 第 3 条「最多 2 轮」
 READ_TIER = "L0"              # 来源：规格 §2 的 8 个只读意图权限档均为 L0
-LIMIT_DEFAULT = 50            # 来源：规格 §2 T2 `limit=50`
 RANGE_FIELDS = ("date_from", "date_to")
 
 #: 卡 09 第 2 条点名的 8 个只读意图（其余意图本卡不执行）
@@ -76,20 +76,9 @@ PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
 
 #: 相对时间的别名表 / 偏移 / 解析实现见 `agent/period.py`（卡 17b 拆出去：纯函数，也为守住单文件 ≤300 行）
 
-#: 意图 → (工具名, 调用器)。**只读意图在这里，写操作一概不在**（卡 09 禁止项）。
-TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
-    "balance_query": ("get_balance", lambda s: query.get_balance(s.get("account_type") or "savings")),
-    "txn_query": ("list_txn", lambda s: query.list_txn(s["date_from"], s["date_to"],
-                                                      category=s.get("category"),
-                                                      min_amount=s.get("min_amount"),
-                                                      limit=s.get("limit", LIMIT_DEFAULT))),
-    "bill_analysis": ("analyze_spending", lambda s: query.analyze_spending(s["period"], s.get("group_by") or "category")),
-    "anomaly_check": ("detect_anomalies", lambda s: query.detect_anomalies(s["period"])),
-    "bill_report": ("generate_bill_report", lambda s: query.generate_bill_report(s["period"], s.get("kind") or "monthly")),
-    "subscription_list": ("list_subscriptions", lambda s: subscription.list_subscriptions(s.get("status") or "active")),
-    "wealth_recommend": ("recommend_wealth", lambda s: wealth.recommend_wealth(
-        s.get("risk_level"), s.get("horizon_days"), s.get("amount"))),
-}
+#: 只读意图 → (工具名, 调用器) 的那张表已移到 `agent/read_routes.py`（卡 23 拆出：本文件当时 293 行，
+#: 而 card-23 要把 `card_query` 接上 T18）；这里 import 即 **re-export** ——
+#: `orchestrator.TOOL_ROUTES` 仍指向**同一份表**（不是复制），历史调用点行为不变。
 
 class Turn(BaseModel):
     """一次请求的处理结果（编排层 API，非冻结工具契约）。"""

@@ -220,3 +220,45 @@ class AddPayeeData(BaseModel):
     payee_id: str
     name: str
     masked_phone: str
+
+
+# ---------- T18 list_cards（卡 23：接通卡片查询；人类已批 SPEC-CHANGE 17→18） ----------
+
+#: 卡片状态（卡 23 拍板：认全 DDL 的四个合法值 —— 拒 `frozen` 会造出「合法状态却查不了」的怪洞，
+#: 认它、回 0 条是诚实答案；`frozen` 目前无生产者，保留以对齐 schema）。测试钉它与 data 层一致。
+CARD_STATUSES = ("normal", "locked", "lost", "frozen")
+CardStatus = Literal["normal", "locked", "lost", "frozen"]
+
+
+class ListCardsReq(BaseModel):
+    """T18 入参（规格 §2 冻结：`list_cards(status=None)`）。不传 = 不过滤（全部）。"""
+
+    model_config = STRICT
+
+    status: CardStatus | None = None
+
+
+class CardItem(BaseModel):
+    """一张卡（`data.items` 的元素；键名与个数冻结：规格 §2 只允许这 7 个键）。
+
+    金额一律整数分；储蓄卡没有授信额度 → `credit_limit` 为 `None`（**不是 0、不编数**）。
+    `card_no_mask` 照抄库里那一列（`6222 **** **** 0001`）—— 不得拼接、补全、猜测。
+    """
+
+    card_id: str
+    card_no_mask: str
+    type: str
+    status: str
+    credit_limit: int | None = None
+    single_limit: int | None = None
+    daily_limit: int | None = None
+
+
+class ListCardsData(BaseModel):
+    """T18 的 `data`：`total_count` = **符合过滤条件的卡数**（卡 23 拍板口径）。
+
+    没有 `limit` 参数，故它就是 `len(items)`；这里把语义钉死，不写成「展示条数」之类的近似说法。
+    """
+
+    items: list[CardItem]
+    total_count: int

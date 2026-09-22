@@ -58,7 +58,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "subscription_list": ("status",),                                      # T10 list_subscriptions
     "subscription_cancel": ("sub_id",),                                    # T11 cancel_subscription
     "subscription_remind": (),                                             # §3 有此意图、§2 无对应工具 → 留空待定
-    "card_query": ("card_id",),                                            # §3 有此意图、§2 无对应工具（按 card_id 命名习惯）
+    "card_query": ("status",),                                              # T18 list_cards（卡 23：status 可选，不传=全部）
     "card_apply": ("card_type",),                                          # T12 apply 的 kw
     "card_limit_adjust": ("card_id", "credit_limit", "single_limit", "daily_limit"),   # T12 kw
     "card_lock": ("card_id",),                                             # T12

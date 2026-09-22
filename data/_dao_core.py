@@ -15,6 +15,9 @@
 `data.db.connect` 的 `busy_timeout` 串行化。线程结束时其连接随线程局部变量被回收并关闭。
 
 本模块不做任何业务判断：金额一律整数分、枚举越界 → `ValueError`、写按主键幂等、不代写审计。
+
+卡 23：**读原语** `list_cards` 也住这里（不是 `data/dao.py`）—— `data/dao.py` 已顶格 300 行，且它
+docstring 里的「22 个公开读写函数」是文档化不变量，不该被一张新卡扰动；调用方是 `tools/card_query.py`。
 """
 
 from __future__ import annotations
@@ -242,3 +245,20 @@ def _apply_update(table: str, row_id: str, fields: dict) -> dict | None:
         conn.execute(f'UPDATE "{table}" SET {", ".join(f"{n} = ?" for n in names)} WHERE id = ?',
                      (*[fields[n] for n in names], row_id))
     return _one(f'SELECT * FROM "{table}" WHERE id = ?', (row_id,))
+
+
+# ---------------- 卡 23：只读原语（读卡清单） ----------------
+
+
+def list_cards(user_id: str, status: str | None = None) -> list[dict]:
+    """按**用户**列卡（可按状态过滤），按 id 排序；无命中 → `[]`。
+
+    归属由 `user_id` 作为**查询条件**显式圈定（不是事后过滤）→ 结构上不可能读到他人的卡。
+    `status` 省略 = 不过滤；越界取值 → `ValueError`（取值域 = DDL 注释的 `CARD_STATUSES` 四值）。
+    只回答「库里有哪些行」，不做任何业务判断（权限档、卡状态流转都是 `guard/` 与 `tools/` 的事）。
+    """
+    owner = _text(user_id, "user_id")
+    if status is None:
+        return _many('SELECT * FROM card WHERE user_id = ? ORDER BY id', (owner,))
+    return _many('SELECT * FROM card WHERE user_id = ? AND status = ? ORDER BY id',
+                 (owner, _choice(status, "status", CARD_STATUSES)))

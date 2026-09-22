@@ -74,19 +74,19 @@ def test_typical_inputs_reach_the_expected_tool(seeded: Path, monkeypatch: pytes
     assert "{" not in result.reply and result.reply.strip()
 
 
-def test_read_only_inputs_never_call_a_tool_and_never_write(seeded: Path,
+def test_unrouted_intents_never_call_a_tool_and_never_write(seeded: Path,
                                                            monkeypatch: pytest.MonkeyPatch) -> None:
-    """禁写：没有对应工具的只读意图（card_query）与未接通的写意图都不得调用任何工具。
+    """禁写：**未接通**的意图不得调用任何工具，只回「还没接通」模板。
 
-    （card-10 已把 transfer_single 接进确认流程，转账路径的断言移到 `tests/test_confirm_flow.py`。）
+    （card-10 已把 transfer_single 接进确认流程，转账路径的断言移到 `tests/test_confirm_flow.py`；
+    card-23 已把只读的 `card_query` 接上 T18 `list_cards` —— 该路径的断言在
+    `tests/test_tools_card_query.py`，本用例不再断言它「未接通」。）
     """
-    for text, verdict in (("帮我查一下卡", out("card_query")),
-                          ("帮我挂失卡片", out("card_report_lost", slots={"card_id": "card_savings_0001"}))):
-        fake_llm(monkeypatch, [verdict])
-        result = orchestrator.handle(text)
-        assert result.tool_calls == [] and result.confidence > 0
-        assert "还没接通" in result.reply
-        assert "card_query" not in orchestrator.TOOL_ROUTES        # §2 无读卡工具（待人类指定读法）
+    fake_llm(monkeypatch, [out("card_report_lost", slots={"card_id": "card_savings_0001"})])
+    result = orchestrator.handle("帮我挂失卡片")
+    assert result.tool_calls == [] and result.confidence > 0
+    assert "还没接通" in result.reply
+    assert all(name != "manage_card" for name, _call in orchestrator.TOOL_ROUTES.values())
 
 
 def test_analyze_spending_is_really_called_for_last_month(seeded: Path,
@@ -208,7 +208,7 @@ def test_read_intents_are_exactly_the_eight_from_the_card(seeded: Path,
                                          "bill_report", "subscription_list", "card_query",
                                          "wealth_recommend")
     assert all(intent in classifier.INTENT_LABELS for intent in orchestrator.READ_INTENTS)
-    assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS) - {"card_query"}
+    assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS)   # 卡 23 起 card_query 也有路由
 
 
 def test_no_write_intent_has_a_route(seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
