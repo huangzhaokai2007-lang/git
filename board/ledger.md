@@ -1696,3 +1696,21 @@ worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_a
 **飞书日历**：我这边**无飞书通道**（连接器网关 `no portal access token`；仓库里的飞书适配器只是收 webhook 的），故以 `AI-Banking-Agent-排期.ics` 替代，人类在飞书日历「导入日历」即可。
 
 **card-23 状态**：昨晚 22:04 会话断在半途（无交付报告）→ 今早 11:01 续派成功，工作区可见 `agent/read_routes.py` 已建、classifier/orchestrator 已改。基线 1051 passed 未被半成品破坏（我核过）。
+
+## 决策记录（card-23 交付入账 + 建 card-24）
+
+**card-23 交付并提交 `ca2bf31`**：T18 `list_cards` + 编排路由（拆 `agent/read_routes.py`）+ 大白话模板；**1085 passed** / verify 6/6；真机：「我几张卡」→ 3 张（含已挂失那张），「我有没有挂失的卡」→ 只回该状态。
+
+**worker 3 条待拍板 → 全部拍完**：
+- ① **越界 3 处 → 追认**（`agent/classifier.py` 槽位 1 行 / `tests/cases/orchestrator.yaml` / `tests/test_orchestrator_readonly.py`）。理由：卡 20「禁止改已 PASS 卡的测试」与卡 23 **要求 5** 正面冲突，不改则 verify 第 3 段必红 —— 卡自身矛盾，以要求为准。已告知 reviewer 只做正确性检查。
+- ② **批**补 §2 表内缺失的 **T17 行**（worker 发现：卡 20 的 SPEC-CHANGE 只把标题 16→17、从未补行）→ 已提交 `d9ddda2` 并推 main（标题 18 = 表内 18 行 = 序号 1–18 连续）。
+- ③ `tools/subscription.py:13/112` 两处「17 个工具」注释 → **待办**（该文件顶格 300，等下次拆文件一起改）。
+
+**worker 提议「规格计数机器守卫」→ 批准，排进 card-24**。理由：这坑**已栽两次**（卡 18 报过「标题 15 vs 表 T1–T16」、卡 20 只改标题未补行），光靠人盯必再犯。
+
+**已派 reviewer 审 card-23**（含变异抽查；明确告知 3 处越界是追认的）。
+
+**建 card-24（W1 第 4 项，重头戏）**：接通 `subscription_cancel` + **泛化写路径**（后面 9 个写功能的共同地基）+ 规格计数守卫。三处同步（卡文件 / 剧本 / README）。
+关键事实（读代码得）：**两种确认凭证并存** —— `preview_token`（`tools.transfer.preview_transfer` 签发，T7）与 `confirm_ref`（工具层私有约定 `issue_confirm_ref(action, target_id)` 签发，T11/T12/T15 用，TTL 300s、绑定 action+target+user）；`agent/write_flow.py` 目前硬编码 `transfer.*`（265 行）；`tools/subscription.py` 与 `data/dao.py` 均**顶格 300 不许加**。
+
+排期文档 `docs/04-功能排期.md` 已随此为共享仓库 main 的一部分。
