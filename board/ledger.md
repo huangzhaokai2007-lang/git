@@ -1722,3 +1722,18 @@ worker 复述通过后提了 4 条，逐条批：
 - **Q2 泛化形状**（批准）：`agent/write_intents.py` 放写描述符（槽位整形/凭证种类/确认卡渲染/执行调用/定档来源），`write_flow.py` 只留通用四步，`orchestrator.py` 仅 import —— 同时满足「转账行为不变」「orchestrator 不出现 cancel_subscription 字面量（保 test_orchestrator_readonly.py:220 红线）」「行数不破」三条。
 - **Q3 `subscription_cancel` 槽位扩成 `(sub_id, merchant)`**（批准）：照 `resolve_payee` 先例，唯一命中→填 sub_id、多命中→CLARIFY、零命中→NOT_FOUND；不新增工具、不猜。重名用自造 fixture 测。
 - **Q4 要改的既有测试**（批准）：`tests/cases/orchestrator.yaml` sub-003/sub-004 从「还没接通」翻成「接通」（要求 5 与旧断言冲突的必然）；`test_orchestrator_readonly.py:220` 红线尽量不动，真躲不开先报备。交付说明需列「改了哪些既有断言、为什么」。
+
+## 决策记录（card-23 审核 PASS 入账 + reviewer 提的两件事）
+
+**card-23 审核 PASS，无 MUST_FIX**（`board/reviews/card-23.md`）。五条重点全过且都做了隔离 worktree 内的变异抽查；越界 3 处只查正确性 → 均正确；两张截图人工核过。
+
+**⚠ reviewer 报的协作问题（重要，定成规矩）**：它在 11:31 于**工作区**跑 verify 出现 **20 failed**，查实是 **worker card-24 的在途改动**落盘所致（不是卡 23 缺陷）。改用 `git worktree` 隔离到 `ca2bf31` 复跑 → 1085 passed / verify 6/6 ✓。
+→ **定规：复跑一律在隔离副本（worktree / 临时 clone）上做；worker 在别人复跑期间不得改工作区**。单工作树 + 多写手 = 复跑结果不可信，这次靠 reviewer 自己发现并绕开。
+
+**RISK ①（受保护文件计数）**：`.hermes.md`(14/36) 与 `CLAUDE.md`(27) 仍写「17 个工具」→ 实际 18。
+- `.hermes.md` 两处**已由 analyst 落地**（本次提交）。
+- `CLAUDE.md` 一处**被保护机制拦下**（审批提示超时，静默≠同意）→ **待人类在 UI 批准后 analyst 重试**。
+
+**RISK ②（耦合）**：`tools/card_query.py:22` 直取私有模块 `from data._dao_core import list_cards`（其余 14 个工具都走 `from data import dao` 门面）→ 已转给 worker，**在 card-24 给 data 层减负时顺手提到门面**。
+
+（reviewer 已 `git worktree remove` 清理；遗留空目录 `%LOCALAPPDATA%\Temp\c23wt` 可忽略。）
