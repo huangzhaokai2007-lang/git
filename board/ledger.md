@@ -1674,3 +1674,25 @@ worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_a
 - 受保护文件 CLAUDE.md/.hermes.md 由 analyst 另行落地
 
 **同批发现并已修的隐患**：旧 `.env` 的 `DB_PATH=data/bank.db` 会让工具**在代码目录生野库**（实测真的生了一个、还读到空库）→ 已改 `var/bank.db`；野库已删。``.gitignore` 只忽略 `.env` 未忽略 `.env.*`` → 记待办（含 key 的备份可能被提交）。
+
+## 决策记录（人类：小组共创启动 → 24 功能排期定稿 + 原始架构推上 GitHub 共享仓库）
+
+**人类计划（原话）**：agent 包含的所有 24 个功能精细化重置、保留初始架构；这周做 4 个、往后每周 5 个、每周日收束总结，到 10-25 做完；代码放 GitHub 共创项目；把原始架构 push 上去；飞书建共享日历排期。
+
+**排期定稿**（人类确认「24 项清单对」）：`docs/04-功能排期.md`（已进共享仓库）。
+- 5 周 · 4+5+5+5+5 = 24 · 结束日 10-25（周日）
+- 依赖硬约束：**风险测评 → 理财推荐/申购/赎回**（实测：没测评申购回 INVALID_STATE）；**收款人 → 转账/AA/送礼**；**卡片查询 → 卡片操作×5**；**写路径泛化 → 10 个写功能全部**
+- 四条原则：机制先行（第 1 周做写路径泛化）· 同域成组（少碰 classifier/read_routes/templates 三个共享文件）· 依赖前置 · 一重几轻
+- 配套 `AI-Banking-Agent-排期.ics`（11 事件：5 周 + 5 次收束 + 1 次交付）
+
+**GitHub 共创**（已完成）：
+- 仓库 `https://github.com/huangzhaokai2007-lang/git`（**公开**，owner=huangzhaokai2007-lang；推送账号 tangliheng7-sys，push 权限 ✓）
+- 推送方式：先 `merge --allow-unrelated-histories` 把对方 main（3 个练习提交）并进我的历史 → 再 `push HEAD:main` = **普通快进，无 force、不抹任何人的历史**；远程 190 文件
+- push 前密钥扫描：无硬编码密钥、`.env` 不在版本库 ✓
+- 人类拍板补 `.gitignore`（+`.env.*` +`*.bak`，与 `.dockerignore` 对齐）—— commit `26149b5`
+- 提醒过人类：仓库公开，如不想公开可 Settings → Change visibility 改私有
+- 工具链：`gh` CLI 装于 `%LOCALAPPDATA%\Temp\ghcli\bin\gh.exe`（走官方 zip，非 winget）；登录用 GitHub 设备码流程（密钥全程不入聊天）
+
+**飞书日历**：我这边**无飞书通道**（连接器网关 `no portal access token`；仓库里的飞书适配器只是收 webhook 的），故以 `AI-Banking-Agent-排期.ics` 替代，人类在飞书日历「导入日历」即可。
+
+**card-23 状态**：昨晚 22:04 会话断在半途（无交付报告）→ 今早 11:01 续派成功，工作区可见 `agent/read_routes.py` 已建、classifier/orchestrator 已改。基线 1051 passed 未被半成品破坏（我核过）。
