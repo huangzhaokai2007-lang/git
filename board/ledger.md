@@ -1714,3 +1714,11 @@ worker 报告 RISK：「离线替身 app/cli.py 的 OFFLINE_RULES 不含 payee_a
 关键事实（读代码得）：**两种确认凭证并存** —— `preview_token`（`tools.transfer.preview_transfer` 签发，T7）与 `confirm_ref`（工具层私有约定 `issue_confirm_ref(action, target_id)` 签发，T11/T12/T15 用，TTL 300s、绑定 action+target+user）；`agent/write_flow.py` 目前硬编码 `transfer.*`（265 行）；`tools/subscription.py` 与 `data/dao.py` 均**顶格 300 不许加**。
 
 排期文档 `docs/04-功能排期.md` 已随此为共享仓库 main 的一部分。
+
+### 决策记录（card-24 开工前 4 条口径）
+
+worker 复述通过后提了 4 条，逐条批：
+- **Q1 T11 没有 `otp` 参数 → OTP 闸门放编排层**（批准）。依据：仓库自己写在 `tools/cross_scene.py:15`「确认与 OTP 落在编排层（同 T11/T15 的分工）」。**分工口径**：T8/T12 的 OTP 在工具层、**T11/T15 的 OTP 在编排层**。常量优先 `from tools.transfer import OTP_CODE`（agent→tools 合法），引不动才本层定义 + 断言钉同值。要求写进交付说明，免得 reviewer 当"不一致"报 RISK。
+- **Q2 泛化形状**（批准）：`agent/write_intents.py` 放写描述符（槽位整形/凭证种类/确认卡渲染/执行调用/定档来源），`write_flow.py` 只留通用四步，`orchestrator.py` 仅 import —— 同时满足「转账行为不变」「orchestrator 不出现 cancel_subscription 字面量（保 test_orchestrator_readonly.py:220 红线）」「行数不破」三条。
+- **Q3 `subscription_cancel` 槽位扩成 `(sub_id, merchant)`**（批准）：照 `resolve_payee` 先例，唯一命中→填 sub_id、多命中→CLARIFY、零命中→NOT_FOUND；不新增工具、不猜。重名用自造 fixture 测。
+- **Q4 要改的既有测试**（批准）：`tests/cases/orchestrator.yaml` sub-003/sub-004 从「还没接通」翻成「接通」（要求 5 与旧断言冲突的必然）；`test_orchestrator_readonly.py:220` 红线尽量不动，真躲不开先报备。交付说明需列「改了哪些既有断言、为什么」。
