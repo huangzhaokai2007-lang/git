@@ -5,12 +5,12 @@
 ## 一项功能的完整流程
 
 1. 打开功能页，了解代码基础、依赖和验收点；在 GitHub Issues 选择“功能认领”模板。
-2. 在认领表登记负责人、另一位审核人和 Issue。先查是否已有实施者，尤其 F04 / card-24。
+2. 按四周排期领取自己板块的功能；在功能总表登记对应 Issue/PR 和状态。负责人及交叉审核人已列明，先查是否已有实施者，尤其 F04 / card-24。
 3. 从最新 main 建分支，例如 `feature/f01-card-query`。一项功能一个 PR；公共机制改动单独说明受影响功能。
-4. 修改共享文件前，在 Issue 约定范围和合并顺序。业务改动先补测试，再实现并回归。
+4. 修改共享文件前，按四周排期联系本周集成人员，在 Issue 约定范围和合并顺序。业务改动先补测试，再实现并回归。
 5. 使用 PR 模板提供真实验证输出和演示；审核通过、合并且验收证据齐全后，更新认领表为“已验收”。
 
-状态只维护在认领表，Issue/PR 作为讨论与证据。每周日总结只记录当周快照。组员 GitHub 写权限由仓库管理员在 Settings → Collaborators 中配置。
+状态只维护在功能总表，Issue/PR 作为讨论与证据。每周日总结只记录当周快照。组员 GitHub 写权限由仓库管理员在 Settings → Collaborators 中配置。
 
 ```bash
 git switch main
@@ -26,7 +26,7 @@ git push -u origin feature/f01-card-query
 
 ## 共享文件与接口
 
-每周指定一名集成人员，姓名登记在该周总结页。多人改 `agent/classifier.py`、`agent/read_routes.py`、`agent/write_flow.py`、`agent/templates.py`、`tools/schemas.py`、`data/dao.py` 时，先约定责任区；同域 `tools/card.py` 等文件也需要协调。
+四周集成人员依次为莫、黄、汤、舒，周总结页已列明。多人改 `agent/classifier.py`、`agent/read_routes.py`、`agent/write_flow.py`、`agent/templates.py`、`tools/schemas.py`、`data/dao.py` 时，先约定责任区；同域 `tools/card.py` 等文件也需要协调。
 
 保留 interfaces → agent → guard/tools → data 的既有分层约束；界面不直连业务工具或数据库。具体调用边界以 [CLAUDE.md](CLAUDE.md) 为准。
 
