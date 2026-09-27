@@ -120,6 +120,7 @@ SLOT_CN: dict[str, str] = {
     "card_id": "卡号", "risk_level": "风险等级", "horizon_days": "投资期限（天）", "amount": "金额",
     "product_id": "产品", "answers": "问卷答案", "contact": "联系人", "date": "日期", "budget": "预算",
     "payee": "收款人", "payee_ids": "收款人列表", "schedule": "预约时间", "split_with": "分账对象",
+    "merchant": "订阅商户名", "sub_id": "订阅编号",
     "sub_id": "订阅", "card_type": "卡片类型",
 }
 

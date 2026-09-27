@@ -69,7 +69,8 @@ PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
 REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {"txn_query": RANGE_FIELDS,
                                              **{intent: ("period",) for intent in PERIOD_INTENTS}}
 
-#: 写意图清单定义在 `agent/write_flow.py`（写路径的唯一归属）；这里是引用别名，避免两份清单漂移
+#: 写意图清单的唯一来源是 `agent/write_intents.py` 的写描述符表（card-24 泛化拆出），
+#: 经 `write_flow.WRITE_INTENTS` 转发到这里 —— 全程只有一份，避免清单漂移。
 WRITE_INTENTS = write_flow.WRITE_INTENTS
 #: 分析类意图的 period 缺省/解析口径（锚点当月）
 PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
