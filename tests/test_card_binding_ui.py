@@ -154,6 +154,24 @@ def test_chat_password_is_hidden_even_without_a_card_number(monkeypatch, seeded)
     assert seen == []
 
 
+@pytest.mark.parametrize("text", ["卡片查询", "银行卡查询", "我有哪些卡？", "查询银行卡", "查看我的银行卡"])
+def test_explicit_card_queries_work_without_a_model(monkeypatch, seeded, text):
+    from agent import llm
+
+    def unavailable(*args, **kwargs):
+        raise llm.LLMUnavailable("演示未配置模型")
+
+    monkeypatch.setattr(llm, "chat_json", unavailable)
+    at = app(monkeypatch, seeded)
+    at.chat_input[0].set_value(text).run()
+    assert not at.exception
+    turn = at.session_state["messages"][-1]["turn"]
+    assert turn["intent"] == "card_query"
+    assert turn["tool_calls"] == ["list_bound_cards"]
+    assert any(button.label == "绑定银行卡" for button in at.button)
+    assert any("您还未绑定银行卡" in element.value for element in at.info)
+
+
 def test_switching_user_clears_card_chat_and_sensitive_ui(monkeypatch, foreign):
     from tools._query_common import set_current_user
 

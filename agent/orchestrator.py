@@ -221,7 +221,8 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
 
 
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
-           session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None) -> Turn:
+           session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None,
+           intent_resolver: Callable[[str, list[str] | None], classifier.IntentOut] | None = None) -> Turn:
     """处理一句用户输入，返回 `Turn`（含到达过的状态序列与调用过的工具）。
 
     `clarify_round`：调用方在追问后续接时自增（0 → 最多 2 轮追问后转人工）。
@@ -239,7 +240,7 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
         ctx.intent = inflight
         return _apply(ctx, write_flow.resume(ctx.session_id, text))
     ctx.enter("CLASSIFY")
-    verdict = classifier.classify(_with_date_context(text), history)
+    verdict = (intent_resolver or classifier.classify)(_with_date_context(text), history)
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence
     ctx.slots = dict(verdict.slots)
     if verdict.intent == "unsafe_request":
