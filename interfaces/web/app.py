@@ -29,21 +29,19 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import confirm_card, orchestrator                     # noqa: E402
+from agent import card_binding_flow, confirm_card, orchestrator  # noqa: E402
 
 import components as ui                                         # noqa: E402
+import card_binding_ui as cards_ui                              # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
-PAGES = ("💬 聊天", "📊 账单图表", "🧾 审计时间轴")
+PAGES = ("💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡")
 PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = ("您好，我是**模拟银行**智能体（全部为合成数据）。试试：「上个月花了多少」「给王五转 100 元」"
             "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景。")
 
-#: 不把上一轮用户话当 history 送给分类器：`classifier.build_messages` 会把 history 与当前话拼进
-#: **同一条 user 消息**，实测「带历史」时连续 6 句全部被上一轮意图带偏（如「查一下我的储蓄卡余额」
-#: 被上一轮账单请求带成 bill_report）；不带历史 6/6 正确。跨轮上下文由确认/OTP 的在途流程承载。
-#: 这是 agent/ 层的历史口径问题，见交付说明「待拍板」。
+#: 查询历史继承尚未启用；跨轮确认/OTP 仍由在途流程承载。
 HISTORY = None
 
 
@@ -98,9 +96,10 @@ def _ask(text: str, *, display: str | None = None) -> None:
     验证码不进日志/回执；本页的轨迹与聊天记录同样不回显它的值）。
     """
     state = st.session_state
+    display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
     try:
-        turn = _agent_executor().submit(orchestrator.handle, text, history=HISTORY,
+        turn = _agent_executor().submit(card_binding_flow.handle, text, history=HISTORY,
                                         clarify_round=state["clarify_round"],
                                         session_id=state["session_id"]).result()
     except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
@@ -110,10 +109,13 @@ def _ask(text: str, *, display: str | None = None) -> None:
                                           "`uv run python -m data.seed --reset` 重新生成合成数据后再试。"})
         return
     dump = turn.model_dump()
+    if turn.intent == "card_query":
+        cards_ui.reset()
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
+    state["bound-card-query"] = turn.intent == "card_query" and turn.error_code is None
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [item for item in state["balance"] if item["text"] != turn.reply][-1:]
         state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})
@@ -226,6 +228,8 @@ def _sidebar() -> str:
         st.caption(f"会话 `{st.session_state['session_id']}` · 已处理 {len(st.session_state['turns'])} 次请求")
         if st.button("🧹 重置会话态", key="reset-session", width="stretch"):
             confirm_card.reset_state()
+            cards_ui.reset()
+            st.session_state["bound-card-query"] = False
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0)):
                 st.session_state[key] = value
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
@@ -245,6 +249,8 @@ def _chat_page() -> None:
     _render_pending()
     _render_confirm()
     _render_payee_form()
+    if st.session_state.get("bound-card-query"):
+        cards_ui.render(_agent_executor(), st.session_state["session_id"])
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()
@@ -275,14 +281,17 @@ def main() -> None:
     if not _ensure_db():
         return
     _init_state()
+    cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
     ui.sim_banner()
     page = _sidebar()
     if page == PAGES[0]:
         _chat_page()
     elif page == PAGES[1]:
         _bill_page()
-    else:
+    elif page == PAGES[2]:
         _audit_page()
+    else:
+        cards_ui.render(_agent_executor(), st.session_state["session_id"])
 
 
 main()
