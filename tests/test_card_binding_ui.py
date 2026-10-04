@@ -52,12 +52,13 @@ def test_form_preview_confirmation_and_hidden_balance(monkeypatch, seeded):
     assert not any(element.value == PIN for element in at.text_input)
     click(at, "确认绑定")
     assert len(raw(seeded, "SELECT * FROM agent_card_binding")) == 1
-    texts = [element.value for element in at.markdown]
+    texts = [element.value for element in at.text]
     assert "******" in texts and not any("46,634.00" in text for text in texts)
     next(button for button in at.button if button.key == f"balance-{CARD}").click().run()
-    assert any("46,634.00" in element.value for element in at.markdown)
+    assert any("46,634.00" in element.value for element in at.text)
     next(button for button in at.button if button.key == f"balance-{CARD}").click().run()
-    assert not any("46,634.00" in element.value for element in at.markdown)
+    assert "******" in [element.value for element in at.text]
+    assert not any("46,634.00" in element.value for element in at.text)
 
 
 def test_wrong_password_and_cancellation_never_bind(monkeypatch, seeded):

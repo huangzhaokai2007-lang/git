@@ -93,7 +93,7 @@ def _row(executor: ThreadPoolExecutor, item: dict, state: dict) -> None:
     visible = state["visible"].get(card_id, False)
     with columns[2]:
         amount, button = st.columns([3, 2])
-        amount.markdown(f"{item['balance_yuan']} 元" if visible else "******")
+        amount.text(f"{item['balance_yuan']} 元" if visible else "******")
         if button.button("隐藏" if visible else "显示", key=f"balance-{card_id}",
                          icon=":material/visibility:" if visible else ":material/visibility_off:",
                          help="隐藏余额" if visible else "显示余额"):
@@ -141,7 +141,7 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
     st.markdown(result["summary"])
     st.caption("此卡关联账户余额；信用卡余额与授信额度分别展示。")
     visible = state["detail_balance"]
-    st.markdown(f"{result['data']['balance_yuan']} 元" if visible else "******")
+    st.text(f"{result['data']['balance_yuan']} 元" if visible else "******")
     if st.button("隐藏详情余额" if visible else "显示详情余额", key="detail-balance"):
         state["detail_balance"] = not visible
         st.rerun()
