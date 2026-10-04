@@ -3,6 +3,22 @@
 > **旧施工卡。** 下文 W1–W5 是原五周方案的排期。现由莫负责 [F04 订阅取消](../features/F04-cancel-subscription.md)，执行前先核对[四周计划](../04-功能排期.md)和现有实施进度。
 
 > 用法：`bash scripts/run-card.sh 24`（无人值守）或在 Hermes 里直接说「做卡 24」。
+
+> **实施记录（2026-09-27，莫）**：本卡已实施完毕，等待提交 PR 与舒复核。
+>
+> **后续写功能的人（汤 F05–F09、黄 F15/F20、莫 F12/F13）从这里接手**：
+> 到 `agent/write_intents.py` 的 `_SPECS` 里加一条 `WriteSpec`（实现 `shape` / `prepare` / `card` /
+> `plain` / `execute` 五个纯函数即可），**不需要改 `agent/write_flow.py`** —— 那是与意图无关的通用四步骨架。
+> 该文件**模块 docstring 顶部有完整的三步操作说明**；`tests/cases/orchestrator.yaml` 补对应用例。
+> 两种凭证（`preview_token` / `confirm_ref`）与 OTP 校验位置由描述符的 `credential_kind` / `otp_in_tool` 声明。
+>
+> 关键落点：`agent/write_intents.py`（**新建**，写描述符表 —— 每意图声明槽位整形/凭证种类/卡面/执行调用）、
+> `agent/write_flow.py`（改为**通用四步骨架**，转账专属逻辑外移）、
+> `agent/confirm_card.py`（卡面行改由描述符提供，承载 `confirm_ref` 型凭证）、
+> `tests/test_spec_counts.py`（规格计数守卫）、`tests/test_subscription_cancel_flow.py`（订阅取消端到端）。
+> 门禁：`uv run pytest -q` **1095 passed**（原 1085 + 新增 10），`bash scripts/verify.sh` 六段全绿。
+> **口径更正**：本卡旧文写「OTP 全由工具处理」是错的，已按台账口径实施 —— T8/T12 的 OTP 在工具层，
+> **T11/T15 的 OTP 在编排层**（`write_intents.WriteSpec.otp_in_tool` 声明，`write_flow._execute` 执行闸门）。
 > 开工前 Agent 必须先读 `CLAUDE.md` 和 `docs/01-接口规格.md`。
 > 本卡是 **W1 的重头戏**：它打出的「通用写路径」是后面 **9 个写功能**（W2 卡片 5 项、W3 理财 3 项、W4 AA、W5 送礼）的共同地基。
 
