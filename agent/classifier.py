@@ -56,7 +56,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "transfer_scheduled": ("payee", "amount", "schedule"),                 # T7 schedule 参数
     "aa_collect": ("payee_ids", "amount"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
-    "subscription_cancel": ("sub_id",),                                    # T11 cancel_subscription
+    "subscription_cancel": ("sub_id", "merchant"),                          # T11 cancel_subscription（card-24 扩 merchant）
     "subscription_remind": (),                                             # §3 有此意图、§2 无对应工具 → 留空待定
     "card_query": ("status",),                                              # T18 list_cards（卡 23：status 可选，不传=全部）
     "card_apply": ("card_type",),                                          # T12 apply 的 kw

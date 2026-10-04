@@ -76,11 +76,15 @@
 - id: sub-003
   input: "退订好买会员"
   slots: {sub_id: sub_0001}
-  expect: {intent: subscription_cancel, tool_calls: [], tier: null, executed: false, must_contain: ["还没接通"]}
+  # card-24：subscription_cancel 已接通 → 由「还没接通」翻成「出 L2 确认卡」。
+  # tool_calls 记的是写描述符声明的 PRECHECK 工具（list_subscriptions 取事实），执行还没发生。
+  expect: {intent: subscription_cancel, tool_calls: [list_subscriptions], tier: L2, executed: false,
+           requires_otp: true, must_contain: ["确认卡"]}
 - id: sub-004
   input: "取消这个自动续费"
   slots: {sub_id: sub_0002}
-  expect: {intent: subscription_cancel, tool_calls: [], tier: null, executed: false, must_contain: ["还没接通"]}
+  expect: {intent: subscription_cancel, tool_calls: [list_subscriptions], tier: L2, executed: false,
+           requires_otp: true, must_contain: ["确认卡"]}
 - id: sub-005
   input: "帮我看看有没有僵尸订阅"
   slots: {status: active}

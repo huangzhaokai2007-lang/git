@@ -2,13 +2,20 @@
 
 两件事，一个模块，因为它们是同一层「写操作确认」的两面：
 
-1. **渲染**：`render(CardInput)` → 确认卡文本 = 意图 + 金额 + 收款人（脱敏手机号）+ 预计到账 + 风险提示。
-   卡上每个数字都来自**工具层预览的事实包**（金额、档位），本模块只做中文措辞与拼装 —— 不造数字。
+1. **渲染**：`render(CardInput)` → 确认卡文本 = 标题 + 意图 + 卡面行 + 权限档 + 风险提示。
+   卡上每个数字都来自**工具层的事实包**，本模块只做中文措辞与拼装 —— 不造数字（铁律 2）。
+   card-24 起**卡面行由调用方给出**（写意图描述符，见 `agent/write_intents.py`），
+   本模块不再硬编码「转账」字样，同一套模板服务所有写意图；
+   转账的渲染结果与 card-10 **逐字一致**（既有用例是判据）。
 2. **会话态**：一次写操作从「等确认」→「等 OTP」→「已执行」的阶段机；会话级 OTP 错误计数与锁定
    （错 `OTP_MAX_ERRORS` 次锁会话）；L3 的待复核登记 / 撤销 / 延迟放行。
 
-⚠ OTP 的**校验与幂等复用工具层**（`tools/transfer.execute_transfer(preview_token, otp)`，card-05 已 PASS）：
-本模块只数「错了几次」并锁会话，**不另写一份 OTP 比对**（analyst 裁决，card-10 台账）。
+⚠ OTP 的**校验位置分两种**（card-24 台账口径，由 `write_intents.WriteSpec.otp_in_tool` 声明）：
+- `preview_token` 族（T7 转账）：校验与幂等**复用工具层**（`tools/transfer.execute_transfer`），
+  本模块只数「错了几次」并锁会话，**不另写一份 OTP 比对**（analyst 裁决，card-10 台账）；
+- `confirm_ref` 族（T11/T12/T15）：工具签名**没有 otp 参数** → 校验落在**编排层**
+  （依据 `tools/cross_scene.py`「确认与 OTP 落在编排层（同 T11/T15 的分工）」），
+  本模块同样只负责计数与锁定，比对由写意图描述符做。
 
 ⚠ 会话态在进程内存里（demo 口径）：进程重启即清空；多 worker 部署需要换成共享存储 —— 记在交付待拍板。
 """
@@ -21,7 +28,6 @@ from pydantic import BaseModel, ConfigDict
 
 from guard import permission
 from guard.permission import L3_DELAY_SECONDS
-
 
 
 def _now() -> datetime:
@@ -45,32 +51,29 @@ FACTOR_NOTES = {
     "new_payee": "首次向该收款人转账",
 }
 
-CARD_TEMPLATE = """【转账确认卡】
+#: 卡面模板。`{rows}` 由调用方拼好的多行「标签：值」构成（card-24 起不再硬编码转账字段）。
+CARD_TEMPLATE = """【{title}】
 意图：{intent_cn}
-收款人：{payee_name}（{masked_phone}）
-金额：{amount_yuan} 元
-预计到账：{expected_arrival}
+{rows}
 权限档：{tier}{otp_hint}
 风险提示：{risk_note}
 请回复「确认」继续；回复其它内容，我们重新填写。"""
 
-PENDING_TEMPLATE = """【待人工复核】这笔转账按规格 §5 属 L3：{reason}
+PENDING_TEMPLATE = """【待人工复核】这笔{what}按规格 §5 属 L3：{reason}
 编号：{pending_id}
 将在 {delay_seconds} 秒后生效；回复「撤销 {pending_id}」可取消。"""
 
 
 class CardInput(BaseModel):
-    """确认卡的输入：数字一律来自工具层事实包。"""
+    """确认卡的输入：卡面行里的数字一律来自工具层事实包。"""
 
     model_config = ConfigDict(extra="forbid")
 
+    title: str                                  # 卡标题（不含书名号），如「转账确认卡」
     intent_cn: str
-    payee_name: str
-    masked_phone: str
-    amount_yuan: str
+    rows: list[tuple[str, str]]                 # 卡面行（标签、值）；顺序即渲染顺序
     tier: str
     requires_otp: bool
-    expected_arrival: str
     risk_note: str
 
 
@@ -82,10 +85,10 @@ def mask_phone(value: str) -> str:
     return f"{text[:3]}****{text[-4:]}"
 
 
-def risk_note(factors: list[str]) -> str:
+def risk_note(factors: list[str], what: str = "转账") -> str:
     """降级因子 → 风险提示；无命中给中性提示（提示语本身不含业务数字）。"""
     notes = [FACTOR_NOTES[item] for item in factors if item in FACTOR_NOTES]
-    return "；".join(notes) if notes else "常规转账，未触发风险因子"
+    return "；".join(notes) if notes else f"常规{what}，未触发风险因子"
 
 
 def expected_arrival(tier: str) -> str:
@@ -95,7 +98,9 @@ def expected_arrival(tier: str) -> str:
 
 def render(card: CardInput) -> str:
     """渲染确认卡文本（占位符全部来自 `card`，缺字段由 Pydantic 拦下）。"""
-    return CARD_TEMPLATE.format(otp_hint="（需输入短信验证码）" if card.requires_otp else "", **card.model_dump())
+    rows = "\n".join(f"{label}：{value}" for label, value in card.rows)
+    return CARD_TEMPLATE.format(otp_hint="（需输入短信验证码）" if card.requires_otp else "",
+                                rows=rows, **card.model_dump(exclude={"rows"}))
 
 
 def is_confirmation(text: str) -> bool:
@@ -104,9 +109,9 @@ def is_confirmation(text: str) -> bool:
     return any(word in normalized for word in CONFIRM_WORDS)
 
 
-def otp_prompt() -> str:
+def otp_prompt(what: str = "转账") -> str:
     """等 OTP 的追问（不含任何业务数字）。"""
-    return "请输入短信验证码以完成这笔转账。"
+    return f"请输入短信验证码以完成这笔{what}。"
 
 
 def otp_wrong_text(remaining: int) -> str:
@@ -114,9 +119,9 @@ def otp_wrong_text(remaining: int) -> str:
     return f"验证码不正确，还可再试 {remaining} 次。"
 
 
-def otp_locked_text() -> str:
+def otp_locked_text(what: str = "转账") -> str:
     """OTP 错误超限：锁定会话（卡 10 第 4 条）。"""
-    return "验证码连续错误次数过多，本次会话的转账已被锁定，请稍后再试或联系客服。"
+    return f"验证码连续错误次数过多，本次会话的{what}已被锁定，请稍后再试或联系客服。"
 
 
 def to_human_text(factors: list[str]) -> str:
@@ -124,14 +129,14 @@ def to_human_text(factors: list[str]) -> str:
     return f"这笔操作触发了 {len(factors)} 项风险因子，已转人工复核，请等待客服联系。"
 
 
-def pending_text(pending_id: str, factors: list[str]) -> str:
+def pending_text(pending_id: str, factors: list[str], what: str = "转账") -> str:
     """L3 待复核（延迟窗口 + 撤销入口）。"""
-    return PENDING_TEMPLATE.format(reason=risk_note(factors), pending_id=pending_id,
+    return PENDING_TEMPLATE.format(reason=risk_note(factors, what), what=what, pending_id=pending_id,
                                    delay_seconds=L3_DELAY_SECONDS)
 
 
-def undone_text(pending_id: str) -> str:
-    return f"已取消编号 {pending_id} 的这笔转账，没有扣款。"
+def undone_text(pending_id: str, what: str = "转账") -> str:
+    return f"已取消编号 {pending_id} 的这笔{what}，没有扣款。"
 
 
 # ---------------- 确认流程的会话态（进程内） ----------------
@@ -143,10 +148,11 @@ class Confirmation(BaseModel):
 
     session_id: str
     intent: str
-    preview_token: str
-    payee_id: str
-    payee_name: str
-    masked_phone: str
+    credential_kind: str              # "preview_token"（工具层预览签发）| "confirm_ref"（工具层私有约定签发）
+    credential: str                   # 凭证值 —— **由工具层签发**，编排层不得自己造串（card-24 要求 3）
+    target_id: str                    # 工具层主键：`payee_id` / `sub_id`
+    target_name: str                  # 卡面主对象名：收款人 / 商户
+    masked_phone: str = ""            # 转账专用（其余写意图留空）
     amount_yuan: str
     amount_cents: int
     tier: str
@@ -162,7 +168,9 @@ class Pending(BaseModel):
 
     pending_id: str
     session_id: str
-    preview_token: str
+    credential_kind: str
+    credential: str
+    target_id: str
     amount_cents: int
     created_at: str
     revoked: bool = False
@@ -260,5 +268,3 @@ def mark_released(pending_id: str) -> None:
 def now_iso() -> str:
     """当前时刻的 ISO 串（测试用假时钟钉 `_now`，跨天可复现）。"""
     return _now().isoformat(timespec="seconds")
-
-

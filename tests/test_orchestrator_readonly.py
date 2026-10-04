@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from agent import classifier, llm, orchestrator, templates, write_flow
+from agent import classifier, llm, orchestrator, templates, write_flow, write_intents
 from data import dao
 
 from tests.conftest import count, raw
@@ -213,15 +213,18 @@ def test_read_intents_are_exactly_the_eight_from_the_card(seeded: Path,
 
 def test_no_write_intent_has_a_route(seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """静态红线：只读路由表里不得出现写意图；card-10 只放行 transfer 的确认流程。"""
-    write_intents = (set(classifier.INTENT_LABELS) - set(orchestrator.READ_INTENTS)
-                     - {"smalltalk", "out_of_scope", "unsafe_request"})
-    assert not (set(orchestrator.TOOL_ROUTES) & write_intents)
+    write_intent_names = (set(classifier.INTENT_LABELS) - set(orchestrator.READ_INTENTS)
+                          - {"smalltalk", "out_of_scope", "unsafe_request"})
+    assert not (set(orchestrator.TOOL_ROUTES) & write_intent_names)
     assert not (set(orchestrator.TOOL_ROUTES) & set(orchestrator.WRITE_INTENTS))
     source = Path(orchestrator.__file__).read_text(encoding="utf-8")
     for forbidden in ("cancel_subscription", "manage_card", "trade_wealth",
                       "plan_gift", "create_aa_request", "assess_risk"):
         assert forbidden not in source
-    # card-10b 拆分后：唯一放行的写工具在写路径模块里，且只能经确认流程调用
-    flow = Path(write_flow.__file__).read_text(encoding="utf-8")
+    # card-10b 拆分后：唯一放行的写工具在写路径模块里，且只能经确认流程调用。
+    # card-24：写路径再拆成 write_flow（通用四步骨架）+ write_intents（每意图写描述符），
+    # 执行调用随描述符落到 write_intents；**红线不变** —— orchestrator 里一个写工具名都不许出现。
+    flow = "".join(Path(module.__file__).read_text(encoding="utf-8")
+                   for module in (write_flow, write_intents))
     assert "transfer.execute_transfer" in flow
     assert "transfer.execute_transfer" not in source and "execute_transfer(" not in source
