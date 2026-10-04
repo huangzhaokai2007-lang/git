@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Mapping
+from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -221,7 +221,7 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
 
 
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
-           session_id: str | None = None) -> Turn:
+           session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None) -> Turn:
     """处理一句用户输入，返回 `Turn`（含到达过的状态序列与调用过的工具）。
 
     `clarify_round`：调用方在追问后续接时自增（0 → 最多 2 轮追问后转人工）。
@@ -253,10 +253,10 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
         return _finish(ctx, payee_flow.PROMPT, result="pending_confirm")
     if ctx.intent in WRITE_INTENTS:                                      # 卡 10：写路径
         return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id))
-    return _read_flow(ctx)
+    return _read_flow(ctx, card_reader=card_reader)
 
 
-def _read_flow(ctx: _Ctx) -> Turn:
+def _read_flow(ctx: _Ctx, *, card_reader: Callable[[dict], ToolResult] | None = None) -> Turn:
     """只读路径（卡 09）：SLOT_FILL → PRECHECK → EXECUTE → VERIFY_NUMBERS → 回执。"""
     if ctx.intent not in READ_INTENTS:
         ctx.enter("PRECHECK")
@@ -269,6 +269,8 @@ def _read_flow(ctx: _Ctx) -> Turn:
     if _precheck(ctx.intent) != READ_TIER or ctx.intent not in TOOL_ROUTES:
         return _finish(ctx, templates.unsupported(ctx.intent), result="rejected")   # 无路由=未接通
     name, call = TOOL_ROUTES[ctx.intent]
+    if ctx.intent == "card_query" and card_reader is not None:
+        name, call = "list_bound_cards", card_reader
     ctx.enter("EXECUTE")
     ctx.tool_calls.append(name)
     result = call(ctx.slots)
