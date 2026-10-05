@@ -66,6 +66,7 @@ def _ensure_db() -> bool:
 def _init_state() -> None:
     """会话态：对话、轨迹、余额回显、追问轮次（跨 rerun 保留）。"""
     state = st.session_state
+    state["page"] = state.pop("navigate-page", state.get("page", PAGES[0]))
     state.setdefault("session_id", f"web-{uuid.uuid4().hex[:8]}")
     state.setdefault("messages", [{"role": "assistant", "text": GREETING, "turn": None}])
     state.setdefault("turns", [])
@@ -222,6 +223,8 @@ def _sidebar() -> str:
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:
+            if prompt == "卡片查询":
+                st.session_state["navigate-page"] = PAGES[0]
             _ask(prompt)
             st.rerun()
         st.divider()

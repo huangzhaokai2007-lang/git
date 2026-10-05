@@ -41,6 +41,25 @@ def test_card_page_is_available(monkeypatch, seeded):
     assert "💳 我的银行卡" in at.radio[0].options
 
 
+@pytest.mark.parametrize("page", ["💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡"])
+def test_manage_cards_shortcut_opens_card_query_without_model(monkeypatch, seeded, page):
+    from agent import llm
+
+    def offline(*args, **kwargs):
+        raise llm.LLMUnavailable("快捷查询不依赖模型")
+
+    monkeypatch.setattr(llm, "chat_json", offline)
+    at = app(monkeypatch, seeded)
+    at.radio[0].set_value(page).run()
+    click(at, "💳 管卡")
+    assert at.radio[0].value == "💬 聊天"
+    turn = at.session_state["turns"][-1]
+    assert turn["text"] == "卡片查询"
+    assert turn["turn"]["intent"] == "card_query"
+    assert turn["turn"]["tool_calls"] == ["list_bound_cards"]
+    assert any(button.label == "绑定银行卡" for button in at.button)
+
+
 def test_form_preview_confirmation_and_hidden_balance(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     at.radio[0].set_value("💳 我的银行卡").run()
