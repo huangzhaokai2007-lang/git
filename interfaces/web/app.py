@@ -111,7 +111,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
         return
     dump = turn.model_dump()
     if turn.intent == "card_query":
-        cards_ui.reset()
+        cards_ui.reset(turn)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0

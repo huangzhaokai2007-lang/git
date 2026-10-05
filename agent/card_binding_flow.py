@@ -17,6 +17,12 @@ CARD_QUERIES = frozenset({
     "我有哪些卡", "我有哪些卡片", "我有哪些银行卡", "查看我的卡片", "查看我的银行卡",
     "查一下我的卡", "帮我查一下银行卡",
 })
+BINDING_REQUESTS = frozenset({
+    "卡片绑定", "银行卡绑定", "绑定银行卡", "绑定卡片", "绑卡", "我要绑卡",
+    "我要绑定银行卡", "我想绑定银行卡", "绑定信用卡", "我想绑定一张信用卡",
+})
+CREDIT_APPLICATIONS = frozenset({"申请信用卡", "我想申请一张信用卡", "我想申请信用卡", "我要申请信用卡"})
+BINDING_PROMPT = "请在绑卡表单中输入预设模拟卡号及对应的银行卡密码，验证后确认绑定。"
 
 
 def owner_key() -> str:
@@ -78,15 +84,25 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
                                  states=["IDLE", "CLARIFY", "REPLY", "AUDIT"], reply=result.message,
                                  ask=result.message)
     history = [safe_chat_text(turn) for turn in history] if history else None
-    return orchestrator.handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
+    turn = orchestrator.handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
                                card_reader=lambda slots: card_binding.list_bound_cards(slots.get("status"), audit=False),
                                intent_resolver=_resolve_intent)
+    request = _request_text(text)
+    if turn.intent == "card_query" and turn.error_code is None and request in BINDING_REQUESTS | CREDIT_APPLICATIONS:
+        turn.ask = BINDING_PROMPT
+        turn.reply = BINDING_PROMPT if request in BINDING_REQUESTS else (
+            "当前模拟项目不支持新信用卡申请或审批，只能绑定已经预设的模拟银行卡。" + BINDING_PROMPT)
+    return turn
+
+
+def _request_text(text: str) -> str:
+    request = re.sub(r"\n（当前日期：[0-9]{4}-[0-9]{2}-[0-9]{2}）$", "", text)
+    return request.strip().rstrip("？?。！!").strip()
 
 
 def _resolve_intent(text: str, history: list[str] | None) -> classifier.IntentOut:
     """仅完整匹配明确查询指令；含写操作或其它条件的表达仍交由原分类器。"""
-    request = re.sub(r"\n（当前日期：[0-9]{4}-[0-9]{2}-[0-9]{2}）$", "", text)
-    if request.strip().rstrip("？?。！!").strip() in CARD_QUERIES:
+    if _request_text(text) in CARD_QUERIES | BINDING_REQUESTS | CREDIT_APPLICATIONS:
         return classifier.IntentOut(intent="card_query", confidence=1.0, slots={})
     return classifier.classify(text, history)
 

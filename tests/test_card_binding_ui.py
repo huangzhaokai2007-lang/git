@@ -41,6 +41,40 @@ def test_card_page_is_available(monkeypatch, seeded):
     assert "💳 我的银行卡" in at.radio[0].options
 
 
+@pytest.mark.parametrize("user_text", ["卡片绑定", "银行卡绑定", "绑定银行卡", "我要绑卡", "我想绑定一张信用卡"])
+def test_chat_binding_request_opens_form_without_model(monkeypatch, seeded, user_text):
+    from agent import llm
+
+    def offline(*args, **kwargs):
+        raise llm.LLMUnavailable("聊天绑卡入口不依赖模型")
+
+    monkeypatch.setattr(llm, "chat_json", offline)
+    at = app(monkeypatch, seeded)
+    at.chat_input[0].set_value(user_text).run()
+    assert not at.exception
+    turn = at.session_state["turns"][-1]["turn"]
+    assert turn["intent"] == "card_query" and not turn["executed"]
+    assert any(element.label == "模拟银行卡号" for element in at.text_input)
+    assert any(element.label == "银行卡密码" for element in at.text_input)
+    assert raw(seeded, "SELECT * FROM agent_card_binding") == []
+    assert len(raw(seeded, "SELECT * FROM audit_log WHERE trace_id=?", (turn["trace_id"],))) == 1
+
+
+@pytest.mark.parametrize("user_text", ["我想申请一张信用卡", "申请信用卡"])
+def test_credit_application_explains_demo_scope_and_offers_binding(monkeypatch, seeded, user_text):
+    from agent import llm
+
+    monkeypatch.setattr(llm, "chat_json", lambda *args, **kwargs: (_ for _ in ()).throw(llm.LLMUnavailable("offline")))
+    at = app(monkeypatch, seeded)
+    at.chat_input[0].set_value(user_text).run()
+    assert not at.exception
+    turn = at.session_state["turns"][-1]["turn"]
+    assert "不支持新信用卡申请或审批" in turn["reply"]
+    assert any(element.label == "模拟银行卡号" for element in at.text_input)
+    assert not turn["executed"]
+    assert raw(seeded, "SELECT * FROM agent_card_binding") == []
+
+
 @pytest.mark.parametrize("page", ["💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡"])
 def test_manage_cards_shortcut_opens_card_query_without_model(monkeypatch, seeded, page):
     from agent import llm
