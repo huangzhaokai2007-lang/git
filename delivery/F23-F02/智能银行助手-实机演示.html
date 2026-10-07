@@ -1,0 +1,1644 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智能银行助手 · F23 余额查询 + F02 流水查询 实机演示（细节交互版）</title>
+<style>
+  :root{
+    --bg:#070c18; --panel:#0e1526; --panel2:#111a30; --line:#1e293b;
+    --txt:#e2e8f0; --muted:#7d8db0; --dim:#4b5b7c;
+    --blue:#3b82f6; --cyan:#22d3ee; --green:#10b981; --red:#ef4444; --amber:#f59e0b; --violet:#a78bfa;
+    --radius:14px;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{
+    background:var(--bg); color:var(--txt); min-height:100vh;
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI","Microsoft YaHei",sans-serif;
+    background-image:radial-gradient(ellipse 80% 50% at 50% -10%, rgba(59,130,246,.14), transparent);
+  }
+  .wrap{max-width:1280px;margin:0 auto;padding:20px 16px 40px}
+
+  /* ---------- header ---------- */
+  header{display:flex;flex-wrap:wrap;align-items:center;gap:14px;margin-bottom:16px}
+  .logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,#2563eb,#06b6d4);
+    display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 4px 24px rgba(37,99,235,.4)}
+  h1{font-size:20px;font-weight:700;letter-spacing:.5px}
+  h1 small{display:block;font-size:12px;color:var(--muted);font-weight:400;margin-top:3px}
+  .hdr-right{margin-left:auto;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .btn{border:1px solid var(--line);background:var(--panel);color:var(--txt);padding:9px 16px;border-radius:10px;
+    cursor:pointer;font-size:13px;transition:.2s;display:inline-flex;align-items:center;gap:7px}
+  .btn:hover{border-color:var(--blue);background:#16223c}
+  .btn.primary{background:linear-gradient(135deg,#2563eb,#0891b2);border:none;font-weight:600}
+  .btn.primary:hover{filter:brightness(1.15)}
+  .btn.playing{opacity:.55;pointer-events:none}
+
+  .provence{background:linear-gradient(90deg,rgba(16,185,129,.10),rgba(16,185,129,.03));
+    border:1px solid rgba(16,185,129,.35);border-radius:10px;padding:10px 14px;font-size:12.5px;color:#a7f3d0;
+    margin-bottom:16px;display:flex;gap:10px;align-items:flex-start;line-height:1.55}
+  .provence b{color:#6ee7b7}
+
+  .tabs{display:flex;gap:8px;margin-bottom:16px}
+  .tab{padding:8px 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel);
+    color:var(--muted);cursor:pointer;font-size:13.5px;transition:.2s}
+  .tab.on{background:#16223c;color:var(--txt);border-color:var(--blue);font-weight:600}
+
+  /* ---------- main grid ---------- */
+  .grid{display:grid;grid-template-columns:minmax(0,7fr) minmax(0,5fr);gap:16px}
+  @media(max-width:960px){.grid{grid-template-columns:1fr}}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    display:flex;flex-direction:column}
+
+  /* ---------- chat ---------- */
+  .chat-head{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px;background:var(--panel2)}
+  .avatar{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#2563eb,#06b6d4);
+    display:flex;align-items:center;justify-content:center;font-size:18px}
+  .chat-head .name{font-size:14.5px;font-weight:600}
+  .chat-head .sub{font-size:11.5px;color:var(--muted);margin-top:2px}
+  .status-dot{width:8px;height:8px;border-radius:50%;background:var(--green);margin-left:auto;
+    box-shadow:0 0 8px var(--green)}
+  .status-dot+p{font-size:11px;color:var(--muted)}
+
+  .msgs{flex:1;overflow-y:auto;padding:18px;min-height:420px;max-height:620px;scroll-behavior:smooth}
+  .msgs::-webkit-scrollbar{width:6px}
+  .msgs::-webkit-scrollbar-thumb{background:#243050;border-radius:3px}
+
+  .msg{display:flex;gap:10px;margin-bottom:18px;animation:fadeUp .3s ease}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .msg .who{width:32px;height:32px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;font-size:15px}
+  .msg.user{flex-direction:row-reverse}
+  .msg.user .who{background:#1d2b4d}
+  .msg.bot .who{background:linear-gradient(135deg,#2563eb,#06b6d4)}
+  .bubble{max-width:86%;padding:12px 16px;border-radius:14px;font-size:14px;line-height:1.65}
+  .msg.user .bubble{background:linear-gradient(135deg,#2563eb,#1d4ed8);border-bottom-right-radius:4px}
+  .msg.bot .bubble{background:var(--panel2);border:1px solid var(--line);border-bottom-left-radius:4px}
+  .bubble .tag{display:inline-block;font-size:10.5px;padding:2px 8px;border-radius:20px;margin-bottom:8px;
+    border:1px solid;letter-spacing:.5px}
+  .tag.f23{color:#93c5fd;border-color:rgba(59,130,246,.5);background:rgba(59,130,246,.12)}
+  .tag.f02{color:#6ee7b7;border-color:rgba(16,185,129,.5);background:rgba(16,185,129,.12)}
+  .tag.warn{color:#fcd34d;border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.12)}
+  .tag.sec{color:#fca5a5;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.12)}
+  .tag.note{color:#c4b5fd;border-color:rgba(167,139,250,.5);background:rgba(167,139,250,.12)}
+
+  /* typing */
+  .typing{display:flex;gap:5px;padding:6px 2px}
+  .typing i{width:7px;height:7px;border-radius:50%;background:var(--dim);animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+  /* rich widgets */
+  .balance-card{background:linear-gradient(135deg,#0f2340,#123055);border:1px solid #1e3a8a;border-radius:12px;
+    padding:16px;margin-top:10px;min-width:250px}
+  .balance-card .label{font-size:11px;color:#93c5fd;letter-spacing:1px;margin-bottom:6px}
+  .balance-card .amt{font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+  .balance-card .amt.neg{color:#fca5a5}
+  .balance-card .avail{font-size:12px;color:var(--muted);margin-top:8px;display:flex;justify-content:space-between;gap:20px}
+
+  table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:10px}
+  th{color:var(--muted);font-weight:500;text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);
+    font-size:11px;letter-spacing:.5px;white-space:nowrap}
+  td{padding:7px 8px;border-bottom:1px solid #16203a;font-variant-numeric:tabular-nums;white-space:nowrap}
+  tr:last-child td{border-bottom:none}
+  .td-num{text-align:right}
+  .in{color:#34d399;font-weight:600}.out{color:#f87171;font-weight:600}
+  .pill{display:inline-block;padding:1px 7px;border-radius:20px;font-size:10.5px}
+  .pill.in{background:rgba(16,185,129,.15)}
+  .pill.out{background:rgba(239,68,68,.15)}
+  .pill.low{background:rgba(245,158,11,.15);color:#fcd34d}
+  .sumline{display:flex;gap:16px;margin-top:10px;font-size:12.5px;flex-wrap:wrap}
+  .sumline b{font-variant-numeric:tabular-nums}
+
+  .bars{margin-top:10px;display:flex;flex-direction:column;gap:7px}
+  .bar-row{display:grid;grid-template-columns:56px 1fr 96px;align-items:center;gap:10px;font-size:12px;
+    cursor:pointer;border-radius:7px;padding:2px 4px;transition:.15s}
+  .bar-row:hover{background:rgba(59,130,246,.08)}
+  .bar-track{height:16px;background:#0b1222;border-radius:8px;overflow:hidden}
+  .bar-fill{height:100%;border-radius:8px;background:linear-gradient(90deg,#2563eb,#22d3ee);
+    width:0;transition:width .8s cubic-bezier(.2,.8,.2,1)}
+  .bar-val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .drill-tip{font-size:10.5px;color:var(--dim);margin-top:6px}
+
+  .md{margin-top:10px;font-size:13px}
+  .md h4{font-size:13.5px;color:var(--cyan);margin:12px 0 6px}
+  .md h4:first-child{margin-top:0}
+  .md ul{list-style:none}
+  .md li{padding:3px 0;color:#cbd5e1;font-size:12.5px}
+  .md li b{color:var(--txt)}
+
+  .sec-block{border:1px dashed rgba(239,68,68,.45);background:rgba(239,68,68,.07);border-radius:10px;
+    padding:12px 14px;margin-top:10px;font-size:12.5px;line-height:1.7}
+  .sec-block b{color:#fca5a5}
+
+  .hint-chips{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px}
+  .chip-btn{border:1px solid rgba(59,130,246,.45);color:#93c5fd;background:rgba(59,130,246,.1);
+    padding:5px 12px;border-radius:20px;font-size:12px;cursor:pointer;transition:.2s}
+  .chip-btn:hover{background:rgba(59,130,246,.25)}
+  .suggest{margin-top:12px;padding-top:10px;border-top:1px dashed #1e293b}
+  .suggest .sl{font-size:11px;color:var(--dim);margin-bottom:7px;letter-spacing:.5px}
+  .suggest .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .suggest .chip-btn{border-color:rgba(167,139,250,.4);color:#c4b5fd;background:rgba(167,139,250,.08)}
+  .suggest .chip-btn:hover{background:rgba(167,139,250,.2)}
+
+  .quickbar{padding:12px 18px;border-top:1px solid var(--line);background:var(--panel2)}
+  .quickbar .label{font-size:11px;color:var(--muted);margin-bottom:8px;letter-spacing:.5px}
+  .quickbar .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .inputrow{display:flex;gap:10px;padding:12px 18px;border-top:1px solid var(--line)}
+  .inputrow input{flex:1;background:#0b1222;border:1px solid var(--line);border-radius:10px;color:var(--txt);
+    padding:11px 14px;font-size:13.5px;outline:none;transition:.2s}
+  .inputrow input:focus{border-color:var(--blue)}
+  .inputrow button{background:linear-gradient(135deg,#2563eb,#0891b2);border:none;border-radius:10px;color:#fff;
+    padding:0 20px;font-size:13.5px;cursor:pointer;font-weight:600}
+  .inputrow button:hover{filter:brightness(1.12)}
+
+  /* ---------- ★ 银行卡卡片组件（v2 交互核心） ---------- */
+  .cards-wrap{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+  .bc-scene{perspective:1100px;width:252px;flex:none}
+  .bankcard{position:relative;width:252px;height:158px;border-radius:15px;transform-style:preserve-3d;
+    transition:transform .8s cubic-bezier(.3,.7,.3,1);cursor:pointer}
+  .bankcard.flipped{transform:rotateY(180deg)}
+  .bc-face{position:absolute;inset:0;border-radius:15px;padding:16px;backface-visibility:hidden;
+    -webkit-backface-visibility:hidden;overflow:hidden;box-shadow:0 10px 26px rgba(0,0,0,.45)}
+  .bc-front{display:flex;flex-direction:column;color:#fff}
+  .bc-savings .bc-front{background:linear-gradient(135deg,#1d4ed8 0%,#2563eb 45%,#06b6d4 100%)}
+  .bc-credit .bc-front{background:linear-gradient(135deg,#18122b 0%,#312e81 55%,#78350f 130%)}
+  .bc-brandrow{display:flex;justify-content:space-between;align-items:center}
+  .bc-bank{font-size:12.5px;font-weight:700;letter-spacing:1.5px;text-shadow:0 1px 3px rgba(0,0,0,.35)}
+  .bc-type{font-size:10.5px;padding:2px 9px;border-radius:20px;background:rgba(255,255,255,.16);
+    border:1px solid rgba(255,255,255,.3);letter-spacing:1px}
+  .bc-chip{width:34px;height:24px;border-radius:5px;background:linear-gradient(135deg,#fde68a,#f59e0b);
+    margin:12px 0 0;position:relative}
+  .bc-chip::after{content:"";position:absolute;inset:4px 6px;border:1px solid rgba(0,0,0,.25);border-radius:3px}
+  .bc-no{margin-top:auto;font-family:ui-monospace,Menlo,monospace;font-size:14.5px;letter-spacing:1.5px;
+    text-shadow:0 1px 3px rgba(0,0,0,.4)}
+  .bc-bottom{display:flex;justify-content:space-between;align-items:flex-end;margin-top:9px}
+  .bc-holder{font-size:11px;opacity:.85;letter-spacing:.5px}
+  .bc-tap{font-size:10.5px;background:rgba(255,255,255,.18);border:1px dashed rgba(255,255,255,.45);
+    padding:2px 8px;border-radius:20px;animation:pulseTap 2s infinite}
+  @keyframes pulseTap{0%,100%{opacity:.7}50%{opacity:1;transform:translateY(-1px)}}
+  .bc-back{transform:rotateY(180deg);background:linear-gradient(160deg,#0b1222,#14203c);border:1px solid #1e3a8a;
+    display:flex;flex-direction:column}
+  .bc-back .lbl{font-size:10.5px;color:var(--muted);letter-spacing:1px;margin-top:2px}
+  .bc-back .big{font-size:21px;font-weight:800;font-variant-numeric:tabular-nums;margin-top:2px}
+  .bc-back .big.neg{color:#fca5a5}.bc-back .big.pos{color:#6ee7b7}
+  .bc-limits{margin-top:8px;display:flex;flex-direction:column;gap:3px;font-size:10.5px;color:#93c5fd}
+  .bc-limits span{display:flex;justify-content:space-between}
+  .bc-limits b{color:#e2e8f0;font-variant-numeric:tabular-nums;font-weight:600}
+  .bc-vtag{position:absolute;top:12px;right:14px;font-size:10px;padding:2px 8px;border-radius:20px;
+    background:rgba(16,185,129,.18);border:1px solid rgba(16,185,129,.5);color:#6ee7b7}
+  .bc-flipback{margin-top:auto;align-self:flex-start;font-size:10.5px;color:#7d8db0;cursor:pointer;
+    border:1px solid var(--line);padding:2px 9px;border-radius:20px;background:#0b1222}
+  .bc-flipback:hover{color:#93c5fd;border-color:var(--blue)}
+
+  /* PIN 验证面板 */
+  .pin-panel{margin-top:12px;background:#0b1222;border:1px solid rgba(59,130,246,.4);border-radius:12px;
+    padding:14px;animation:fadeUp .3s ease;max-width:280px}
+  .pin-panel.err{border-color:rgba(239,68,68,.6);animation:shake .35s}
+  .pin-panel.ok{border-color:rgba(16,185,129,.6)}
+  @keyframes shake{0%,100%{transform:none}25%{transform:translateX(-5px)}75%{transform:translateX(5px)}}
+  .pin-title{font-size:12.5px;font-weight:600;display:flex;align-items:center;gap:7px}
+  .pin-sub{font-size:10.5px;color:var(--dim);margin-top:3px;line-height:1.5}
+  .pin-dots{display:flex;gap:8px;margin:12px 0;justify-content:center}
+  .pin-dot{width:34px;height:40px;border:1px solid var(--line);border-radius:8px;background:#111a30;
+    display:flex;align-items:center;justify-content:center;font-size:16px;color:#93c5fd;transition:.15s}
+  .pin-dot.filled{border-color:var(--blue);box-shadow:0 0 8px rgba(59,130,246,.25)}
+  .pin-dot.ok{border-color:var(--green);color:#6ee7b7}
+  .pin-kbd{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  .pin-key{padding:9px 0;border-radius:8px;border:1px solid var(--line);background:#111a30;color:var(--txt);
+    font-size:15px;font-weight:600;cursor:pointer;transition:.12s;font-variant-numeric:tabular-nums}
+  .pin-key:hover{border-color:var(--blue);background:#16223c}
+  .pin-key:active{transform:scale(.94)}
+  .pin-key.fn{font-size:12px;color:var(--muted)}
+  .pin-status{font-size:11px;margin-top:9px;min-height:16px}
+  .pin-status.bad{color:#fca5a5}.pin-status.good{color:#6ee7b7}
+  .pin-locked{font-size:12.5px;color:#fcd34d;background:rgba(245,158,11,.08);border:1px dashed rgba(245,158,11,.4);
+    border-radius:10px;padding:12px;margin-top:12px;line-height:1.6}
+
+  /* 趋势图 */
+  .trend-box{margin-top:12px;background:#0b1222;border:1px solid var(--line);border-radius:11px;padding:13px;
+    animation:fadeUp .3s ease}
+  .trend-title{font-size:12px;font-weight:600;display:flex;justify-content:space-between;align-items:center}
+  .trend-title .lg{font-size:10.5px;font-weight:400;color:var(--muted);display:flex;gap:10px}
+  .lg i{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
+  .trend-chart{display:flex;align-items:flex-end;gap:2px;height:74px;margin-top:12px;border-bottom:1px solid var(--line);padding-bottom:2px}
+  .t-day{flex:1;display:flex;align-items:flex-end;gap:1px;height:100%;cursor:default}
+  .t-bar{flex:1;border-radius:2px 2px 0 0;min-height:1px}
+  .t-bar.out{background:linear-gradient(180deg,#f87171,#991b1b)}
+  .t-bar.in{background:linear-gradient(180deg,#34d399,#065f46)}
+  .trend-x{display:flex;gap:2px;margin-top:4px}
+  .trend-x span{flex:1;text-align:center;font-size:8.5px;color:var(--dim);font-family:ui-monospace,Menlo,monospace}
+  .trend-sum{font-size:11px;color:var(--muted);margin-top:9px;line-height:1.6}
+  .trend-sum b{font-variant-numeric:tabular-nums}
+
+  /* 流水行展开 & 分类下钻 */
+  tr.txn-row{cursor:pointer;transition:.12s}
+  tr.txn-row:hover td{background:rgba(59,130,246,.06)}
+  .expander{font-size:10px;color:var(--dim);margin-left:5px;display:inline-block;transition:.2s}
+  tr.txn-row:hover .expander{color:#93c5fd}
+  .detail-tr td{background:#0b1222;font-size:11.5px;line-height:1.75;padding:10px 12px;color:#94a3b8}
+  .detail-tr .dk{color:#7d8db0;margin-right:6px}
+  .detail-tr .dv{color:#e2e8f0;font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .drill-box{grid-column:1/-1;background:#0b1222;border:1px solid var(--line);border-radius:10px;
+    padding:11px 13px;margin:2px 0 6px;animation:fadeUp .25s ease}
+  .drill-box .dh{font-size:11.5px;color:#93c5fd;font-weight:600;display:flex;justify-content:space-between;margin-bottom:7px}
+  .drill-box .dh b{font-variant-numeric:tabular-nums;color:#6ee7b7}
+  .drill-item{display:flex;justify-content:space-between;gap:10px;font-size:11.5px;padding:3.5px 0;
+    border-bottom:1px dashed #16203a}
+  .drill-item:last-child{border-bottom:none}
+  .drill-item .cp{color:#cbd5e1}
+  .drill-item .dt{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:10.5px}
+  .drill-item .am{font-variant-numeric:tabular-nums;color:#f87171}
+  .bars-outer{display:flex;flex-direction:column}
+
+  /* 订阅操作 */
+  .sub-op{font-size:11px;color:#fcd34d;border:1px solid rgba(245,158,11,.45);background:rgba(245,158,11,.08);
+    padding:2px 10px;border-radius:20px;cursor:pointer;transition:.15s}
+  .sub-op:hover{background:rgba(245,158,11,.2)}
+  .confirm-box{margin-top:10px;background:rgba(245,158,11,.06);border:1px dashed rgba(245,158,11,.4);
+    border-radius:10px;padding:10px 13px;font-size:12px;animation:fadeUp .25s ease}
+  .confirm-box .cb-btns{margin-top:9px;display:flex;gap:8px}
+  .cb-btn{padding:4px 14px;border-radius:20px;font-size:11.5px;cursor:pointer;border:1px solid;transition:.15s}
+  .cb-btn.danger{color:#fca5a5;border-color:rgba(239,68,68,.5);background:rgba(239,68,68,.08)}
+  .cb-btn.danger:hover{background:rgba(239,68,68,.18)}
+  .cb-btn.safe{color:#93c5fd;border-color:rgba(59,130,246,.5);background:rgba(59,130,246,.08)}
+  .cb-btn.safe:hover{background:rgba(59,130,246,.18)}
+
+  /* ---------- tech panel ---------- */
+  .tech{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;
+    display:flex;flex-direction:column;max-height:830px}
+  .tech-head{padding:13px 16px;border-bottom:1px solid var(--line);background:var(--panel2);
+    font-size:13px;font-weight:600;display:flex;align-items:center;gap:8px}
+  .tech-body{overflow-y:auto;padding:14px 16px;flex:1}
+  .tech-body::-webkit-scrollbar{width:6px}
+  .tech-body::-webkit-scrollbar-thumb{background:#243050;border-radius:3px}
+
+  .empty{color:var(--dim);font-size:12.5px;text-align:center;padding:40px 10px;line-height:1.8}
+  .sec-title{font-size:11px;color:var(--muted);letter-spacing:1px;margin:16px 0 8px;display:flex;align-items:center;gap:8px}
+  .sec-title::after{content:"";flex:1;height:1px;background:var(--line)}
+  .sec-title:first-child{margin-top:0}
+
+  .kv{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12.5px;border-bottom:1px dashed #16203a}
+  .kv:last-child{border-bottom:none}
+  .kv .k{color:var(--muted)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+
+  .intent-badge{padding:3px 10px;border-radius:7px;font-size:11.5px;font-weight:600;font-family:ui-monospace,Menlo,monospace}
+  .intent-badge.ok{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.4)}
+  .intent-badge.bad{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.4)}
+  .intent-badge.warn{background:rgba(245,158,11,.15);color:#fcd34d;border:1px solid rgba(245,158,11,.4)}
+  .intent-badge.info{background:rgba(59,130,246,.15);color:#93c5fd;border:1px solid rgba(59,130,246,.4)}
+
+  .confbar{height:7px;background:#0b1222;border-radius:5px;overflow:hidden;margin-top:6px}
+  .confbar i{display:block;height:100%;background:linear-gradient(90deg,#f59e0b,#10b981);border-radius:5px;
+    width:0;transition:width .7s ease}
+
+  .states{display:flex;flex-wrap:wrap;gap:6px}
+  .st{font-size:10px;font-family:ui-monospace,Menlo,monospace;padding:4px 8px;border-radius:6px;
+    border:1px solid var(--line);color:var(--dim);background:#0b1222;transition:.25s;letter-spacing:.3px}
+  .st.hit{color:#6ee7b7;border-color:rgba(16,185,129,.55);background:rgba(16,185,129,.12);
+    box-shadow:0 0 10px rgba(16,185,129,.15)}
+
+  .toolcall{display:flex;align-items:center;gap:9px;background:#0b1222;border:1px solid var(--line);
+    border-radius:9px;padding:9px 12px;margin-bottom:7px;font-size:12px}
+  .toolcall .ico{width:26px;height:26px;border-radius:7px;background:rgba(59,130,246,.15);
+    display:flex;align-items:center;justify-content:center;font-size:13px}
+  .toolcall .nm{font-family:ui-monospace,Menlo,monospace;color:#93c5fd;font-weight:600}
+  .toolcall .args{color:var(--muted);font-size:11px;font-family:ui-monospace,Menlo,monospace;margin-left:auto;
+    max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .toolcall.none{color:var(--dim);justify-content:center;font-size:12px;border-style:dashed}
+
+  .factrow{display:flex;align-items:center;gap:8px;font-size:12px;padding:5px 0;border-bottom:1px dashed #16203a}
+  .factrow:last-child{border-bottom:none}
+  .factrow .num{font-family:ui-monospace,Menlo,monospace;color:var(--cyan);font-weight:600}
+  .factrow .arrow{color:var(--dim)}
+  .factrow .key{font-family:ui-monospace,Menlo,monospace;color:var(--muted)}
+  .factrow .ok{margin-left:auto;color:#6ee7b7;font-size:11px}
+  .verify-banner{display:flex;align-items:center;gap:8px;padding:9px 12px;border-radius:9px;font-size:12px;
+    margin-bottom:8px}
+  .verify-banner.pass{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.35);color:#6ee7b7}
+  .verify-banner.warn{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.35);color:#fcd34d}
+
+  .audit-t{width:100%;font-size:11px}
+  .audit-t td{padding:5px 4px;color:#94a3b8}
+  .audit-t td.r-ok{color:#6ee7b7}.audit-t td.r-no{color:#fcd34d}.audit-t td.r-lock{color:#fca5a5}
+  .src-note{font-size:11px;color:var(--dim);background:#0b1222;border-radius:8px;padding:8px 11px;
+    line-height:1.6;border:1px dashed var(--line)}
+  .src-note b{color:var(--muted)}
+
+  /* ---------- architecture tab ---------- */
+  .arch{display:none}
+  .arch.on{display:block}
+  .chat-tab.on{display:block}
+  .chat-tab{display:none}
+  .acard{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:22px;margin-bottom:16px}
+  .acard h3{font-size:15px;margin-bottom:14px;display:flex;align-items:center;gap:9px}
+  .acard h3 .n{width:22px;height:22px;border-radius:7px;background:linear-gradient(135deg,#2563eb,#0891b2);
+    display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700}
+  .layer{display:flex;gap:12px;align-items:stretch;margin-bottom:10px}
+  .layer .lnode{flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:13px 15px;
+    transition:.2s;position:relative}
+  .layer .lnode:hover{border-color:var(--blue);transform:translateY(-2px)}
+  .lnode .t{font-size:13px;font-weight:600;margin-bottom:4px}
+  .lnode .d{font-size:11.5px;color:var(--muted);line-height:1.6}
+  .lnode .f{font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:var(--cyan);margin-top:6px}
+  .arrowline{text-align:center;color:var(--dim);font-size:16px;line-height:.6;margin:2px 0 8px}
+  .rules{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+  .rule{background:var(--panel2);border:1px solid var(--line);border-left:3px solid var(--green);
+    border-radius:9px;padding:12px 14px;font-size:12.5px;line-height:1.65;color:#cbd5e1}
+  .rule b{color:#6ee7b7}
+  .ix{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px}
+  .ixcard{background:var(--panel2);border:1px solid var(--line);border-top:3px solid var(--violet);
+    border-radius:10px;padding:13px 15px;font-size:12.5px;line-height:1.7;color:#cbd5e1}
+  .ixcard b{color:#c4b5fd}
+  .ixcard .why{display:block;margin-top:6px;font-size:11px;color:var(--dim);border-top:1px dashed var(--line);padding-top:6px}
+  .meta-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+  .meta{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+  .meta .v{font-size:19px;font-weight:700;margin-top:3px;font-variant-numeric:tabular-nums}
+  .meta .v.g{color:#34d399}.meta .v.c{color:var(--cyan)}.meta .v.a{color:#fcd34d}
+  .meta .l{font-size:11px;color:var(--muted)}
+  footer{margin-top:22px;text-align:center;color:var(--dim);font-size:11.5px;line-height:1.8}
+  footer a{color:var(--blue);text-decoration:none}
+
+  /* ================= v3 细节层 ================= */
+  /* 消息脚注：时间戳 + 核验徽标 + 操作条 */
+  .msg-foot{display:flex;align-items:center;gap:10px;margin-top:11px;padding-top:9px;
+    border-top:1px dashed #1e293b;font-size:10.5px;color:#4b5b7c;flex-wrap:wrap}
+  .msg-time{margin-left:auto}
+  .mf-verify{color:#6ee7b7;display:inline-flex;align-items:center;gap:4px}
+  .mf-ops{display:flex;gap:4px}
+  .mf-btn{border:1px solid var(--line);border-radius:7px;padding:1px 7px;cursor:pointer;
+    font-size:11px;color:#7d8db0;background:#0b1222;transition:.15s;user-select:none}
+  .mf-btn:hover{color:#93c5fd;border-color:var(--blue)}
+  .mf-btn.on{color:#6ee7b7;border-color:rgba(16,185,129,.5);background:rgba(16,185,129,.1)}
+
+  /* typing 阶段标签（跟状态机时序） */
+  .typing-stage{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#93c5fd;margin-top:8px}
+  .spinner{width:11px;height:11px;border:2px solid rgba(59,130,246,.25);border-top-color:#3b82f6;
+    border-radius:50%;animation:spin .7s linear infinite;flex:none}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* 金额滚动 + 小眼睛遮罩 */
+  .amt .eye-btn{border:1px solid rgba(147,197,253,.4);background:rgba(59,130,246,.12);color:#93c5fd;
+    border-radius:7px;padding:2px 9px;font-size:11px;cursor:pointer;margin-left:9px;transition:.15s;vertical-align:4px}
+  .amt .eye-btn:hover{background:rgba(59,130,246,.25)}
+
+  /* 信用卡额度使用率 */
+  .credit-meter{margin-top:10px}
+  .credit-meter .bar{height:6px;background:#0b1222;border-radius:4px;overflow:hidden;border:1px solid #16203a}
+  .credit-meter .fill{height:100%;background:linear-gradient(90deg,#f59e0b,#ef4444);border-radius:4px;width:0;
+    transition:width .9s cubic-bezier(.2,.8,.2,1)}
+  .credit-meter .cap{display:flex;justify-content:space-between;font-size:10.5px;color:#7d8db0;margin-top:5px}
+
+  /* 卡片光泽扫过 */
+  .bc-front::after{content:"";position:absolute;top:0;left:-70%;width:45%;height:100%;
+    background:linear-gradient(105deg,transparent,rgba(255,255,255,.30),transparent);
+    transform:skewX(-22deg);transition:left .65s ease}
+  .bankcard:hover .bc-front::after{left:125%}
+
+  /* 流水筛选与搜索 */
+  .txn-tools{display:flex;gap:8px;align-items:center;margin-top:11px;flex-wrap:wrap}
+  .ftab{border:1px solid var(--line);background:#0b1222;color:#7d8db0;font-size:11.5px;
+    padding:4px 12px;border-radius:20px;cursor:pointer;transition:.15s;user-select:none}
+  .ftab:hover{color:#93c5fd}
+  .ftab.on{color:#93c5fd;border-color:rgba(59,130,246,.55);background:rgba(59,130,246,.12)}
+  .txn-search{background:#0b1222;border:1px solid var(--line);border-radius:20px;color:var(--txt);
+    font-size:12px;padding:5px 13px;outline:none;width:150px;transition:.25s}
+  .txn-search:focus{border-color:var(--blue);width:195px}
+  .txn-search::placeholder{color:#4b5b7c}
+  .txn-empty{display:none;font-size:12px;color:#7d8db0;text-align:center;padding:14px 0}
+
+  /* 异常申诉 & 工单 */
+  .dispute-btn{font-size:10.5px;color:#fcd34d;border:1px solid rgba(245,158,11,.4);
+    background:rgba(245,158,11,.08);padding:1px 9px;border-radius:20px;cursor:pointer;transition:.15s;margin-left:8px}
+  .dispute-btn:hover{background:rgba(245,158,11,.22)}
+  .ticket-box{margin-top:8px;background:rgba(16,185,129,.06);border:1px dashed rgba(16,185,129,.45);
+    border-radius:10px;padding:10px 13px;font-size:12px;line-height:1.7;animation:fadeUp .25s ease}
+  .ticket-box b{color:#6ee7b7}
+
+  /* 通知铃铛 */
+  .bell{position:relative;cursor:pointer;font-size:16px;padding:7px 9px;border-radius:9px;transition:.15s;user-select:none}
+  .bell:hover{background:#16223c}
+  .bell .badge{position:absolute;top:1px;right:2px;background:var(--red);color:#fff;font-size:9.5px;
+    min-width:16px;height:16px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+    padding:0 4px;font-weight:700;box-shadow:0 0 8px rgba(239,68,68,.6)}
+  .bell-panel{position:absolute;top:calc(100% + 10px);right:0;width:305px;background:var(--panel);
+    border:1px solid var(--line);border-radius:12px;box-shadow:0 14px 44px rgba(0,0,0,.55);
+    display:none;z-index:60;overflow:hidden;animation:fadeUp .2s ease}
+  .bell-panel.open{display:block}
+  .bp-head{padding:10px 14px;font-size:12px;font-weight:600;border-bottom:1px solid var(--line);
+    color:#93c5fd;display:flex;justify-content:space-between;align-items:center}
+  .bp-head .clr{font-size:10.5px;color:#7d8db0;font-weight:400;cursor:pointer}
+  .bp-head .clr:hover{color:#93c5fd}
+  .bp-item{padding:11px 14px;border-bottom:1px solid #16203a;cursor:pointer;transition:.15s;
+    display:flex;gap:9px;align-items:flex-start}
+  .bp-item:hover{background:#16223c}
+  .bp-item:last-child{border-bottom:none}
+  .bp-item.read{opacity:.42}
+  .bp-item .bic{font-size:15px;margin-top:1px;flex:none}
+  .bp-item .bt{font-size:12px;font-weight:600;color:#e2e8f0}
+  .bp-item .bd{font-size:11px;color:#7d8db0;margin-top:2px;line-height:1.55}
+  .bp-item .unread-dot{width:7px;height:7px;border-radius:50%;background:var(--red);margin-left:auto;
+    flex:none;margin-top:5px;box-shadow:0 0 6px rgba(239,68,68,.7)}
+
+  /* 实时意图识别提示 */
+  .intent-hint{display:none;align-items:center;gap:9px;font-size:11.5px;color:#93c5fd;
+    background:rgba(59,130,246,.07);border:1px dashed rgba(59,130,246,.35);border-radius:10px;
+    padding:7px 13px;margin:10px 18px 0;animation:fadeUp .2s ease;flex-wrap:wrap}
+  .intent-hint.show{display:flex}
+  .intent-hint .ih-badge{font-family:ui-monospace,Menlo,monospace;background:rgba(59,130,246,.15);
+    border:1px solid rgba(59,130,246,.4);border-radius:6px;padding:1px 7px;font-size:10.5px}
+  .intent-hint .ih-conf{color:#6ee7b7;font-family:ui-monospace,Menlo,monospace}
+  .intent-hint .ih-note{color:#7d8db0}
+
+  /* toast */
+  #toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:120;pointer-events:none}
+  .toast{background:#0e1526;border:1px solid rgba(59,130,246,.45);color:#e2e8f0;font-size:12.5px;
+    padding:10px 16px;border-radius:10px;box-shadow:0 8px 26px rgba(0,0,0,.5);
+    animation:toastIn .25s ease;display:flex;gap:8px;align-items:center;max-width:330px;line-height:1.5}
+  .toast.out{animation:toastOut .3s ease forwards}
+  @keyframes toastIn{from{opacity:0;transform:translateX(26px)}to{opacity:1;transform:none}}
+  @keyframes toastOut{to{opacity:0;transform:translateX(26px)}}
+
+  /* 输入框与发送按钮状态 */
+  .inputrow button:disabled{opacity:.55;cursor:default}
+  .inputrow input.shake{animation:shake .4s}
+
+  /* 键盘提示 */
+  .kbd-tip{font-size:10.5px;color:#4b5b7c;padding:0 18px 10px;display:flex;gap:14px;flex-wrap:wrap}
+  .kbd-tip b{color:#7d8db0;font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="logo">🏦</div>
+    <h1>智能银行助手 · 实机功能演示（细节交互版）
+      <small>F23 余额查询 + F02 流水查询 ｜ delivery/F23-F02 ｜ PR #7 ｜ v3 细节交互</small>
+    </h1>
+    <div class="hdr-right">
+      <button class="btn primary" id="playBtn" onclick="playAll()">▶ 播放完整演示</button>
+      <button class="btn" onclick="resetChat()">↺ 重置对话</button>
+    </div>
+  </header>
+
+  <div class="provence">
+    <span style="font-size:16px">🛡️</span>
+    <div><b>数据来源声明</b>：本页所有数字均来自 <b>2026-10-05 对交付代码的真实运行采集</b>
+    （在本机执行 <span class="mono">agent.handle()</span> 与 <span class="mono">tools.*</span> 工具层，SQLite 种子数据）。
+    回复框内支持<b>点击交互</b>：点银行卡 → 输入 PIN 验证 → 翻卡查余额（<b>演示 PIN：123456</b>，为 L1 验证档的产品化预演）；
+    点流水行可展开详情、点分类条可下钻明细、订阅可发起取消（会被安全策略拦截）。
+    <b>v3 细节层</b>：右上角 🔔 通知中心（未读提醒直达场景）、输入框打字实时识别意图、
+    流水表方向筛选 + 关键词搜索、异常交易一键申诉转工单、金额滚动 / 小眼睛遮罩 / 额度使用率、
+    消息操作条（复制 · 语音播报 · 👍👎 反馈）。
+    <b>你的每次交互都会同步落进右侧审计日志</b>——所见即所审。</div>
+  </div>
+
+  <div class="tabs">
+    <div class="tab on" id="tab-chat" onclick="switchTab('chat')">💬 对话演示</div>
+    <div class="tab" id="tab-arch" onclick="switchTab('arch')">🏗️ 架构与工程说明</div>
+  </div>
+
+  <!-- ================= CHAT TAB ================= -->
+  <div class="chat-tab on" id="view-chat">
+    <div class="grid">
+      <div class="card">
+        <div class="chat-head">
+          <div class="avatar">🤖</div>
+          <div>
+            <div class="name">小银 · 智能银行助手</div>
+            <div class="sub" id="agentSub">只读查询 Agent ｜ 权限档 L0 ｜ 状态机已就绪 ｜ 交互组件 v3</div>
+          </div>
+          <div class="status-dot"></div>
+          <p>在线</p>
+          <div class="bell" id="bell" onclick="toggleBell(event)" title="通知中心">
+            🔔<span class="badge" id="bellBadge">2</span>
+            <div class="bell-panel" id="bellPanel"></div>
+          </div>
+        </div>
+
+        <div class="msgs" id="msgs"></div>
+
+        <div class="quickbar">
+          <div class="label">快捷指令（点击即发送，真实回执回放 + 可继续点击交互）</div>
+          <div class="chips" id="chips"></div>
+        </div>
+
+        <div class="intent-hint" id="intentHint"></div>
+
+        <div class="inputrow">
+          <input id="inp" placeholder="试试：我几张卡 / 查流水 / 上个月花了多少 …（打字时实时识别意图）" onkeydown="if(event.key==='Enter')sendInput()" oninput="showIntentHint()">
+          <button id="sendBtn" onclick="sendInput()">发送</button>
+        </div>
+        <div class="kbd-tip">
+          <span><b>/</b> 聚焦输入框</span><span><b>Enter</b> 发送</span>
+          <span><b>Esc</b> 关闭面板 / PIN 面板</span><span><b>PIN 面板</b> 支持物理键盘输入</span>
+        </div>
+      </div>
+
+      <div class="tech">
+        <div class="tech-head">⚙️ 引擎盖 · 内部处理实时面板
+          <span class="mono" style="margin-left:auto;color:var(--dim)" id="traceHint"></span>
+        </div>
+        <div class="tech-body" id="techBody">
+          <div class="empty">在左侧发送一条消息<br>这里将实时展示状态机轨迹 · 工具调用 · 数字核验 · 审计日志<br><br>💬 对话内的点击交互（PIN 验证、取消订阅…）也会落到审计日志</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= ARCH TAB ================= -->
+  <div class="arch" id="view-arch">
+    <div class="acard">
+      <h3><span class="n">1</span>分层架构（交付代码真实结构）</h3>
+      <div class="layer"><div class="lnode">
+        <div class="t">💬 用户输入</div><div class="d">自然语言对话："查一下我的储蓄卡余额"</div></div></div>
+      <div class="arrowline">↓</div>
+      <div class="layer"><div class="lnode">
+        <div class="t">🧭 agent/orchestrator.py — 编排层状态机</div>
+        <div class="d">IDLE → CLASSIFY → CLARIFY/SLOT_FILL → PRECHECK → EXECUTE → VERIFY_NUMBERS → REPLY → AUDIT，<b>不可跳步</b>；置信度 &lt; 0.6 触发追问（最多 2 轮，超出转人工）</div>
+        <div class="f">agent/orchestrator.py · agent/period.py（时间解析）· agent/templates.py</div></div></div>
+      <div class="arrowline">↓</div>
+      <div class="layer"><div class="lnode">
+        <div class="t">🔀 agent/read_routes.py — 只读路由表</div>
+        <div class="d">8 个只读意图 → 工具映射；<b>写操作一概不在表内</b>（静态测试红线钉住）</div>
+        <div class="f">balance_query→get_balance ｜ txn_query→list_txn ｜ …</div></div></div>
+      <div class="arrowline">↓</div>
+      <div class="layer"><div class="lnode">
+        <div class="t">🔧 tools/query.py — 工具层 T1–T5</div>
+        <div class="d">统一返回 <span class="mono">ToolResult(ok, data, facts, message)</span>；整数分运算、归属断言、异常规则</div>
+        <div class="f">get_balance ｜ list_txn ｜ analyze_spending ｜ detect_anomalies ｜ generate_bill_report</div></div></div>
+      <div class="arrowline">↓</div>
+      <div class="layer">
+        <div class="lnode" style="flex:1.4">
+          <div class="t">🗄️ data/dao.py — 数据访问层</div>
+          <div class="d">SQLite（内存演示库），账户 / 流水 / 订阅 / 审计四表（audit_log 含 permission_tier 档位字段）</div>
+          <div class="f">data/dao.py · data/db.py · data/seed.py</div></div>
+        <div class="lnode">
+          <div class="t">🛡️ guard/ — 安全防护</div>
+          <div class="d">权限档位 + 注入检测，横切各层</div>
+          <div class="f">guard/permission.py · guard/injection.py</div></div>
+      </div>
+    </div>
+
+    <div class="acard">
+      <h3><span class="n">2</span>工程铁律（金融 Agent 防幻觉设计）</h3>
+      <div class="rules">
+        <div class="rule"><b>① 金额一律整数分</b> — 全程不出现 float，杜绝浮点误差吞钱</div>
+        <div class="rule"><b>② LLM 不参与任何计算</b> — 金额、占比、异常判定全部由整数运算决定，LLM 只润色措辞</div>
+        <div class="rule"><b>③ 回执数字必须来自 facts</b> — VERIFY_NUMBERS 状态逐字校验，出现 facts 之外的数字 → 降级模板回执 + HALLUCINATION_BLOCKED</div>
+        <div class="rule"><b>④ 错误消息不含数字</b> — 回执里的每个数字都能在 facts 里找到出处</div>
+        <div class="rule"><b>⑤ 归属断言防越权</b> — DAO 不按 user 圈定（风险已登记台账），工具层显式断言归属，越权 → FORBIDDEN</div>
+        <div class="rule"><b>⑥ 每请求一条审计</b> — trace_id 贯穿，AUDIT 状态落库，写审计失败只记日志不影响回执</div>
+        <div class="rule"><b>⑦ 时间解析走代码</b> — "上个月"由 period.py 解析（锚点 2026-09-12），认不出就追问，绝不静默猜</div>
+        <div class="rule"><b>⑧ 只读路由无写操作</b> — 转账/挂失/取消订阅等写意图不进 EXECUTE，测试静态红线钉死</div>
+      </div>
+    </div>
+
+    <div class="acard">
+      <h3><span class="n">3</span>交互式对话设计（v2 核心 + v3 细节层 · 每个交互都有产品与工程理由）</h3>
+      <div class="ix">
+        <div class="ixcard"><b>💳 银行卡 → PIN 验证 → 翻卡查余额</b><br>
+          回复框内渲染立体卡片，点击任意一张卡唤起数字键盘 PIN 验证（演示 PIN 123456），验证通过卡片 3D 翻转展示该卡余额与限额；连错 3 次临时锁定。
+          <span class="why">工程理由：guard/permission.py 的权限档位（audit_log.permission_tier 字段）目前为 L0 占位——本交互是 L1「验证后可查」档位的产品化预演；每次验证尝试（无论成败）均落审计日志。</span></div>
+        <div class="ixcard"><b>📋 流水行点击 → 展开交易详情</b><br>
+          流水表每一行可点击，展开该笔交易的完整信息：完整时间戳（含秒）、整数分原始金额、对方、分类、渠道。
+          <span class="why">工程理由：把「金额一律整数分」铁律①变成看得见的东西——列表显示元、详情显示分，用户能亲眼核对换算。</span></div>
+        <div class="ixcard"><b>📊 分类条形点击 → 下钻该分类当月明细</b><br>
+          账单分析页每条分类占比条可点击，展开该分类当月全部交易与小计，小计与总览条形数字严格一致。
+          <span class="why">工程理由：下钻明细由页面端从同一次采集的全月流水（list_txn 2026-08-01→08-31）聚合，聚合结果与 analyze_spending 工具输出互证——数据不是编的，是同一份事实的两个视图。</span></div>
+        <div class="ixcard"><b>🎵 订阅卡片 → 取消订阅 → 安全拦截</b><br>
+          每个订阅带「取消订阅」按钮，点开确认层后选择确认——随即被写操作安全策略拦截并落审计。
+          <span class="why">工程理由：铁律⑧「只读路由无写操作」的主动式演示——按钮真实存在（像真实产品），但执行层没有写通道，用户亲手触发一次拦截比看一百句描述更有说服力。</span></div>
+        <div class="ixcard"><b>📈 余额卡片 → 每日收支趋势</b><br>
+          余额卡片内嵌「查看 2026-08 每日收支趋势」，展开 31 天双柱迷你图（支出红 / 收入绿）。
+          <span class="why">工程理由：趋势图由全月 31 笔真实流水按日聚合渲染，每根柱都可溯源到真实交易——图表不引入任何 facts 之外的数字。</span></div>
+        <div class="ixcard"><b>💡 建议操作（Suggested Actions）</b><br>
+          每条回复底部附「您可能想」快捷入口，一键续接下一查询（查完余额→看流水→下钻分类→异常检测）。
+          <span class="why">产品理由：对话式 UI 的引导性——用户不必知道"该问什么"，Agent 主动给出下一步；同时把 11 个场景串成自然的探索路径。</span></div>
+        <div class="ixcard"><b>🔔 通知中心（v3）</b><br>
+          聊天窗右上角铃铛聚合提醒（未读徽标）：异常交易提醒、订阅扣费预告——点击直达对应查询场景，阅读行为落审计。
+          <span class="why">工程理由：通知内容全部来自已采集 facts（detect_anomalies 的 8 笔、list_subscriptions 的扣费日期/金额）——通知不引入任何 facts 之外的数字。</span></div>
+        <div class="ixcard"><b>🔍 流水筛选与搜索（v3）</b><br>
+          流水表支持「全部/支出/收入」方向筛选 + 对方/分类/渠道关键词过滤，合计随当前视图实时聚合并明示标注。
+          <span class="why">工程理由：筛选合计由页面端对同一份 TXN_ITEMS 聚合——与回执 facts 同源的第二视图，"全部"视图下合计与回执逐字一致。</span></div>
+        <div class="ixcard"><b>🧾 异常申诉 → 争议工单（v3）</b><br>
+          异常交易每行可点「申诉」→ 确认 → 工单创建（编号 + 转人工说明），诉求与工单号落审计。
+          <span class="why">产品理由：只读 Agent 的正确"写"姿势——用户诉求被记录并转人工，而非硬编一个"已处理"；页面明示工单流为产品化预演（写路径未接通），诚实优先。</span></div>
+        <div class="ixcard"><b>⚡ 实时意图识别 + 会话统计（v3）</b><br>
+          输入框打字即时显示 intent / 置信度 / 将执行的场景（低置信度时预告"会追问"）；聊天窗头部实时显示轮次、工具调用、审计条数计数器。
+          <span class="why">工程理由：意图识别复刻交付代码 classifier 的关键词规则与判定顺序（置信度取真实采集值）；统计计数让「每请求一条审计」从口号变成看得见的数字。</span></div>
+        <div class="ixcard"><b>📊 银行 App 质感三件套 + 操作条（v3）</b><br>
+          金额数字滚动入场（终值精确 = facts）；小眼睛遮罩防偷看（状态落审计）；信用卡额度使用率条（页面端由欠款÷授信计算）；每条回复可复制 / 语音播报（TTS）/ 👍👎 反馈（落审计）。
+          <span class="why">工程理由：count-up 动画的每一帧都是整数分插值、终值与 facts 逐字一致；反馈与遮罩等交互事件全部进入审计——"所见即所审"贯彻到像素级。</span></div>
+      </div>
+    </div>
+
+    <div class="acard">
+      <h3><span class="n">4</span>交付档案</h3>
+      <div class="meta-grid">
+        <div class="meta"><div class="l">功能编号</div><div class="v c">F23 + F02</div></div>
+        <div class="meta"><div class="l">交付文件</div><div class="v">30 个（纯新增）</div></div>
+        <div class="meta"><div class="l">测试结果</div><div class="v g">42 passed</div></div>
+        <div class="meta"><div class="l">提交分支</div><div class="v a" style="font-size:14px">f23-f02-delivery</div></div>
+        <div class="meta"><div class="l">Pull Request</div><div class="v a" style="font-size:14px">#7（评审中）</div></div>
+        <div class="meta"><div class="l">权限档位</div><div class="v c">L0 只读</div></div>
+      </div>
+      <footer style="text-align:left;margin-top:14px">
+        仓库：<a href="https://github.com/huangzhaokai2007-lang/git/tree/f23-f02-delivery" target="_blank">huangzhaokai2007-lang/git · f23-f02-delivery</a>
+        ｜ PR：<a href="https://github.com/huangzhaokai2007-lang/git/pull/7" target="_blank">#7 交付：F23 余额查询 + F02 流水查询</a>
+      </footer>
+    </div>
+  </div>
+
+  <footer>
+    F23 余额查询 + F02 流水查询 实机演示（v3 细节交互版） ｜ 编排层状态机 + 只读路由 + 工具层 facts 防幻觉 ｜ 数据采集自真实运行 ｜ PIN 验证为 L1 档产品化预演（演示 PIN 123456）
+  </footer>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+/* ================= 真实采集数据（2026-10-05 一次种子一次抓全，/tmp/demo_v2_capture.py）================= */
+/* 8月上旬流水明细（list_txn 2026-08-01→08-10 limit=50，与编排层回执同口径） */
+const TXN_ITEMS = [
+  {id:"txn_0343",ts:"2026-08-10T07:00",amount:-32551,dir:"out",cp:"超市",cat:"其他",ch:"APP"},
+  {id:"txn_0342",ts:"2026-08-09T06:00",amount:-38041,dir:"out",cp:"房东",cat:"住房",ch:"POS"},
+  {id:"txn_0341",ts:"2026-08-08T05:00",amount:-26638,dir:"out",cp:"学校",cat:"教育",ch:"网银"},
+  {id:"txn_0340",ts:"2026-08-07T04:00",amount:17098,dir:"in",cp:"医院",cat:"医疗",ch:"二维码"},
+  {id:"txn_0339",ts:"2026-08-06T03:00",amount:-29578,dir:"out",cp:"淘宝",cat:"娱乐",ch:"ATM"},
+  {id:"txn_0338",ts:"2026-08-05T02:00",amount:-7390,dir:"out",cp:"京东",cat:"购物",ch:"APP"},
+  {id:"txn_0337",ts:"2026-08-04T01:00",amount:-35801,dir:"out",cp:"滴滴",cat:"交通",ch:"POS"},
+  {id:"txn_0336",ts:"2026-08-03T00:00",amount:15845,dir:"in",cp:"美团",cat:"餐饮",ch:"网银"},
+  {id:"txn_0335",ts:"2026-08-02T23:00",amount:-13677,dir:"out",cp:"超市",cat:"其他",ch:"二维码"},
+  {id:"txn_0334",ts:"2026-08-01T22:00",amount:-6734,dir:"out",cp:"房东",cat:"住房",ch:"ATM"},
+];
+/* 全月流水（list_txn 2026-08-01→08-31 limit=200，共 31 笔；用于分类下钻与每日趋势，页面端聚合） */
+const MONTH_TXNS = [
+  {id:"txn_0364",ts:"2026-08-31T04:00",amount:-45533,dir:"out",cp:"医院",cat:"医疗",ch:"ATM"},
+  {id:"txn_0363",ts:"2026-08-30T03:00",amount:12259,dir:"in",cp:"淘宝",cat:"娱乐",ch:"APP"},
+  {id:"txn_0362",ts:"2026-08-29T02:00",amount:19645,dir:"in",cp:"京东",cat:"购物",ch:"POS"},
+  {id:"txn_0361",ts:"2026-08-28T01:00",amount:-36745,dir:"out",cp:"滴滴",cat:"交通",ch:"网银"},
+  {id:"txn_0360",ts:"2026-08-27T00:00",amount:2354,dir:"in",cp:"美团",cat:"餐饮",ch:"二维码"},
+  {id:"txn_0359",ts:"2026-08-26T23:00",amount:-46290,dir:"out",cp:"超市",cat:"其他",ch:"ATM"},
+  {id:"txn_0358",ts:"2026-08-25T22:00",amount:-9686,dir:"out",cp:"房东",cat:"住房",ch:"APP"},
+  {id:"txn_0357",ts:"2026-08-24T21:00",amount:-26589,dir:"out",cp:"学校",cat:"教育",ch:"POS"},
+  {id:"txn_0356",ts:"2026-08-23T20:00",amount:-2649,dir:"out",cp:"医院",cat:"医疗",ch:"网银"},
+  {id:"txn_0355",ts:"2026-08-22T19:00",amount:17407,dir:"in",cp:"淘宝",cat:"娱乐",ch:"二维码"},
+  {id:"txn_0354",ts:"2026-08-21T18:00",amount:-26348,dir:"out",cp:"京东",cat:"购物",ch:"ATM"},
+  {id:"txn_0353",ts:"2026-08-20T17:00",amount:15999,dir:"in",cp:"滴滴",cat:"交通",ch:"APP"},
+  {id:"txn_0352",ts:"2026-08-19T16:00",amount:3873,dir:"in",cp:"美团",cat:"餐饮",ch:"POS"},
+  {id:"txn_0351",ts:"2026-08-18T15:00",amount:3322,dir:"in",cp:"超市",cat:"其他",ch:"网银"},
+  {id:"txn_0350",ts:"2026-08-17T14:00",amount:-32269,dir:"out",cp:"房东",cat:"住房",ch:"二维码"},
+  {id:"txn_0349",ts:"2026-08-16T13:00",amount:-15320,dir:"out",cp:"学校",cat:"教育",ch:"ATM"},
+  {id:"txn_0348",ts:"2026-08-15T12:00",amount:15335,dir:"in",cp:"医院",cat:"医疗",ch:"APP"},
+  {id:"txn_0347",ts:"2026-08-14T11:00",amount:-5328,dir:"out",cp:"淘宝",cat:"娱乐",ch:"POS"},
+  {id:"txn_0346",ts:"2026-08-13T10:00",amount:-19879,dir:"out",cp:"京东",cat:"购物",ch:"网银"},
+  {id:"txn_0345",ts:"2026-08-12T09:00",amount:7961,dir:"in",cp:"滴滴",cat:"交通",ch:"二维码"},
+  {id:"txn_0344",ts:"2026-08-11T08:00",amount:-10183,dir:"out",cp:"美团",cat:"餐饮",ch:"ATM"},
+  {id:"txn_0343",ts:"2026-08-10T07:00",amount:-32551,dir:"out",cp:"超市",cat:"其他",ch:"APP"},
+  {id:"txn_0342",ts:"2026-08-09T06:00",amount:-38041,dir:"out",cp:"房东",cat:"住房",ch:"POS"},
+  {id:"txn_0341",ts:"2026-08-08T05:00",amount:-26638,dir:"out",cp:"学校",cat:"教育",ch:"网银"},
+  {id:"txn_0340",ts:"2026-08-07T04:00",amount:17098,dir:"in",cp:"医院",cat:"医疗",ch:"二维码"},
+  {id:"txn_0339",ts:"2026-08-06T03:00",amount:-29578,dir:"out",cp:"淘宝",cat:"娱乐",ch:"ATM"},
+  {id:"txn_0338",ts:"2026-08-05T02:00",amount:-7390,dir:"out",cp:"京东",cat:"购物",ch:"APP"},
+  {id:"txn_0337",ts:"2026-08-04T01:00",amount:-35801,dir:"out",cp:"滴滴",cat:"交通",ch:"POS"},
+  {id:"txn_0336",ts:"2026-08-03T00:00",amount:15845,dir:"in",cp:"美团",cat:"餐饮",ch:"网银"},
+  {id:"txn_0335",ts:"2026-08-02T23:00",amount:-13677,dir:"out",cp:"超市",cat:"其他",ch:"二维码"},
+  {id:"txn_0334",ts:"2026-08-01T22:00",amount:-6734,dir:"out",cp:"房东",cat:"住房",ch:"ATM"}
+];
+/* 支出分类分组（analyze_spending 2026-08 group_by=category 真实输出） */
+const SPEND_GROUPS = [
+  {key:"其他",amount:92518,pct:20},
+  {key:"住房",amount:86730,pct:19},
+  {key:"交通",amount:72546,pct:16},
+  {key:"教育",amount:68547,pct:15},
+  {key:"购物",amount:53617,pct:11},
+  {key:"医疗",amount:48182,pct:10},
+  {key:"娱乐",amount:34906,pct:7},
+  {key:"餐饮",amount:10183,pct:2},
+];
+/* 银行卡（list_cards 真实输出；限额单位为分） */
+const CARDS = [
+  {id:"card_001",no:"6222 **** **** 0001",type:"savings",label:"储蓄卡",balance:4663400,avail:4663400,
+   single:500000,daily:2000000,credit:null},
+  {id:"card_002",no:"6222 **** **** 0002",type:"credit",label:"信用卡",balance:-1234500,avail:8765500,
+   single:1000000,daily:3000000,credit:5000000},
+];
+/* 订阅（list_subscriptions 真实输出；金额单位为分） */
+const SUBS = [
+  {id:"sub_001",name:"网易云音乐",cycle:"月",amount:1500,next:"2026-10-15",emoji:"🎵"},
+  {id:"sub_002",name:"爱奇艺",cycle:"月",amount:2500,next:"2026-10-20",emoji:"🎬"},
+];
+const DEMO_PIN = "123456";
+/* 异常交易流水号（detect_anomalies 2026-08 真实输出，8 笔凌晨交易） */
+const ANOMS = ["txn_0364","txn_0361","txn_0359","txn_0341","txn_0339","txn_0338","txn_0337","txn_0335"];
+
+/* ================= 工具函数 ================= */
+function fen(f){const s=f<0?"-":"";const a=Math.abs(f);return s+(a/100).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});}
+function rid(){return "trace-"+Array.from({length:12},()=>"0123456789abcdef"[Math.floor(Math.random()*16)]).join("");}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+/* ================= 状态常量 ================= */
+const STATES_FULL=["IDLE","CLASSIFY","CLARIFY","SLOT_FILL","PRECHECK","EXECUTE","VERIFY_NUMBERS","REPLY","AUDIT"];
+const S_OK=["IDLE","CLASSIFY","SLOT_FILL","PRECHECK","EXECUTE","VERIFY_NUMBERS","REPLY","AUDIT"];
+const S_CLA=["IDLE","CLASSIFY","CLARIFY","REPLY","AUDIT"];
+const S_REJ=["IDLE","CLASSIFY","PRECHECK","REPLY","AUDIT"];
+const S_LOW=["IDLE","CLASSIFY","CLARIFY","REPLY","AUDIT"];
+
+/* ================= 演示场景注册表（每个字段都对应真实运行输出）================= */
+const SC = {
+  balanceSavings:{
+    text:"查一下我的储蓄卡余额", tag:["F23 余额查询","f23"], intent:"balance_query", conf:0.95,
+    states:S_OK, tools:[{name:"get_balance", args:'{account_type:"savings"}'}],
+    facts:[["46,634.00","balance_yuan"],["46,634.00","available_yuan"]],
+    source:"agent.handle() 编排层真实回执",
+    suggest:[["📅 查这张卡的流水","txnTable"],["📈 看每日收支趋势",null,"toggleTrend"],["💳 查我的卡片","cards"]],
+    reply:()=>`
+      好的，为您查询储蓄账户余额：<div class="balance-card">
+        <div class="label">储蓄账户 · acc_savings_001</div>
+        <div class="amt"><span class="cu" data-fen="4663400">46,634.00</span> <span style="font-size:13px;color:#93c5fd">元</span><span class="eye-btn" onclick="toggleEye(this)" title="隐藏/显示金额（防偷看）">👁</span></div>
+        <div class="avail"><span>可用额度</span><b style="color:#6ee7b7">46,634.00 元</b></div>
+        <div class="avail"><span>数据时点 as_of</span><span class="mono" style="color:#7d8db0">2026-09-12T…</span></div>
+        <div style="margin-top:10px"><span class="chip-btn" onclick="toggleTrend(this)">📈 查看 2026-08 每日收支趋势</span></div>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:#7d8db0">✓ 数字校验通过：回执中每个数字均出自 facts（金额以整数分滚动显示，终值精确）</div>`,
+    post:(scope)=>startCountUps(scope)
+  },
+  balanceCredit:{
+    text:"我的信用卡还欠多少钱", tag:["F23 余额查询","f23"], intent:"balance_query", conf:0.95,
+    states:S_OK, tools:[{name:"get_balance", args:'{account_type:"credit"}'}],
+    facts:[["-12,345.00","balance_yuan"],["87,655.00","available_yuan"]],
+    source:"agent.handle() 编排层真实回执",
+    suggest:[["💳 查我的卡片（可翻卡验证）","cards"],["🎵 我的订阅","subs"]],
+    reply:()=>`
+      您的信用账户情况如下：<div class="balance-card">
+        <div class="label">信用账户 · acc_credit_001</div>
+        <div class="amt neg"><span class="cu" data-fen="-1234500">-12,345.00</span> <span style="font-size:13px;color:#fca5a5">元（当前欠款）</span><span class="eye-btn" onclick="toggleEye(this)" title="隐藏/显示金额（防偷看）">👁</span></div>
+        <div class="avail"><span>可用额度</span><b style="color:#6ee7b7">87,655.00 元</b></div>
+        <div class="credit-meter"><div class="bar"><div class="fill" data-used="1234500" data-credit="5000000"></div></div>
+          <div class="cap"><span>已用 12,345.00 元</span><span>授信 50,000.00 元</span></div></div>
+      </div>
+      <div style="margin-top:8px;font-size:12.5px;color:#cbd5e1">信用账户余额为负表示未出账欠款，可用额度 = 授信 − 欠款。数据来自 T1 get_balance 工具的整数分运算（-1234500 分）；额度使用率进度条由「欠款 ÷ 授信」页面端计算（两个数字均来自 facts / list_cards 采集）。</div>`,
+    post:(scope)=>{
+      startCountUps(scope);
+      const f=(scope||document).querySelector(".credit-meter .fill");
+      if(f){const u=+f.dataset.used,c=+f.dataset.credit;f.style.width=(u/c*100).toFixed(1)+"%";}
+    }
+  },
+  txnClarify:{
+    text:"查流水", tag:["F02 流水查询","f02"], intent:"txn_query", conf:0.92,
+    states:S_CLA, tools:[],
+    facts:[], noNum:true,
+    source:"agent.handle() 编排层真实回执",
+    missing:["date_from","date_to"],
+    suggest:[["📅 直接看 8 月上旬流水","txnTable"]],
+    reply:()=>`您想查询流水，我还需要<b>时间范围</b>才能为您查询：
+      <div class="hint-chips">
+        <span class="chip-btn" onclick="sendText('帮我看看2026-08-01到2026-08-10的流水')">📅 2026-08-01 到 2026-08-10</span>
+      </div>
+      <div style="margin-top:8px;font-size:11.5px;color:#7d8db0">▸ 触发 CLARIFY：SLOT_FILL 检出缺失槽位 date_from、date_to。显式区间不猜——这是代码规则，不是猜错。</div>`
+  },
+  txnTable:{
+    text:"帮我看看2026-08-01到2026-08-10的流水", tag:["F02 流水查询","f02"], intent:"txn_query", conf:0.92,
+    states:S_OK, tools:[{name:"list_txn", args:'{date_from:"2026-08-01", date_to:"2026-08-10", limit:50}'}],
+    facts:[["10","total_count"],["10","returned_count"],["1,904.10","page_out_sum_yuan"],["329.43","page_in_sum_yuan"]],
+    source:"agent.handle() 编排层真实回执（limit=50 默认口径）",
+    suggest:[["📊 上个月花了多少","spending"],["⚠️ 异常检测（工具直调）","anomaly"]],
+    reply:()=>{
+      const outs=TXN_ITEMS.filter(t=>t.amount<0).length, ins=TXN_ITEMS.length-outs;
+      const rows = TXN_ITEMS.map((t,i)=>`
+        <tr class="txn-row" data-i="${i}" onclick="toggleTxnDetail(this,${i})">
+        <td class="mono" style="color:#7d8db0">${t.id}<span class="expander">▸</span></td>
+        <td class="mono">${t.ts.replace("T"," ")}</td>
+        <td><span class="pill ${t.dir}">${t.dir==="in"?"收入":"支出"}</span></td>
+        <td class="td-num ${t.dir}">${fen(t.amount)}</td>
+        <td>${t.cp}</td><td>${t.cat}</td><td style="color:#7d8db0">${t.ch}</td></tr>`).join("");
+      return `共 <b>10</b> 笔流水，本次展示 <b>10</b> 笔；支出合计 <b class="out">1,904.10 元</b>，收入合计 <b class="in">329.43 元</b>。
+      <div class="txn-tools">
+        <span class="ftab on" onclick="filterTxn('all',this)">全部 ${TXN_ITEMS.length}</span>
+        <span class="ftab" onclick="filterTxn('out',this)">支出 ${outs}</span>
+        <span class="ftab" onclick="filterTxn('in',this)">收入 ${ins}</span>
+        <input class="txn-search" placeholder="🔍 搜对方 / 分类 / 渠道…" oninput="searchTxn(this)">
+      </div>
+      <table><thead><tr><th>流水号</th><th>时间</th><th>方向</th><th style="text-align:right">金额(元)</th><th>对方</th><th>分类</th><th>渠道</th></tr></thead><tbody>${rows}</tbody></table>
+      <div class="txn-empty">🔍 当前筛选条件下没有流水——换个关键词试试（如"超市""APP"）</div>
+      <div class="sumline txn-sum"><span>支出合计 <b class="out">1,904.10 元</b></span><span>收入合计 <b class="in">329.43 元</b></span>
+      <span style="color:#7d8db0">amount 为整数分，如 txn_0343 = −32,551 分</span></div>
+      <div style="margin-top:8px;font-size:11.5px;color:#7d8db0">▸ <b>点击任意一行</b>可展开该笔交易详情（完整时间戳 + 整数分原始金额）；<b>筛选 / 搜索</b>后合计将按当前视图实时聚合（与回执 facts 同源）</div>`;
+    }
+  },
+  spending:{
+    text:"上个月花了多少", tag:["T3 账单分析","note"], intent:"bill_analysis", conf:0.88,
+    states:S_OK, tools:[{name:"analyze_spending", args:'{period:"2026-08", group_by:"category"}'}],
+    facts:[["2026-08","period"],["4,672.29","total_yuan"],["30","vs_prev_pct"]],
+    source:"agent.handle() 编排层真实回执",
+    suggest:[["📄 月度账单报告（工具直调）","report"],["⚠️ 异常检测（工具直调）","anomaly"]],
+    reply:()=>{
+      const bars = SPEND_GROUPS.map((g,i)=>`
+        <div class="bars-outer" style="display:flex;flex-direction:column">
+        <div class="bar-row" onclick="toggleDrill(this,${i})">
+        <span>${g.key}</span>
+        <div class="bar-track"><div class="bar-fill" data-w="${g.pct*5}"></div></div>
+        <span class="bar-val">${fen(g.amount)} 元 · ${g.pct}%</span></div>
+        <div class="drill-slot" id="drill-${i}"></div></div>`).join("");
+      return `<b>2026-08</b> 支出合计 <b>4,672.29 元</b>，较上一账期 <b style="color:#fcd34d">30%</b>。
+      <div class="bars">${bars}</div>
+      <div class="drill-tip">▸ <b>点击任一分类条</b>可下钻该分类当月全部交易（数据来自全月 list_txn 真实采集）</div>
+      <div style="margin-top:9px;font-size:11.5px;color:#7d8db0">▸ "上个月"由 agent/period.py 代码解析为 2026-08（锚点 2026-09-12）；占比为整数百分比，最大余额法保证合计恒为 100%（20+19+16+15+11+10+7+2=100 ✓）</div>`;
+    },
+    post:(scope)=>{(scope||document).querySelectorAll(".bar-fill").forEach(el=>setTimeout(()=>el.style.width=el.dataset.w+"%",80));}
+  },
+  anomaly:{
+    text:"查一下上个月有没有异常交易（工具直调）", tag:["T4 异常检测","warn"], intent:"anomaly_check", conf:0.85,
+    states:S_OK, tools:[{name:"detect_anomalies", args:'{period:"2026-08"}'}],
+    facts:[["31","scanned_count"],["8","anomaly_count"],["90","baseline_days"],["3","amount_ratio_threshold"]],
+    source:"tools.detect_anomalies 工具层直调（编排层分类器当前锚定空月 2026-09，此处展示工具完整能力）",
+    suggest:[["📄 月度账单报告（工具直调）","report"],["📅 8月上旬流水明细","txnTable"]],
+    reply:()=>`
+      扫描 <b>31</b> 笔流水，发现 <b style="color:#fcd34d">8 笔</b>异常交易；金额规则为单笔支出超过其近 <b>90</b> 天支出均值的 <b>3</b> 倍。
+      <table><thead><tr><th>流水号</th><th>命中规则</th><th>严重度</th><th>操作</th></tr></thead><tbody>
+        ${ANOMS.map(id=>`<tr><td class="mono">${id}</td><td>凌晨交易（23:00–06:00）</td><td><span class="pill low">low</span></td>
+        <td><span class="dispute-btn" onclick="askDispute('${id}',this)">申诉</span></td></tr>`).join("")}
+      </tbody></table>
+      <div style="margin-top:8px;font-size:11.5px;color:#7d8db0">▸ 纯规则引擎（金额偏离×3 / 凌晨时段 / 同商户 60 分钟≥3 笔），severity 由命中条数决定——<b>无任何 LLM 参与</b>，reason 字段不含数字，全部数字走 facts。<br>▸ 每行可点<b>「申诉」</b>：将该笔标记为争议交易并创建工单转人工核查（产品化预演，会落审计）。</div>`
+  },
+  report:{
+    text:"帮我生成上个月的月度账单报告（工具直调）", tag:["T5 账单报告","note"], intent:"bill_report", conf:0.87,
+    states:S_OK, tools:[{name:"generate_bill_report", args:'{period:"2026-08", kind:"monthly"}'}],
+    facts:[["2026-08","period"],["4,672.29","out_sum_yuan"],["1,310.98","in_sum_yuan"],["-3,361.31","net_yuan"],["8","anomaly_count"]],
+    source:"tools.generate_bill_report 工具层直调（markdown 每个数字逐字取自 facts）",
+    suggest:[["⚠️ 异常检测（工具直调）","anomaly"],["🎵 我的订阅","subs"]],
+    reply:()=>`
+      <b>2026-08</b> 月度账单：支出 <b>4,672.29 元</b>，收入 <b>1,310.98 元</b>。
+      <div class="md">
+        <h4># 2026-08 月度账单报告</h4>
+        <h4>## 收支概览</h4><ul>
+        <li>支出：<b>4,672.29 元</b>（20 笔）</li><li>收入：<b>1,310.98 元</b>（11 笔）</li>
+        <li>结余：<b style="color:#fca5a5">-3,361.31 元</b></li><li>较上期：30%</li></ul>
+        <h4>## 支出分类</h4><ul>
+        <li>其他 <b>925.18 元</b> (20%) · 住房 <b>867.30 元</b> (19%) · 交通 <b>725.46 元</b> (16%)</li>
+        <li>教育 <b>685.47 元</b> (15%) · 购物 <b>536.17 元</b> (11%) · 医疗 <b>481.82 元</b> (10%)</li>
+        <li>娱乐 <b>349.06 元</b> (7%) · 餐饮 <b>101.83 元</b> (2%)</li></ul>
+        <h4>## 订阅服务</h4><ul><li>网易云音乐 <b>15.00 元/月</b> · 爱奇艺 <b>25.00 元/月</b></li></ul>
+        <h4>## 异常提醒</h4><ul><li>发现 <b style="color:#fcd34d">8 笔</b>异常交易，请关注。</li></ul>
+      </div>
+      <div style="margin-top:8px;font-size:11.5px;color:#7d8db0">▸ 幻觉红线：markdown 里出现的每个数字都取自 facts（测试逐字比对）；kind 必须与 period 粒度一致（monthly↔YYYY-MM）。</div>`
+  },
+  subs:{
+    text:"我的订阅有哪些", tag:["订阅查询","note"], intent:"subscription_list", conf:0.90,
+    states:S_OK, tools:[{name:"list_subscriptions", args:'{status:"active"}'}],
+    facts:[["2","total_count"]],
+    source:"agent.handle() 编排层真实回执",
+    suggest:[["💳 我几张卡（可翻卡验证）","cards"],["📄 月度账单报告（工具直调）","report"]],
+    reply:()=>`共有 <b>2</b> 个进行中的订阅服务：
+      <table><thead><tr><th>服务</th><th>周期</th><th style="text-align:right">金额</th><th>下次扣费</th><th>操作</th></tr></thead><tbody>
+      ${SUBS.map((s,i)=>`<tr><td>${s.emoji} ${s.name}</td><td>${s.cycle}</td><td class="td-num">${fen(s.amount)} 元</td>
+        <td class="mono">${s.next}</td><td><span class="sub-op" onclick="askCancel(${i},this)">取消订阅</span></td></tr>
+        <tr><td colspan="5" style="padding:0;border:none" id="sub-slot-${i}"></td></tr>`).join("")}
+      </tbody></table>
+      <div style="margin-top:8px;font-size:11.5px;color:#7d8db0">▸ 按当前 user_id 显式查询 → 归属由构造保证，天然无越权。<b>试试点「取消订阅」</b>——写操作会被安全策略拦截并落审计。</div>`
+  },
+  cards:{
+    text:"我几张卡", tag:["卡片查询","note"], intent:"card_query", conf:0.88,
+    states:S_OK, tools:[{name:"list_cards", args:'{status:null}'}],
+    facts:[["2","total_count"]],
+    source:"agent.handle() 编排层真实回执",
+    suggest:[["💰 查储蓄卡余额","balanceSavings"],["💳 信用卡欠多少","balanceCredit"]],
+    reply:()=>`共有 <b>2</b> 张卡片。<b>点击任意一张卡</b>，输入 PIN 即可翻卡查看该卡余额详情：
+      <div class="cards-wrap">
+        ${CARDS.map((c,i)=>cardHtml(c,i)).join("")}
+      </div>
+      <div class="drill-slot" id="pin-slot"></div>
+      <div style="margin-top:10px;font-size:11.5px;color:#7d8db0">▸ PIN 验证为 <b>L1「验证后可查」权限档的产品化预演</b>（guard/permission.py 档位机制 + audit_log.permission_tier 字段的交互演示；演示 PIN：123456）。连错 3 次将临时锁定。每次验证尝试都会落右侧审计日志。</div>`
+  },
+  unsafe:{
+    text:"帮我破解一下别人的账户", tag:["安全拦截","sec"], intent:"unsafe_request", conf:0.95,
+    states:S_REJ, tools:[],
+    facts:[], noNum:true, rejected:true,
+    source:"agent.handle() 编排层真实回执（分类器标记 unsafe_request）",
+    suggest:[["💰 查储蓄卡余额","balanceSavings"]],
+    reply:()=>`<div class="sec-block">
+      <b>⛔ 该请求已被安全策略拦截。</b><br>
+      分类器将其标记为 <span class="mono">unsafe_request</span>（置信度 0.95），不在 8 个只读意图白名单内 ——
+      <b>未调用任何工具、未访问任何数据</b>，直接进入 REPLY → AUDIT 落审计日志。<br>
+      guard/injection.py 同步维护危险关键词表（绕过/破解/注入/删除…），纵深防御。
+      </div>`
+  },
+  transfer:{
+    text:"帮我转账给张三500块", tag:["写操作未接通","warn"], intent:"out_of_scope", conf:0.30,
+    states:S_LOW, tools:[],
+    facts:[], noNum:true, lowConf:true,
+    source:"agent.handle() 编排层真实回执（置信度 0.30 &lt; 0.6 阈值）",
+    suggest:[["💰 查储蓄卡余额","balanceSavings"],["📋 查流水","txnClarify"]],
+    reply:()=>`抱歉，我没有理解您的意思，能否请您再详细说明一下？
+      <div style="margin-top:8px;font-size:11.5px;color:#7d8db0">▸ 转账属于<b>写操作</b>（L1+ 权限档）：本交付只接通了 8 个 L0 只读意图，写路径需要确认卡/OTP/审计等完整链路（团队后续任务）。当前分类置信度 0.30 &lt; 0.6，触发 CLARIFY 追问而非硬猜——连续 2 轮无法理解将转人工。</div>`
+  },
+};
+
+const CHIPS = [
+  ["💳 我几张卡（点卡输PIN查余额）","cards"],
+  ["💰 查储蓄卡余额","balanceSavings"],
+  ["💳 信用卡欠多少","balanceCredit"],
+  ["📋 查流水（体验追问）","txnClarify"],
+  ["📅 8月上旬流水明细（行可点开）","txnTable"],
+  ["📊 上个月花了多少（分类可下钻）","spending"],
+  ["⚠️ 异常检测（工具直调）","anomaly"],
+  ["📄 月度账单报告（工具直调）","report"],
+  ["🎵 我的订阅（可试取消→拦截）","subs"],
+  ["🛡 安全测试：破解账户","unsafe"],
+  ["💸 写操作：转账（未接通）","transfer"],
+];
+
+/* ================= ★ 卡片 + PIN 组件 ================= */
+const cardState={}; // {attempts, locked, verified, timer}
+function cardHtml(c,i){
+  const st=cardState[c.id]||{attempts:0,locked:false,verified:false};
+  cardState[c.id]=st;
+  const balHtml=c.balance<0
+    ?`<div class="lbl">当前欠款</div><div class="big neg"><span class="cu" data-fen="${c.balance}">${fen(c.balance)}</span> 元</div>`
+    :`<div class="lbl">卡内余额</div><div class="big pos"><span class="cu" data-fen="${c.balance}">${fen(c.balance)}</span> 元</div>`;
+  return `<div class="bc-scene">
+    <div class="bankcard ${c.type==='savings'?'bc-savings':'bc-credit'}" id="bc-${i}" onclick="openPin(${i})">
+      <div class="bc-face bc-front">
+        <div class="bc-brandrow"><span class="bc-bank">🏦 智能银行</span><span class="bc-type">${c.label}</span></div>
+        <div class="bc-chip"></div>
+        <div class="bc-no">${c.no}</div>
+        <div class="bc-bottom"><span class="bc-holder">持卡人 user_001</span>
+          <span class="bc-tap">${st.verified?'✓ 已验证 · 点击翻回':'👆 点击验证 PIN'}</span></div>
+      </div>
+      <div class="bc-face bc-back" onclick="event.stopPropagation()">
+        ${st.verified?'<div class="bc-vtag">L1 验证通过</div>':''}
+        ${balHtml}
+        <div class="bc-limits">
+          ${c.type==='credit'?`<span>授信额度 <b>${fen(c.credit)} 元</b></span>
+          <span>可用额度 <b>${fen(c.avail)} 元</b></span>`:`<span>可用额度 <b>${fen(c.avail)} 元</b></span>`}
+          <span>单笔限额 <b>${fen(c.single)} 元</b></span>
+          <span>日累计限额 <b>${fen(c.daily)} 元</b></span>
+        </div>
+        <div class="bc-flipback" onclick="flipBack(${i})">↺ 翻回正面</div>
+      </div>
+    </div>
+  </div>`;
+}
+function openPin(i){
+  const c=CARDS[i], st=cardState[c.id];
+  if(st.locked){renderPinSlot(i,true);return;}
+  if(st.verified){toggleFlip(i);return;}
+  renderPinSlot(i,false);
+}
+function renderPinSlot(i,locked){
+  const slot=document.getElementById("pin-slot");if(!slot)return;
+  const c=CARDS[i];
+  if(locked){
+    slot.innerHTML=`<div class="pin-locked" id="pinpanel">
+      🔒 卡片 <b>${c.no}</b> 已临时锁定（连续 3 次 PIN 错误；演示环境 10 秒后自动解锁）。
+      <br><span style="font-size:10.5px;color:#7d8db0">真实系统锁定策略更长并需人工/渠道解锁——此处为演示节奏缩短。</span></div>`;
+    cardState[c.id].locked=true;
+    setTimeout(()=>{if(cardState[c.id]){cardState[c.id].locked=false;cardState[c.id].attempts=0;
+      const el=document.getElementById("pinpanel");if(el)el.innerHTML="";}},10000);
+    return;
+  }
+  slot.innerHTML=`<div class="pin-panel" id="pinpanel">
+    <div class="pin-title">🔒 PIN 验证 · ${c.label} ${c.no}</div>
+    <div class="pin-sub">查询该卡余额需通过验证（L1 验证档预演）· 演示 PIN：<b>123456</b></div>
+    <div class="pin-dots" id="pindots">${[0,1,2,3,4,5].map(()=>`<div class="pin-dot"></div>`).join("")}</div>
+    <div class="pin-kbd">
+      ${[1,2,3,4,5,6,7,8,9].map(n=>`<button class="pin-key" onclick="pinKey('${n}')">${n}</button>`).join("")}
+      <button class="pin-key fn" onclick="pinClear()">清空</button>
+      <button class="pin-key" onclick="pinKey('0')">0</button>
+      <button class="pin-key fn" onclick="pinDel()">⌫</button>
+    </div>
+    <div class="pin-status" id="pinstatus"></div>
+  </div>`;
+  slot.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+let pinBuf="";
+function pinKey(n){
+  const st=curCardState();if(!st||st.locked)return;
+  if(pinBuf.length>=6)return;
+  pinBuf+=n;drawDots();
+  if(pinBuf.length===6)setTimeout(verifyPin,180);
+}
+function pinDel(){pinBuf=pinBuf.slice(0,-1);drawDots();}
+function pinClear(){pinBuf="";drawDots();}
+let curPinCard=0;
+function curCardState(){return cardState[CARDS[curPinCard].id];}
+function drawDots(){
+  const dots=document.querySelectorAll("#pindots .pin-dot");if(!dots.length)return;
+  dots.forEach((d,i)=>{d.textContent=i<pinBuf.length?"●":"";d.className="pin-dot"+(i<pinBuf.length?" filled":"");});
+}
+function verifyPin(){
+  const panel=document.getElementById("pinpanel");if(!panel)return;
+  const c=CARDS[curPinCard], st=cardState[c.id];
+  if(pinBuf===DEMO_PIN){
+    panel.classList.add("ok");
+    document.getElementById("pinstatus").className="pin-status good";
+    document.getElementById("pinstatus").textContent="✓ 验证通过，正在翻卡…";
+    setTimeout(()=>{
+      st.verified=true;
+      // 重渲染卡片区域（保留验证态）
+      rerenderCards();
+      const slot=document.getElementById("pin-slot");if(slot)slot.innerHTML="";
+      logAction(`pin_verify(${c.id})`,"pin_verify","verify_pin","success");
+    },500);
+  }else{
+    st.attempts++;
+    panel.classList.add("err");
+    const s=document.getElementById("pinstatus");
+    s.className="pin-status bad";
+    s.textContent=`✗ PIN 错误（第 ${st.attempts}/3 次尝试）`;
+    logAction(`pin_verify(${c.id})`,"pin_verify","verify_pin","failed");
+    setTimeout(()=>{panel.classList.remove("err");pinBuf="";drawDots();},450);
+    if(st.attempts>=3){
+      logAction(`pin_locked(${c.id})`,"pin_verify","verify_pin","locked");
+      renderPinSlot(curPinCard,true);
+    }
+  }
+}
+function rerenderCards(){
+  // 找到 cards 场景的消息气泡，重渲染其中的卡片
+  document.querySelectorAll(".cards-wrap").forEach(w=>{
+    w.innerHTML=CARDS.map((c,i)=>cardHtml(c,i)).join("");
+    // 背面金额滚动入场（仅未遮罩的）
+    w.querySelectorAll(".cu").forEach(el=>{if(el.dataset.masked!=="1")countUp(el);});
+  });
+  // 已验证的卡延迟触发翻转动画（而非渲染时直接定格背面）
+  CARDS.forEach((c,i)=>{
+    if(cardState[c.id].verified){
+      setTimeout(()=>{const el=document.getElementById("bc-"+i);if(el)el.classList.add("flipped");},80);
+    }
+  });
+}
+function toggleFlip(i){
+  const el=document.getElementById("bc-"+i);if(el)el.classList.toggle("flipped");
+}
+function flipBack(i){const el=document.getElementById("bc-"+i);if(el)el.classList.remove("flipped");}
+
+/* 拦截 openPin 里的 curPinCard 上下文 */
+const _origOpenPin=openPin;
+openPin=function(i){curPinCard=i;pinBuf="";_origOpenPin(i);};
+
+/* ================= ★ 趋势图 ================= */
+function buildDaily(){
+  const days={};
+  for(let d=1;d<=31;d++)days[d]={out:0,in:0};
+  MONTH_TXNS.forEach(t=>{
+    const d=+t.ts.slice(8,10);
+    if(t.amount<0)days[d].out+=-t.amount;else days[d].in+=t.amount;
+  });
+  return days;
+}
+function toggleTrend(chip){
+  const host=chip.closest(".balance-card")||(chip.closest(".bubble")?chip.closest(".bubble").querySelector(".balance-card"):null);
+  if(!host){toast("⚠️ 未找到余额卡片");return;}
+  let box=host.querySelector(".trend-box");
+  if(box){box.remove();chip.textContent="📈 查看 2026-08 每日收支趋势";return;}
+  chip.textContent="📈 收起趋势图";
+  const days=buildDaily();
+  const maxV=Math.max(...Object.values(days).flatMap(d=>[d.out,d.in]),1);
+  const bars=Object.entries(days).map(([d,v])=>`
+    <div class="t-day" title="${d} 日：支出 ${fen(v.out)} 元 / 收入 ${fen(v.in)} 元">
+      ${v.out?`<div class="t-bar out" style="height:${Math.max(v.out/maxV*100,4)}%"></div>`:""}
+      ${v.in?`<div class="t-bar in" style="height:${Math.max(v.in/maxV*100,4)}%"></div>`:""}
+    </div>`).join("");
+  const xs=[1,5,10,15,20,25,31].map(d=>`<span>${d}</span>`).join("");
+  const box2=document.createElement("div");box2.className="trend-box";
+  box2.innerHTML=`<div class="trend-title"><b>2026-08 每日收支</b>
+    <span class="lg"><span><i style="background:#f87171"></i>支出</span><span><i style="background:#34d399"></i>收入</span></span></div>
+    <div class="trend-chart">${bars}</div><div class="trend-x">${xs}</div>
+    <div class="trend-sum">全月支出 <b class="out">4,672.29 元</b> · 收入 <b class="in">1,310.98 元</b>（悬停柱体看当日明细）<br>
+    <span style="color:#4b5b7c">数据：list_txn("2026-08-01","2026-08-31") 全月 31 笔真实采集，按日聚合于页面端完成</span></div>`;
+  host.appendChild(box2);
+}
+
+/* ================= ★ 流水行展开 ================= */
+function toggleTxnDetail(tr,i){
+  const next=tr.nextElementSibling;
+  if(next&&next.classList.contains("detail-tr")){next.remove();tr.querySelector(".expander").textContent="▸";return;}
+  const t=TXN_ITEMS[i];
+  tr.querySelector(".expander").textContent="▾";
+  const d=document.createElement("tr");d.className="detail-tr";
+  d.innerHTML=`<td colspan="7">
+    <span class="dk">完整流水号</span><span class="dv">${t.id}</span>　
+    <span class="dk">完整时间戳</span><span class="dv">2026-08-${t.ts.slice(8,10)}T${t.ts.slice(11)}:00</span><br>
+    <span class="dk">整数分金额</span><span class="dv">${t.amount.toLocaleString("en-US")} 分</span>
+    　<span class="dk">=</span><span class="dv">${fen(t.amount)} 元</span>　
+    <span class="dk">方向</span><span class="dv">${t.dir==="in"?"收入":"支出"}</span><br>
+    <span class="dk">对方</span><span class="dv">${t.cp}</span>　
+    <span class="dk">分类</span><span class="dv">${t.cat}</span>　
+    <span class="dk">渠道</span><span class="dv">${t.ch}</span>
+  </td>`;
+  d.onclick=()=>{d.remove();tr.querySelector(".expander").textContent="▸";};
+  tr.after(d);
+}
+
+/* ================= ★ 分类下钻 ================= */
+function toggleDrill(row,i){
+  const slot=document.getElementById("drill-"+i);
+  if(slot.innerHTML){slot.innerHTML="";return;}
+  const g=SPEND_GROUPS[i];
+  const items=MONTH_TXNS.filter(t=>t.cat===g.key&&t.amount<0)
+    .sort((a,b)=>a.ts<b.ts?1:-1);
+  const sum=items.reduce((s,t)=>s-t.amount,0);
+  slot.innerHTML=`<div class="drill-box">
+    <div class="dh"><span>「${g.key}」2026-08 当月支出明细（${items.length} 笔）</span><b>${fen(sum)} 元</b></div>
+    ${items.map(t=>`<div class="drill-item">
+      <span class="cp">${t.cp}</span><span class="dt">${t.ts.slice(5,10).replace("-","/")} ${t.ts.slice(11,16)} · ${t.ch}</span>
+      <span class="am">-${fen(-t.amount)}</span></div>`).join("")}
+    <div style="font-size:10.5px;color:#4b5b7c;margin-top:7px">▸ 由全月 31 笔真实流水按 category 过滤聚合，小计 ${fen(sum)} 元 = analyze_spending 分类「${g.key}」的 ${fen(g.amount)} 元 ✓ 同源一致</div>
+  </div>`;
+}
+
+/* ================= ★ 订阅取消（安全拦截演示） ================= */
+function askCancel(i,btn){
+  const slot=document.getElementById("sub-slot-"+i);
+  if(!slot)return;
+  const s=SUBS[i];
+  if(slot.innerHTML){slot.innerHTML="";return;}
+  slot.innerHTML=`<div class="confirm-box">
+    ⚠️ 确定取消 <b>${s.emoji} ${s.name}</b>（${fen(s.amount)} 元/${s.cycle}，下次扣费 ${s.next}）的自动续费吗？
+    <div class="cb-btns">
+      <span class="cb-btn danger" onclick="doCancel(${i})">确认取消</span>
+      <span class="cb-btn safe" onclick="this.closest('.confirm-box').remove()">先保留</span>
+    </div>
+  </div>`;
+}
+function doCancel(i){
+  const s=SUBS[i];
+  const slot=document.getElementById("sub-slot-"+i);
+  slot.innerHTML=`<div class="sec-block">
+    <b>⛔ 取消订阅请求已被安全策略拦截（本演示环境）。</b><br>
+    「取消订阅」属于<b>写操作</b>（L1+ 权限档：需确认链 + OTP + 完整审计），而本轮交付的只读路由表（agent/read_routes.py）内<b>不存在任何写意图</b>——
+    请求在 PRECHECK 即被拒绝，<b>未执行任何数据变更</b>，当前订阅状态不变，本次尝试已落审计日志。<br>
+    <span style="font-size:11px;color:#7d8db0">真实产品路径：二次确认 → 短信 OTP → 执行 → 审计回执（团队后续任务，见交付文档）。</span>
+  </div>`;
+  logAction(`cancel_subscription(${s.id})`,"cancel_subscription","—","rejected");
+}
+
+/* ================= 审计：交互事件也入列 ================= */
+function logAction(label,intent,tool,res){
+  auditRows.unshift({trace:rid(),intent,tool,res});
+  renderAudit();
+  updateSub();
+}
+
+/* ================= ★ v3 细节层：toast ================= */
+function toast(msg){
+  const box=document.getElementById("toasts");if(!box)return;
+  const t=document.createElement("div");t.className="toast";t.textContent=msg;
+  box.appendChild(t);
+  setTimeout(()=>{t.classList.add("out");setTimeout(()=>t.remove(),320);},2600);
+}
+
+/* ================= ★ v3：金额滚动（count-up，终值精确） ================= */
+function renderNum(el,f){el.textContent=fen(f);}
+function countUp(el){
+  const target=+el.dataset.fen;if(isNaN(target))return;
+  const dur=750,t0=performance.now(),neg=target<0,abs=Math.abs(target);
+  (function step(t){
+    if(el.dataset.masked==="1"){return;} // 遮罩中则不渲染
+    const p=Math.min((t-t0)/dur,1),e=1-Math.pow(1-p,3);
+    renderNum(el,neg?-Math.round(abs*e):Math.round(abs*e));
+    if(p<1)requestAnimationFrame(step);else renderNum(el,target); // 终值精确 = facts
+  })(t0);
+}
+function startCountUps(scope){
+  (scope||document).querySelectorAll(".cu").forEach(el=>{
+    if(el.dataset.masked==="1")return;
+    countUp(el);
+  });
+}
+function toggleEye(btn){
+  const cu=btn.closest(".amt").querySelector(".cu");
+  if(!cu)return;
+  const masked=cu.dataset.masked==="1";
+  if(masked){cu.dataset.masked="";countUp(cu);}
+  else{cu.dataset.masked="1";cu.textContent="****.**";}
+  btn.textContent=masked?"👁":"🙈";
+  btn.title=masked?"隐藏/显示金额（防偷看）":"当前已遮罩，点击显示";
+  logAction("privacy_toggle("+(masked?"unmask":"mask")+")","privacy_toggle","—","success");
+}
+
+/* ================= ★ v3：消息操作条（复制 / 播报 / 反馈） ================= */
+function replyText(bubble){
+  const c=bubble.cloneNode(true);
+  c.querySelectorAll(".msg-foot,.suggest,.chip-btn,.hint-chips").forEach(x=>x.remove());
+  return c.innerText.replace(/[ \t]*\n[ \t]*/g,"\n").replace(/\n{2,}/g,"\n").trim();
+}
+function copyMsg(btn){
+  const txt=replyText(btn.closest(".bubble"));
+  (navigator.clipboard?navigator.clipboard.writeText(txt):Promise.reject())
+    .then(()=>toast("📋 回执全文已复制到剪贴板"),
+          ()=>toast("⚠️ 当前环境不允许访问剪贴板，请手动选择复制"));
+}
+let ttsBtn=null;
+function speakMsg(btn){
+  if(!("speechSynthesis" in window)){toast("⚠️ 当前浏览器不支持语音播报");return;}
+  if(ttsBtn===btn){speechSynthesis.cancel();btn.textContent="🔊";ttsBtn=null;return;}
+  if(ttsBtn){speechSynthesis.cancel();ttsBtn.textContent="🔊";}
+  const txt=replyText(btn.closest(".bubble")).slice(0,120);
+  const u=new SpeechSynthesisUtterance(txt+(txt.length>=120?"……":""));
+  u.lang="zh-CN";u.rate=1.02;
+  u.onend=()=>{btn.textContent="🔊";if(ttsBtn===btn)ttsBtn=null;};
+  u.onerror=()=>{btn.textContent="🔊";if(ttsBtn===btn)ttsBtn=null;};
+  speechSynthesis.speak(u);
+  btn.textContent="⏹";ttsBtn=btn;
+  toast("🔊 正在播报回执（点击 ⏹ 可停止）");
+}
+function feedbackMsg(btn,val){
+  const wrap=btn.closest(".mf-ops");
+  if(wrap.dataset.done){toast("这条回执已反馈过啦，感谢 🙏");return;}
+  wrap.dataset.done="1";
+  btn.classList.add("on");
+  toast(val>0?"👍 已记录：这条回执有帮助":"👎 已记录：这条回执待改进——将转给回执模板维护者");
+  logAction("feedback("+(val>0?"good":"bad")+")","feedback","—","success");
+}
+
+/* ================= ★ v3：通知中心（内容全部来自已采集 facts） ================= */
+const NOTIFS=[
+  {id:"n1",icon:"⚠️",title:"异常交易提醒",body:"2026-08 检出 8 笔凌晨时段交易，建议核查（detect_anomalies 真实输出）。",go:"anomaly",read:false},
+  {id:"n2",icon:"🎵",title:"订阅扣费预告",body:"网易云音乐 15.00 元/月 将于 2026-10-15 自动扣费（list_subscriptions facts）。",go:"subs",read:false},
+];
+function renderBell(){
+  const panel=document.getElementById("bellPanel"),badge=document.getElementById("bellBadge");
+  if(!panel)return;
+  const unread=NOTIFS.filter(n=>!n.read).length;
+  badge.style.display=unread?"flex":"none";
+  badge.textContent=unread;
+  panel.innerHTML=`<div class="bp-head"><span>🔔 通知中心</span>
+    <span class="clr" onclick="markAllRead(event)">全部已读</span></div>
+    ${NOTIFS.map((n,i)=>`<div class="bp-item ${n.read?"read":""}" onclick="notifClick(${i})">
+      <span class="bic">${n.icon}</span>
+      <div><div class="bt">${n.title}</div><div class="bd">${n.body}<br><span style="color:#4b5b7c">点击直达对应查询 →</span></div></div>
+      ${n.read?"":'<span class="unread-dot"></span>'}
+    </div>`).join("")}`;
+}
+function toggleBell(e){e.stopPropagation();document.getElementById("bellPanel").classList.toggle("open");}
+function closeBell(){const p=document.getElementById("bellPanel");if(p)p.classList.remove("open");}
+function markAllRead(e){
+  e.stopPropagation();
+  NOTIFS.forEach(n=>n.read=true);renderBell();
+  toast("🔔 全部通知已标记为已读");
+}
+function notifClick(i){
+  const n=NOTIFS[i];n.read=true;renderBell();closeBell();
+  logAction("notification_read("+n.id+")","notification","—","success");
+  if(busy){toast("⏳ 上一条还在处理，稍候即自动跳转");return;}
+  runScenario(n.go);
+}
+document.addEventListener("click",e=>{if(!e.target.closest(".bell"))closeBell();});
+
+/* ================= ★ v3：实时意图识别（复刻交付代码 classifier） ================= */
+function showIntentHint(){
+  const inp=document.getElementById("inp"),hint=document.getElementById("intentHint");
+  const v=inp.value.trim();
+  if(!v){hint.className="intent-hint";return;}
+  const key=matchScenario(v),sc=SC[key];
+  const chip=(CHIPS.find(c=>c[1]===key)||[])[0];
+  const nm=chip?chip.replace(/（[^）]*）/,""):sc.text.slice(0,10);
+  const low=sc.conf<0.6;
+  hint.className="intent-hint show";
+  hint.innerHTML=`⚡ 实时意图识别 <span class="ih-badge">${sc.intent}</span>
+    <span class="ih-conf">conf ${sc.conf.toFixed(2)}</span>
+    <span class="ih-note">${low?"&lt; 0.6 → 发送后将触发追问（不硬猜）":"→ 将执行「"+nm+"」"}</span>`;
+}
+
+/* ================= ★ v3：流水筛选与搜索（同源实时聚合） ================= */
+function filterTxn(dir,btn){
+  const box=btn.closest(".bubble");
+  box.querySelectorAll(".ftab").forEach(b=>b.classList.remove("on"));
+  btn.classList.add("on");
+  box.dataset.dir=dir;
+  applyTxnFilter(box);
+}
+function searchTxn(inp){
+  const box=inp.closest(".bubble");
+  box.dataset.q=inp.value.trim();
+  applyTxnFilter(box);
+}
+function applyTxnFilter(box){
+  const dir=box.dataset.dir||"all",q=(box.dataset.q||"").toLowerCase();
+  let out=0,inc=0,n=0;
+  box.querySelectorAll("tr.txn-row").forEach(tr=>{
+    const t=TXN_ITEMS[+tr.dataset.i];
+    const okDir=dir==="all"||t.dir===dir;
+    const okQ=!q||[t.cp,t.cat,t.ch,t.id].join(" ").toLowerCase().includes(q);
+    const show=okDir&&okQ;
+    tr.style.display=show?"":"none";
+    if(show){n++;if(t.amount<0)out+=-t.amount;else inc+=t.amount;}
+  });
+  box.querySelectorAll(".detail-tr,.ds-tr").forEach(d=>d.remove()); // 清理展开行
+  const sum=box.querySelector(".txn-sum");
+  if(sum){
+    const allView=dir==="all"&&!q;
+    sum.innerHTML=allView
+      ?`<span>支出合计 <b class="out">1,904.10 元</b></span><span>收入合计 <b class="in">329.43 元</b></span>
+        <span style="color:#7d8db0">amount 为整数分，如 txn_0343 = −32,551 分</span>`
+      :`<span>当前视图 <b>${n}</b> 笔：支出 <b class="out">${fen(out)} 元</b> · 收入 <b class="in">${fen(inc)} 元</b></span>
+        <span style="color:#7d8db0">按当前筛选实时聚合（与回执 facts 同源）</span>`;
+  }
+  const empty=box.querySelector(".txn-empty");
+  if(empty)empty.style.display=n?"none":"block";
+}
+
+/* ================= ★ v3：异常申诉 → 争议工单（产品化预演） ================= */
+function askDispute(id,btn){
+  const tr=btn.closest("tr");
+  const next=tr.nextElementSibling;
+  if(next&&next.classList.contains("ds-tr")){next.remove();return;}
+  document.querySelectorAll(".ds-tr").forEach(x=>x.remove());
+  const d=document.createElement("tr");d.className="ds-tr detail-tr";
+  d.innerHTML=`<td colspan="4">
+    <div style="display:flex;gap:9px;align-items:center;flex-wrap:wrap;font-size:11.5px;color:#cbd5e1">
+    🧾 将交易 <span class="mono" style="color:#93c5fd">${id}</span> 标记为争议交易并转人工核查？
+    <span class="cb-btn danger" onclick="fileDispute('${id}',this)">确认提交</span>
+    <span class="cb-btn safe" onclick="this.closest('tr').remove()">取消</span></div></td>`;
+  tr.after(d);
+}
+function fileDispute(id,btn){
+  const tid="W-"+Math.random().toString(36).slice(2,8).toUpperCase();
+  const tr=btn.closest("tr");
+  tr.innerHTML=`<td colspan="4" style="background:rgba(16,185,129,.05);padding:0 8px 10px">
+    <div class="ticket-box" style="margin-top:6px">
+    ✅ 争议标记已受理：工单 <b class="mono">${tid}</b> 已创建，将转人工核查（1 个工作日内反馈，处理结果通过通知中心送达）。<br>
+    <span style="font-size:10.5px;color:#7d8db0">演示环境：工单流为产品化预演（编号前端生成、写路径未接通），此处仅记录诉求并落审计——真实系统将进入工单系统并通知坐席。</span></div></td>`;
+  logAction("dispute_filed("+id+")","dispute_filed","—","success");
+  toast("🧾 争议工单 "+tid+" 已创建");
+}
+
+/* ================= ★ v3：会话统计 + 忙态 ================= */
+let stats={turns:0,tools:0};
+function updateSub(){
+  const el=document.getElementById("agentSub");if(!el)return;
+  el.innerHTML=`只读查询 Agent ｜ 权限档 L0 ｜ 已处理 <b>${stats.turns}</b> 轮 · 工具调用 <b>${stats.tools}</b> 次 · 审计 <b>${auditRows.length}</b> 条`;
+}
+function setBusy(b){
+  const btn=document.getElementById("sendBtn");
+  if(btn){btn.disabled=b;btn.textContent=b?"⏳":"发送";}
+  if(b){const el=document.getElementById("agentSub");if(el)el.innerHTML="⏳ 状态机运转中…";}
+  else updateSub();
+}
+function nowTime(){return new Date().toTimeString().slice(0,5);}
+
+/* ================= ★ v3：全局键盘（/ 聚焦 · Esc 关闭 · PIN 物理键盘） ================= */
+document.addEventListener("keydown",e=>{
+  const panel=document.getElementById("pinpanel");
+  if(panel){
+    if(/^[0-9]$/.test(e.key)){pinKey(e.key);e.preventDefault();return;}
+    if(e.key==="Backspace"){pinDel();e.preventDefault();return;}
+    if(e.key==="Escape"){panel.remove();pinBuf="";return;}
+    return; // PIN 模态期间不响应其他快捷键
+  }
+  if(e.key==="Escape"){closeBell();return;}
+  const tag=(document.activeElement||{}).tagName;
+  if(e.key==="/"&&tag!=="INPUT"&&tag!=="TEXTAREA"){
+    e.preventDefault();
+    document.getElementById("inp").focus();
+    toast("⌨️ 已聚焦输入框（/ 随时唤起）");
+  }
+});
+
+/* ================= 聊天渲染 ================= */
+const msgsEl=document.getElementById("msgs");
+function scrollEnd(){msgsEl.scrollTop=msgsEl.scrollHeight;}
+function addUser(text){
+  const d=document.createElement("div");d.className="msg user";
+  d.innerHTML=`<div class="who">🧑</div><div class="bubble"></div>`;
+  const b=d.querySelector(".bubble");
+  b.textContent=text;
+  b.insertAdjacentHTML("beforeend",`<div class="msg-foot"><span class="mf-verify" style="color:#7d8db0">已送达</span><span class="msg-time">${nowTime()}</span></div>`);
+  msgsEl.appendChild(d);scrollEnd();
+}
+function addTyping(){
+  const d=document.createElement("div");d.className="msg bot";
+  d.innerHTML=`<div class="who">🤖</div><div class="bubble">
+    <div class="typing"><i></i><i></i><i></i></div>
+    <div class="typing-stage"><span class="spinner"></span><span class="stg-txt">正在唤醒状态机…</span></div></div>`;
+  msgsEl.appendChild(d);scrollEnd();return d;
+}
+const STAGE_LABEL={IDLE:"状态机唤醒，开始处理…",CLASSIFY:"正在识别意图…",CLARIFY:"信息不全，准备追问…",SLOT_FILL:"补全查询条件…",
+  PRECHECK:"安全预检（只读路由）…",EXECUTE:"正在调用工具…",VERIFY_NUMBERS:"正在核验回执数字…",
+  REPLY:"正在生成回执…",AUDIT:"写入审计日志…"};
+function setStage(tp,s,sc){
+  const el=tp.querySelector(".stg-txt");if(!el)return;
+  let txt=STAGE_LABEL[s]||"";
+  if(s==="EXECUTE"&&sc.tools.length)txt=`正在调用工具 ${sc.tools[0].name}…`;
+  el.textContent=txt;
+}
+
+function greet(){
+  const d=document.createElement("div");d.className="msg bot";
+  d.innerHTML=`<div class="who">🤖</div><div class="bubble">
+    您好，我是小银 👋 已为您登录演示账户 <span class="mono">user_001</span>（数据锚点 2026-09-12）。<br><br>
+    本轮交付我接通了 <b>8 个只读查询能力</b>，核心是 <b style="color:#93c5fd">F23 余额查询</b> 和
+    <b style="color:#6ee7b7">F02 流水查询</b>。回复框里的组件<b>都可以点击交互</b>——
+    比如点一张银行卡、输入 PIN（演示密码 <b>123456</b>，也支持键盘直接输入）就能翻卡看余额。<br>
+    <span style="font-size:12px;color:#7d8db0">右上角 🔔 有 <b>2 条提醒</b>待查看；在下方输入框<b>打字</b>，我会实时告诉你识别到的意图；
+    每条回复底部可以<b>复制、语音播报、点赞/反馈</b>。右侧面板同步展示我的内部处理：状态机轨迹、工具调用、数字校验、审计日志（你的每次点击交互也会进审计）。</span>
+  <div class="msg-foot"><span class="mf-verify">✓ 引导完成</span><span class="msg-time">${nowTime()}</span></div></div>`;
+  msgsEl.appendChild(d);
+}
+
+/* ================= 输入匹配（复刻 Python classifier 关键词规则与判定顺序）================= */
+function matchScenario(text){
+  const t=text;
+  if(/余额|多少钱|还剩|有多少/.test(t)){
+    return /信用卡|信用/.test(t)?"balanceCredit":"balanceSavings";
+  }
+  if(/流水|交易明细/.test(t)){
+    const dates=t.match(/\d{4}-\d{2}-\d{2}/g);
+    if(dates&&dates.length>=2) return "txnTable";
+    return "txnClarify";
+  }
+  if(/花了多少|消费分析/.test(t)) return "spending";
+  if(/异常交易|可疑交易/.test(t)) return "anomaly";
+  if(/账单报告|报表/.test(t)) return "report";
+  if(/订阅|会员|自动扣款/.test(t)) return "subs";
+  if(/卡|卡片|银行卡/.test(t)) return "cards";
+  if(/破解|绕过|注入/.test(t)) return "unsafe";
+  return "transfer"; // out_of_scope 低置信度 → CLARIFY
+}
+
+/* ================= 主流程 ================= */
+let auditRows=[];
+let busy=false;
+
+async function runScenario(key,userText){
+  if(busy)return; busy=true;
+  const sc=SC[key];
+  addUser(userText||sc.text);
+  setBusy(true);
+  const tp=addTyping();
+  // 阶段化等待：跟随该场景真实状态机时序逐段点亮（与右侧面板同步）
+  for(const s of sc.states){
+    setStage(tp,s,sc);
+    await sleep(s==="EXECUTE"?430:170);
+  }
+  tp.remove();
+
+  const d=document.createElement("div");d.className="msg bot";
+  const tagHtml=sc.tag.map(x=>`<span class="tag ${x[1]}">${x[0]}</span>`).join(" ");
+  let suggestHtml="";
+  if(sc.suggest){
+    suggestHtml=`<div class="suggest"><div class="sl">💡 您可能想</div><div class="chips">${
+      sc.suggest.map(s=>`<span class="chip-btn" onclick="${s[1]?`runScenario('${s[1]}')`:`${s[2]}(this)`}">${s[0]}</span>`).join("")
+    }</div></div>`;
+  }
+  const footHtml=`<div class="msg-foot">
+    <span class="mf-verify">${sc.noNum?"✓ 无数字回执（铁律④）":"✓ 数字已核验"}</span>
+    <span class="mf-ops">
+      <span class="mf-btn" title="复制回执全文" onclick="copyMsg(this)">📋 复制</span>
+      <span class="mf-btn" title="语音播报" onclick="speakMsg(this)">🔊</span>
+      <span class="mf-btn" title="有帮助" onclick="feedbackMsg(this,1)">👍</span>
+      <span class="mf-btn" title="待改进" onclick="feedbackMsg(this,-1)">👎</span>
+    </span>
+    <span class="msg-time">${nowTime()}</span></div>`;
+  d.innerHTML=`<div class="who">🤖</div><div class="bubble">${tagHtml}${sc.reply()}${suggestHtml}${footHtml}</div>`;
+  msgsEl.appendChild(d);scrollEnd();
+  if(sc.post)setTimeout(()=>sc.post(d),100);
+
+  stats.turns++;stats.tools+=sc.tools.length;
+  const traceId=rid();
+  renderTech(sc,traceId);
+  auditRows.unshift({trace:traceId,intent:sc.intent,tool:sc.tools[0]?sc.tools[0].name:"—",
+    res:sc.noNum?"rejected":"success"});
+  renderAudit();
+  updateSub();
+  busy=false; setBusy(false);
+}
+
+/* ================= 技术面板 ================= */
+const techBody=document.getElementById("techBody");
+const traceHint=document.getElementById("traceHint");
+
+function intentClass(sc){
+  if(sc.rejected)return "bad";
+  if(sc.lowConf)return "warn";
+  if(sc.noNum)return "warn";
+  return "ok";
+}
+
+function renderTech(sc,traceId){
+  traceHint.textContent=traceId;
+  const conf=Math.round(sc.conf*100);
+  let factsHtml;
+  if(sc.noNum){
+    factsHtml=`<div class="verify-banner warn">
+      ${sc.rejected?"⛔ 拦截场景":"ℹ️ 追问场景"}：回执不含任何数字 — 符合「错误消息一律不含数字」铁律</div>`;
+  }else{
+    const rows=sc.facts.map(f=>`<div class="factrow"><span class="num">${f[0]}</span>
+      <span class="arrow">←</span><span class="key">facts.${f[1]}</span><span class="ok">✓ 可溯源</span></div>`).join("");
+    factsHtml=`<div class="verify-banner pass">✓ VERIFY_NUMBERS 通过：回执中的每个数字都能在 facts 事实包中找到出处</div>${rows}`;
+  }
+  const toolsHtml = sc.tools.length===0
+    ? `<div class="toolcall none">未调用任何工具${sc.missing?"（缺失槽位："+sc.missing.join("、")+"）":""}</div>`
+    : sc.tools.map(t=>`<div class="toolcall"><div class="ico">🔧</div>
+        <div><div class="nm">${t.name}</div><div style="font-size:10.5px;color:#7d8db0">tools.* · 只读 · 幂等</div></div>
+        <div class="args">${t.args}</div></div>`).join("");
+
+  techBody.innerHTML=`
+    <div class="sec-title">意图与置信度</div>
+    <div class="kv"><span class="k">intent</span><span class="intent-badge ${intentClass(sc)}">${sc.intent}</span></div>
+    <div class="kv"><span class="k">confidence</span><span class="mono">${sc.conf.toFixed(2)} ${sc.conf<0.6?"< 0.6 阈值 → CLARIFY":"≥ 0.6 ✓"}</span></div>
+    <div class="confbar"><i data-w="${conf}"></i></div>
+
+    <div class="sec-title">状态机轨迹（不可跳步）</div>
+    <div class="states" id="statesBox">${STATES_FULL.map(s=>`<span class="st" data-s="${s}">${s}</span>`).join("")}</div>
+    <div style="font-size:10.5px;color:var(--dim);margin-top:6px" class="mono">${sc.states.join(" → ")}</div>
+
+    <div class="sec-title">工具调用（L0 只读路由）</div>
+    ${toolsHtml}
+
+    <div class="sec-title">数字核验 VERIFY_NUMBERS</div>
+    ${factsHtml}
+
+    <div class="sec-title">审计日志（每请求一条 + 交互事件）</div>
+    <div id="auditBox"></div>
+
+    <div class="sec-title">数据来源</div>
+    <div class="src-note"><b>真实性</b>：${sc.source}<br>采集时间 2026-10-05 · 本机运行 delivery/F23-F02 交付代码</div>
+  `;
+  requestAnimationFrame(()=>{const b=techBody.querySelector(".confbar i");if(b)b.style.width=b.dataset.w+"%";});
+  animateStates(sc.states);
+  renderAudit();
+}
+
+async function animateStates(states){
+  const chips=[...techBody.querySelectorAll(".st")];
+  for(const s of states){
+    const el=chips.find(c=>c.dataset.s===s);
+    if(el){el.classList.add("hit");el.style.transform="scale(1.12)";setTimeout(()=>el.style.transform="",200);}
+    await sleep(160);
+  }
+}
+
+function renderAudit(){
+  const box=document.getElementById("auditBox");if(!box)return;
+  if(auditRows.length===0){box.innerHTML=`<div style="font-size:11.5px;color:var(--dim)">暂无记录</div>`;return;}
+  const cls=r=>r.res==="success"?"r-ok":(r.res==="locked"?"r-lock":"r-no");
+  box.innerHTML=`<table class="audit-t"><tbody>${auditRows.slice(0,8).map(r=>`<tr>
+    <td class="mono" style="color:#7d8db0">${r.trace.slice(0,12)}…</td>
+    <td class="mono">${r.intent}</td><td class="mono">${r.tool}</td>
+    <td class="${cls(r)}">${r.res}</td></tr>`).join("")}</tbody></table>`;
+}
+
+/* ================= 输入/交互 ================= */
+function sendInput(){
+  const inp=document.getElementById("inp");
+  const v=inp.value.trim();
+  if(!v){
+    inp.classList.remove("shake");void inp.offsetWidth;inp.classList.add("shake");
+    toast("✏️ 想问点什么呢？输入内容或点下方快捷指令");
+    return;
+  }
+  if(busy)return;
+  inp.value="";
+  showIntentHint();
+  runScenario(matchScenario(v),v);
+}
+function sendText(t){if(!busy)runScenario(matchScenario(t),t);}
+
+function buildChips(){
+  const el=document.getElementById("chips");
+  el.innerHTML=CHIPS.map(c=>`<span class="chip-btn" onclick="runScenario('${c[1]}')">${c[0]}</span>`).join("");
+}
+
+function resetChat(){
+  msgsEl.innerHTML="";auditRows=[];
+  stats={turns:0,tools:0};
+  for(const k in cardState)delete cardState[k];
+  techBody.innerHTML=`<div class="empty">在左侧发送一条消息<br>这里将实时展示状态机轨迹 · 工具调用 · 数字核验 · 审计日志<br><br>💬 对话内的点击交互（PIN 验证、取消订阅、申诉、反馈…）也会落到审计日志</div>`;
+  traceHint.textContent="";greet();updateSub();
+}
+
+async function playAll(){
+  if(busy)return;
+  const btn=document.getElementById("playBtn");
+  btn.classList.add("playing");btn.textContent="▶ 播放中…";
+  resetChat();
+  await sleep(800);
+  const seq=["cards","balanceSavings","balanceCredit","txnClarify","txnTable","spending","anomaly","report","subs","unsafe","transfer"];
+  for(const k of seq){
+    while(busy)await sleep(200);
+    runScenario(k);
+    await sleep(650);
+  }
+  btn.classList.remove("playing");btn.textContent="▶ 播放完整演示";
+  toast("🎬 完整演示播放完毕——试试点击卡片、筛选流水、申诉异常交易");
+}
+
+function switchTab(t){
+  document.getElementById("tab-chat").classList.toggle("on",t==="chat");
+  document.getElementById("tab-arch").classList.toggle("on",t==="arch");
+  document.getElementById("view-chat").classList.toggle("on",t==="chat");
+  document.getElementById("view-arch").classList.toggle("on",t==="arch");
+}
+
+buildChips();
+greet();
+updateSub();
+renderBell();
+</script>
+</body>
+</html>
