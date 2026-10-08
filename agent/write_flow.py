@@ -215,7 +215,8 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
                     error_code=shaped.error_code,
                     reply=templates.tool_error(shaped.error_code, shaped.message))
     if shaped.missing:                                                 # 缺槽 → 追问，不猜
-        return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing)
+        return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
+                    ask=shaped.clarify or None)      # F17：描述符给了更具体的追问就用它
     filled = shaped.filled
     if confirm_card.is_locked(session_id):
         return Step(states=["PRECHECK"], intent=intent, result="rejected",

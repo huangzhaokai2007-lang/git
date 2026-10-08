@@ -25,7 +25,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Callable, Mapping
 
-from agent import confirm_card
+from agent import confirm_card, payee_clarify
 from tools import subscription, transfer
 from tools.schemas import ToolResult
 from tools.transfer import OTP_CODE                    # agent→tools 合法；OTP 明文绝不进日志/facts/回执
@@ -55,6 +55,7 @@ class ShapeResult:
     missing: list[str] = field(default_factory=list)
     error_code: str | None = None
     message: str = ""
+    clarify: str = ""                 # 缺槽时的具体追问（F17：收款人候选）；空 = 用通用模板追问
 
 
 @dataclass(frozen=True)
@@ -108,8 +109,12 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
     """SLOT_FILL 对齐工具层签名：`payee`（名字/手机号）→ `payee_id`；`amount`（元）→ 整数分。
 
     没找到或同名多个 → 记缺槽（**绝不擅自选一个**）；金额认不出 → 记缺槽。
+
+    缺收款人时把 `resolve_payee` 的**事实包**交给 `payee_clarify.ask_for` 生成追问（F17）：
+    候选的姓名与脱敏手机号由它透出给用户 —— 编排层不自己拼手机号、不自己数候选（铁律 2）。
     """
     filled, missing = dict(slots), []
+    payee_facts: Mapping = {}
     if not filled.get("payee_id"):
         query = str(filled.get("payee") or "").strip()
         found = transfer.resolve_payee(query) if query else None
@@ -120,13 +125,15 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
             filled["masked_phone"] = candidates[0]["phone"]
         else:
             missing.append("payee")
+            payee_facts = found.facts if found is not None and found.ok else {}
     if filled.get("amount_cents") is None:
         cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
         if cents is None:
             missing.append("amount")
         else:
             filled["amount_cents"] = cents
-    return ShapeResult(filled=filled, missing=missing)
+    clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
 def _prepare_transfer(filled: dict) -> Prepared:
