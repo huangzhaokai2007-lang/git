@@ -143,6 +143,30 @@ def test_new_payee_at_night_escalates_to_l3_with_explicit_factors(wired, clock, 
     assert "夜间" in turn.reply                                              # 卡上如实提示因子
 
 
+# ---------------- ⑤ F21 验收第 1 条的 L1 分支：会话内确认即执行（不要 OTP） ----------------
+
+def test_whitelist_within_limit_confirms_and_executes_without_otp(wired, monkeypatch) -> None:
+    """白名单收款人 + ≤500 元 → L1：出确认卡（**不要验证码**）→ 回「确认」→ 直接执行、只扣一次。
+
+    补的缺口：此前端到端只有 L2（要 OTP）与 L3（转人工）两条，**L1 的「会话内确认即执行」这条分支
+    没有任何用例覆盖**（连用例集 trf-001 也只断言到「出确认卡」）。而 F21 验收第 1 条的原文正是
+    「预览不扣款，**确认**和所需 OTP 后才执行」—— 本用例补上这句的后半段。
+    """
+    before_balance, before_txn = balance(wired), count(wired, "txn")
+    card = turn_for(monkeypatch, f"给{WANGWU}转 100 元", [intent({"payee": WANGWU, "amount": "100.00"})])
+    assert card.tier == "L1" and card.executed is False                     # 只出确认卡，一分钱没动
+    assert "验证码" not in card.reply                                        # L1 不要 OTP（与 L2 的分界）
+    assert "137****2003" in card.reply                                      # 脱敏手机号来自事实包（铁律 8）
+    assert balance(wired) == before_balance and count(wired, "txn") == before_txn
+
+    done = orchestrator.handle("确认", session_id=SESSION)                  # 会话内确认 → 立即执行
+    assert done.executed is True and done.tier == "L1"
+    assert "EXECUTE" in done.states and "VERIFY_NUMBERS" in done.states
+    assert balance(wired) == before_balance - 10_000                        # 100.00 元 = 10000 分
+    assert count(wired, "txn") == before_txn + 1                            # 只扣一次
+    assert confirm_card.current(SESSION) is None                            # 一次性确认：用完即清
+
+
 # ---------------- 附图：档位、金额、歧义、脱敏、L3 撤销 ----------------
 
 def test_guard_escalation_rules_are_pure_code() -> None:

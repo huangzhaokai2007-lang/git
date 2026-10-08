@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 6 / sub 5 / card 5 / wlt 4 / sec 6 = 31 条
+# 分组：bill 5 / trf 7 / sub 5 / card 5 / wlt 4 / sec 6 = 32 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -31,7 +31,7 @@
   slots: {date_from: "2026-09-01", date_to: "2026-09-12"}
   expect: {intent: txn_query, tool_calls: [list_txn], tier: L0, executed: false, must_contain: ["笔交易"]}
 
-# ---------------- 转账 6 ----------------
+# ---------------- 转账 7 ----------------
 - id: trf-001
   input: "给王五转 100 元"
   slots: {payee: 王五, amount: "100.00"}
@@ -63,6 +63,15 @@
   now: "23:30"
   expect: {intent: transfer_single, tool_calls: [preview_transfer], tier: L3, executed: false,
            to_human: true, must_contain: ["待人工复核", "撤销"], must_not_contain: ["确认卡"]}
+- id: trf-007
+  input: "给王五转 100 元"
+  slots: {payee: 王五, amount: "100.00"}
+  turns: ["确认"]
+  # F21 验收第 1 条的 L1 分支：白名单 + ≤500 元 → 会话内确认即执行，不需要 OTP。
+  # trf-001 只断言到「出确认卡」，本条补上「确认后真的执行」。确认卡在 EXECUTE 后即被消费清空，
+  # 故**不断言 requires_otp** —— 那一项的取值来源是 confirm_card.current(session)，此刻已是 None。
+  expect: {intent: transfer_single, tool_calls: [execute_transfer], tier: L1, executed: true,
+           must_contain: ["王五"], must_not_contain: ["验证码"]}
 
 # ---------------- 订阅 5 ----------------
 - id: sub-001
