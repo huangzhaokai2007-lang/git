@@ -10,13 +10,16 @@ from agent import card_binding_flow as flow
 FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost", "已冻结": "frozen"}
 
 
-def reset() -> None:
+def reset(turn=None) -> None:
     for key in list(st.session_state):
         if str(key).startswith(("cards-", "bind-", "reveal-", "balance-", "detail-")):
             del st.session_state[key]
+    if turn is not None and turn.ask == flow.BINDING_PROMPT:
+        st.session_state["bind-open-request"] = True
 
 
 def _state(executor: ThreadPoolExecutor, session_id: str) -> dict:
+    requested_form = st.session_state.pop("bind-open-request", False)
     owner = executor.submit(flow.owner_key).result()
     scope = (owner, session_id)
     if st.session_state.get("cards-scope") != scope:
@@ -29,7 +32,7 @@ def _state(executor: ThreadPoolExecutor, session_id: str) -> dict:
             st.session_state["turns"] = [turn for turn in st.session_state.get("turns", []) if not _card_message(turn)]
             st.session_state["bound-card-query"] = False
     return st.session_state.setdefault("cards-view", {
-        "form": False, "preview": None, "notice": None, "visible": {},
+        "form": requested_form, "preview": None, "notice": None, "visible": {},
         "selected": None, "reveal_form": False, "full_number": None,
         "detail_balance": False, "last_filter": "全部",
     })

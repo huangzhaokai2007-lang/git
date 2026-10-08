@@ -1,10 +1,9 @@
 """界面专用的模拟卡片入口；凭证直接交给工具，不经过分类器。"""
 from __future__ import annotations
 
-import re
 import uuid
 
-from agent import classifier
+from agent import card_request_language, classifier
 from guard import card_credentials, permission
 from tools import card_binding
 from tools._query_common import current_user_id
@@ -12,11 +11,7 @@ from tools.schemas import ToolResult
 
 STATUS_LABELS = {"normal": "正常", "locked": "已锁定", "lost": "已挂失", "frozen": "已冻结"}
 TYPE_LABELS = {"savings": "储蓄卡", "credit": "信用卡"}
-CARD_QUERIES = frozenset({
-    "卡片查询", "银行卡查询", "查询卡片", "查询银行卡", "我的卡片", "我的银行卡",
-    "我有哪些卡", "我有哪些卡片", "我有哪些银行卡", "查看我的卡片", "查看我的银行卡",
-    "查一下我的卡", "帮我查一下银行卡",
-})
+BINDING_PROMPT = "请在绑卡表单中输入预设模拟卡号及对应的银行卡密码，验证后确认绑定。"
 
 
 def owner_key() -> str:
@@ -78,15 +73,20 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
                                  states=["IDLE", "CLARIFY", "REPLY", "AUDIT"], reply=result.message,
                                  ask=result.message)
     history = [safe_chat_text(turn) for turn in history] if history else None
-    return orchestrator.handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
+    turn = orchestrator.handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
                                card_reader=lambda slots: card_binding.list_bound_cards(slots.get("status"), audit=False),
                                intent_resolver=_resolve_intent)
+    kind = card_request_language.recognize(text)
+    if turn.intent == "card_query" and turn.error_code is None and kind in ("bind", "apply"):
+        turn.ask = BINDING_PROMPT
+        turn.reply = BINDING_PROMPT if kind == "bind" else (
+            "当前模拟项目不支持新信用卡申请或审批，只能绑定已经预设的模拟银行卡。" + BINDING_PROMPT)
+    return turn
 
 
 def _resolve_intent(text: str, history: list[str] | None) -> classifier.IntentOut:
     """仅完整匹配明确查询指令；含写操作或其它条件的表达仍交由原分类器。"""
-    request = re.sub(r"\n（当前日期：[0-9]{4}-[0-9]{2}-[0-9]{2}）$", "", text)
-    if request.strip().rstrip("？?。！!").strip() in CARD_QUERIES:
+    if card_request_language.recognize(text):
         return classifier.IntentOut(intent="card_query", confidence=1.0, slots={})
     return classifier.classify(text, history)
 
