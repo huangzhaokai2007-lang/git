@@ -95,21 +95,34 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
     return st.button("🔄 刷新余额（走编排层）", key="refresh-balance", width="stretch")
 
 
-def confirm_card(confirmation: Any) -> str | None:
-    """确认卡**独立组件**（卡 16 第 2 条）：金额 / 收款人 / 权限档(风险等级) / 确认 / 取消。
+#: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
+#: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
+_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡"}
+_CARD_TARGET = {"subscription_cancel": "商户"}
 
-    字段全部来自 `agent.confirm_card.Confirmation`。返回 "confirm" / "cancel" / None。
+
+def confirm_card(confirmation: Any) -> str | None:
+    """确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。
+
+    字段全部来自 `agent.confirm_card.Confirmation`。注意该模型经 **card-24 泛化**后，主对象是通用的
+    `target_name`（转账=收款人、订阅取消=商户），**不再有转账专用的 `payee_name`**；标签按 `intent` 取。
+    `masked_phone` 是转账专用字段，其余写意图为空串 → 那一截不印。
     """
+    intent = str(confirmation.intent)
+    title = _CARD_TITLE.get(intent, "转账确认卡")
+    target = _CARD_TARGET.get(intent, "收款人")
     with st.container(border=True):
-        st.markdown("##### 📋 转账确认卡（等待您的确认）")
+        st.markdown(f"##### 📋 {title}（等待您的确认）")
         head = st.columns(4)
         head[0].metric("金额（元）", confirmation.amount_yuan)
-        head[1].metric("收款人", confirmation.payee_name)
+        head[1].metric(target, confirmation.target_name)
         head[2].metric("权限档（风险等级）", confirmation.tier)
         head[3].metric("短信验证码", "需要" if confirmation.requires_otp else "不需要")
-        st.caption(f"意图：{_line(confirmation.card_text, '意图：') or confirmation.intent} · "
-                   f"收款账号：{_esc(confirmation.masked_phone)} · "
-                   f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
+        parts = [f"意图：{_line(confirmation.card_text, '意图：') or confirmation.intent}"]
+        if confirmation.masked_phone:                     # 转账才有；订阅取消为空
+            parts.append(f"收款账号：{_esc(confirmation.masked_phone)}")
+        parts.append(f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
+        st.caption(" · ".join(parts))
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")
         left, right, _rest = st.columns([1, 1, 3])
@@ -126,9 +139,10 @@ def otp_card(confirmation: Any) -> tuple[str, str] | None:
     用 `st.form`：输入值随提交一起送到后端（裸 `text_input` 的值要按回车才提交，
     演示时点「提交」会拿到空串 → 白白浪费一次尝试）。
     """
+    target = _CARD_TARGET.get(str(confirmation.intent), "收款人")
     with st.container(border=True):
         st.markdown("##### 🔐 请输入短信验证码")
-        st.caption(f"收款人 {_esc(confirmation.payee_name)}（{_esc(confirmation.masked_phone)}）· "
+        st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）· "
                    f"金额 {_esc(confirmation.amount_yuan)} 元 · 权限档 {_esc(confirmation.tier)}")
         with st.form("otp-form", clear_on_submit=True):
             code = st.text_input("短信验证码", type="password", key="otp-code",
