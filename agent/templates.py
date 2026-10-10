@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict
 from agent import llm
 from guard import facts_check, injection
 from tools.schemas import ToolResult
+from tools.subscription import CYCLE_LABELS, STATUS_LABELS as STATUS_CN
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +59,17 @@ T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yu
 #: 订阅列表：facts 键见 T10（subscription_count / zombie_count / zombie_window_months / zombie_as_of）
 #: 卡 20 追加（人类口径）：面向用户**不说行话** —— 回执里不再出现"僵尸"二字，改成
 #: "仍在进行中、但最近 W 个月没有任何扣费记录"。`zombie_*` 只留在代码内部命名与 facts 键里。
+#: F19 追加：**回执必须带明细列表**（商户/金额/周期/下次扣费日 = 验收清单第 1 条），
+#: 且「进行中」这句只在查 active 时成立（查 cancelled 时套这句会自相矛盾）。
 T_SUBSCRIPTION_CLEAN = "当前有 {subscription_count} 个订阅，最近 {zombie_window_months} 个月都有正常扣费记录。"
 T_SUBSCRIPTION_ZOMBIE = ("当前有 {subscription_count} 个订阅；其中 {zombie_count} 个仍在「进行中」，"
                          "但最近 {zombie_window_months} 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅，"
                          "建议核对一下。")
-#: `TEMPLATES` 里的默认值（实际按 `zombie_count` 分支，见 `render`）；
+#: 非 active 状态（cancelled / paused）：只报条数与该状态，不解读"是否该取消"。
+T_SUBSCRIPTION_FILTERED = "当前有 {subscription_count} 个「{status_cn}」的订阅。"
+#: 空结果：自己的句子，不套列表头（与 `T_CARD_NO_CARD` 同口径）。
+T_SUBSCRIPTION_EMPTY = "当前没有符合条件的订阅。"
+#: `TEMPLATES` 里的默认值（实际按 `status` / `zombie_count` 分支，见 `render`）；
 #: 保留这个键位是为了"每个只读意图都有模板"这类检查不落空。
 T_SUBSCRIPTION = T_SUBSCRIPTION_ZOMBIE
 
@@ -166,16 +173,47 @@ def render_cards(facts: Mapping) -> str:
     return "\n".join([head, *(card_line(item) for item in facts["items"])])
 
 
+def subscription_line(item: Mapping) -> str:
+    """一条订阅一行（`- ` 开头：界面用 `st.markdown` 渲染会排成项目符号列表）。
+
+    数字全部照抄 facts 对应项，不做换算：金额取 `amount_yuan` 展示串，周期取 `CYCLE_LABELS`。
+    **与 `tools/subscription.py` 的 `_subscription_line` 逐字一致**（`test_subscription_wording`
+    有一条测试钉着两层渲染同源）；周期文案直接引工具层常量，不复制副本。
+    """
+    cycle = CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"]))
+    return (f"- {item['merchant']}：{item['amount_yuan']} 元／{cycle}，"
+            f"下次扣费 {item['next_charge_date']}")
+
+
+def render_subscriptions(facts: Mapping) -> str:
+    """`subscription_list` 回执（卡 20 + F19）：汇总句 + 明细列表。
+
+    分支顺序：**空结果优先**（自己的句子，不套列表头 —— 与 `render_cards` 同口径，
+    避免「当前有 0 个订阅：」这种残句）；再看 `status` —— 查 cancelled / paused 时不套
+    「仍在进行中」那句（实测缺陷：查已取消的订阅，回执却说「其中 2 个仍在『进行中』」）；
+    最后按 `zombie_count` 分「有忘了取消的」/「都正常」两支。明细行数字全部来自 facts。
+    """
+    if not facts["items"]:
+        return T_SUBSCRIPTION_EMPTY
+    status = str(facts.get("status") or "active")
+    if status != "active":
+        head = T_SUBSCRIPTION_FILTERED.format(subscription_count=facts["subscription_count"],
+                                             status_cn=STATUS_CN.get(status, status))
+    else:
+        chosen = T_SUBSCRIPTION_ZOMBIE if facts.get("zombie_count") else T_SUBSCRIPTION_CLEAN
+        try:
+            head = chosen.format(**facts)
+        except KeyError as exc:
+            raise TemplateError(f"'subscription_list' 模板缺少 facts 键：{exc}") from exc
+    return "\n".join([head, *(subscription_line(item) for item in facts["items"])])
+
+
 def render(intent: str, facts: Mapping[str, object]) -> str:
     """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
     if intent == "card_query":                               # 卡 23：列表 + 空结果分支（不走单行 format）
         return render_cards(facts)
-    if intent == "subscription_list":                        # 卡 20：按有没有"忘了取消"的订阅分两种说法
-        chosen = T_SUBSCRIPTION_ZOMBIE if facts.get("zombie_count") else T_SUBSCRIPTION_CLEAN
-        try:
-            return chosen.format(**facts)
-        except KeyError as exc:
-            raise TemplateError(f"{intent!r} 模板缺少 facts 键：{exc}") from exc
+    if intent == "subscription_list":                        # 卡 20 + F19：汇总 + 明细，按状态分支
+        return render_subscriptions(facts)
     template = TEMPLATES.get(intent)
     if template is None:
         raise TemplateError(f"没有为 {intent!r} 定义回执模板")
