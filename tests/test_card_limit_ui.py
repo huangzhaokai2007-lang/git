@@ -7,6 +7,19 @@ from tests.test_card_binding_ui import app, click, fill
 from tests.conftest import raw
 
 
+@pytest.mark.parametrize("page", ["💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡"])
+def test_sidebar_limit_shortcut_opens_dialog_from_every_page(monkeypatch, seeded, page):
+    at = app(monkeypatch, seeded)
+    at.radio[0].set_value(page).run()
+    click(at, "💹 调整额度")
+    assert not at.exception
+    assert at.radio[0].value == "💬 聊天"
+    assert any(button.label == "固定授信额度" for button in at.button)
+    assert any(button.label == "临时授信额度" for button in at.button)
+    assert any(button.label == "单日交易限额" for button in at.button)
+    assert not raw(seeded, "SELECT * FROM agent_card_limit_application")
+
+
 def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     at.radio[0].set_value("💳 我的银行卡").run()
@@ -40,7 +53,7 @@ def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
     assert not at.exception
 
 
-@pytest.mark.parametrize("topic", ["我想调整银行卡额度", "额度", "我的额度是多少", "银行卡每日限额", "能提额吗", "我想申请信用卡并提高额度"])
+@pytest.mark.parametrize("topic", ["我想调整银行卡额度", "额度", "我的额度是多少", "银行卡每日限额", "固定额度", "临时额度", "能提额吗", "我想申请信用卡并提高额度"])
 def test_chat_adjust_and_record_query_do_not_need_llm(monkeypatch, seeded, topic):
     from agent import llm
 
@@ -48,8 +61,7 @@ def test_chat_adjust_and_record_query_do_not_need_llm(monkeypatch, seeded, topic
     at = app(monkeypatch, seeded)
     at.chat_input[0].set_value(topic).run()
     assert not at.exception
-    assert any(button.label == "临时授信额度" for button in at.button) or any(
-        "请选择已绑定银行卡" in item.value for item in at.markdown)
+    assert {"固定授信额度", "临时授信额度", "单日交易限额"} <= {button.label for button in at.button}
     assert not raw(seeded, "SELECT * FROM agent_card_limit_application")
     at.chat_input[0].set_value("查看额度调整记录").run()
     assert not at.exception

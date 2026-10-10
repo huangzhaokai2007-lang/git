@@ -222,7 +222,7 @@ def _sidebar() -> str:
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:
-            if prompt == "卡片查询":
+            if prompt in ("卡片查询", "调整额度"):
                 st.session_state["navigate-page"] = PAGES[0]
             _ask(prompt)
             st.rerun()

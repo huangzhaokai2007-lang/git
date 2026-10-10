@@ -28,7 +28,7 @@ def _state(executor: ThreadPoolExecutor, session_id: str) -> dict:
 
 def open_request(executor: ThreadPoolExecutor, session_id: str, text: str) -> None:
     state = _state(executor, session_id)
-    state.update(open=True, kind=flow.requested_kind(text), selected=None, preview=None, result=None, error=None)
+    state.update(open=True, kind=None, selected=None, preview=None, result=None, error=None)
 
 
 def accept_turn(executor: ThreadPoolExecutor, session_id: str, text: str, ask: str | None) -> None:
