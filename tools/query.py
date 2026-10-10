@@ -49,6 +49,10 @@ def get_balance(account_type: str) -> ToolResult:
     """
     if (bad := _invalid(GetBalanceReq, account_type=account_type)) is not None:
         return bad
+    from tools.card_limit import refresh_due
+
+    if not (refreshed := refresh_due()).ok:
+        return refreshed
     try:
         row = dao.get_balance(account_type)
     except ValueError as exc:

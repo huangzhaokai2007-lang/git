@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
 
 from agent import card_binding_flow as flow
+import card_limit_ui as limits_ui
 
 FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost", "已冻结": "frozen"}
 
@@ -154,7 +155,7 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
         st.rerun()
 
 
-def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     state = _state(executor, session_id)
     st.markdown("### 我的银行卡")
     st.caption("仅展示已绑定的模拟银行卡。")
@@ -184,3 +185,14 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         for item in items:
             _row(executor, item, state)
     _details(executor, session_id, state)
+
+
+def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+    if requested := st.session_state.pop("limit-tab-request", None):
+        st.session_state["cards-tabs"] = requested
+    tabs = st.tabs(["银行卡", "额度调整记录"], key="cards-tabs", on_change="rerun")
+    with tabs[0]:
+        _render_cards(executor, session_id)
+    with tabs[1]:
+        limits_ui.records(executor)
+    limits_ui.render(executor, session_id)

@@ -33,6 +33,7 @@ from agent import card_binding_flow, confirm_card, orchestrator  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                              # noqa: E402
+import card_limit_ui as limits_ui                                # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
@@ -41,10 +42,7 @@ PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = ("您好，我是**模拟银行**智能体（全部为合成数据）。试试：「上个月花了多少」「给王五转 100 元」"
             "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景。")
 
-#: 查询历史继承尚未启用；跨轮确认/OTP 仍由在途流程承载。
 HISTORY = None
-
-
 # ---------------- 启动引导（只碰环境变量与 data/ 层自己的 CLI） ----------------
 
 def _ensure_db() -> bool:
@@ -112,6 +110,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     dump = turn.model_dump()
     if turn.intent == "card_query":
         cards_ui.reset(turn)
+    limits_ui.accept_turn(_agent_executor(), state["session_id"], text, turn.ask)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
@@ -232,6 +231,7 @@ def _sidebar() -> str:
         if st.button("🧹 重置会话态", key="reset-session", width="stretch"):
             confirm_card.reset_state()
             cards_ui.reset()
+            limits_ui.reset()
             st.session_state["bound-card-query"] = False
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0)):
                 st.session_state[key] = value
@@ -239,8 +239,6 @@ def _sidebar() -> str:
             st.rerun()
     return page
 
-
-# ---------------- 三个页面 ----------------
 
 def _chat_page() -> None:
     messages = st.session_state["messages"]
@@ -254,6 +252,8 @@ def _chat_page() -> None:
     _render_payee_form()
     if st.session_state.get("bound-card-query"):
         cards_ui.render(_agent_executor(), st.session_state["session_id"])
+    else:
+        limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()
