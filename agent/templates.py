@@ -17,9 +17,14 @@ from typing import Mapping
 from pydantic import BaseModel, ConfigDict
 
 from agent import llm
+from agent.render_lists import (          # noqa: F401 —— 列表类回执按职责拆出后**再导出**（同一份实现）
+    CARD_STATUS_CN, CARD_TYPE_CN, CYCLE_LABELS, T_CARD_HEAD, T_CARD_HEAD_FILTERED, T_CARD_NO_CARD,
+    T_CARD_NO_CARD_FILTERED, T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
+    T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, TemplateError, card_line, render_cards,
+    render_subscriptions, subscription_line,
+)
 from guard import facts_check, injection
 from tools.schemas import ToolResult
-from tools.subscription import CYCLE_LABELS, STATUS_LABELS as STATUS_CN
 
 logger = logging.getLogger(__name__)
 
@@ -56,38 +61,8 @@ T_ANOMALY = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔
 #: 账单报告：facts 键见 T5（period / out_sum_yuan / in_sum_yuan / net_yuan；markdown 由编排层附加）
 T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yuan} 元，净支出 {net_yuan} 元。"
 
-#: 订阅列表：facts 键见 T10（subscription_count / zombie_count / zombie_window_months / zombie_as_of）
-#: 卡 20 追加（人类口径）：面向用户**不说行话** —— 回执里不再出现"僵尸"二字，改成
-#: "仍在进行中、但最近 W 个月没有任何扣费记录"。`zombie_*` 只留在代码内部命名与 facts 键里。
-#: F19 追加：**回执必须带明细列表**（商户/金额/周期/下次扣费日 = 验收清单第 1 条），
-#: 且「进行中」这句只在查 active 时成立（查 cancelled 时套这句会自相矛盾）。
-T_SUBSCRIPTION_CLEAN = "当前有 {subscription_count} 个订阅，最近 {zombie_window_months} 个月都有正常扣费记录。"
-T_SUBSCRIPTION_ZOMBIE = ("当前有 {subscription_count} 个订阅；其中 {zombie_count} 个仍在「进行中」，"
-                         "但最近 {zombie_window_months} 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅，"
-                         "建议核对一下。")
-#: 非 active 状态（cancelled / paused）：只报条数与该状态，不解读"是否该取消"。
-T_SUBSCRIPTION_FILTERED = "当前有 {subscription_count} 个「{status_cn}」的订阅。"
-#: 空结果：自己的句子，不套列表头（与 `T_CARD_NO_CARD` 同口径）。
-T_SUBSCRIPTION_EMPTY = "当前没有符合条件的订阅。"
-#: `TEMPLATES` 里的默认值（实际按 `status` / `zombie_count` 分支，见 `render`）；
-#: 保留这个键位是为了"每个只读意图都有模板"这类检查不落空。
-T_SUBSCRIPTION = T_SUBSCRIPTION_ZOMBIE
-
 #: 理财推荐：facts 键见 T14（risk_level / item_count）
 T_WEALTH = "按风险等级 {risk_level} 为您推荐 {item_count} 个产品。"
-
-#: 卡查询（卡 23）：facts 键见 `tools/card_query.py`（`total_count` + `items[]`；每项含 `card_no_mask`
-#: 与三档额度的分/元两份）。空结果有自己的句子（绝不渲染成「共 0 张：」这种残句）；
-#: `status_cn` 由编排层按槽位补的**非数字**标签（照 `account_type_cn` 的先例），有它就走带过滤的措辞。
-T_CARD_HEAD = "您名下共有 {total_count} 张卡："
-T_CARD_HEAD_FILTERED = "您名下有 {total_count} 张{status_cn}的卡："
-T_CARD_NO_CARD = "您名下目前没有卡片。"
-T_CARD_NO_CARD_FILTERED = "您名下没有{status_cn}的卡。"
-
-#: 卡片状态 / 类型的中文：面向用户**只说大白话**（`lost` 说「已挂失」、`frozen` 说「已冻结」），
-#: 内部枚举名一个字都不出现在回执里；表外的值原样透传（不猜、不编）。
-CARD_STATUS_CN = {"normal": "正常", "locked": "已锁定", "lost": "已挂失", "frozen": "已冻结"}
-CARD_TYPE_CN = {"savings": "储蓄卡", "credit": "信用卡"}
 
 #: 反问（缺槽/低置信度）：只列缺失项的中文名，不含任何业务数字
 T_CLARIFY_SLOT = "我需要再确认一下：请补充{slots_cn}。"
@@ -138,74 +113,6 @@ TEMPLATES: dict[str, str] = {
     "card_query": T_CARD_HEAD,
     "wealth_recommend": T_WEALTH,
 }
-
-
-class TemplateError(RuntimeError):
-    """模板渲染失败（缺占位符 / 键名写错）。**宁可炸**也不许静默留白（静默留白=幻觉的温床）。"""
-
-
-def card_line(item: Mapping) -> str:
-    """一张卡一行（`- ` 开头：界面用 `st.markdown` 渲染回执，会排成项目符号列表；卡号照抄、不拼接、不补全）。
-
-    数字全部照抄 facts 对应项，不做任何换算：卡号里的数字来自 `card_no_mask` 本体，
-    额度来自 `*_yuan` 展示串。储蓄卡没有授信额度（facts 里 `credit_limit_yuan` 是 `None`）→ 不印那一截。
-    """
-    kind = CARD_TYPE_CN.get(str(item["type"]), item["type"])
-    state = CARD_STATUS_CN.get(str(item["status"]), item["status"])
-    line = f"- {item['card_no_mask']}（{kind} · {state}）"
-    if item.get("credit_limit_yuan"):
-        line += f"，额度 {item['credit_limit_yuan']} 元"
-    return line
-
-
-def render_cards(facts: Mapping) -> str:
-    """`card_query` 回执：按 `total_count` / `status_cn` 分支（卡 23）。
-
-    - 无卡（或该状态一张都没有）→ **自己的句子**，不套列表头（避免「共 0 张：」这种残句）；
-    - 有卡 → 列表头 + 每张一行（数字全部来自 facts）。
-    """
-    count = int(facts["total_count"])
-    status_cn = str(facts.get("status_cn") or "")
-    if count == 0:
-        return T_CARD_NO_CARD_FILTERED.format(status_cn=status_cn) if status_cn else T_CARD_NO_CARD
-    head = (T_CARD_HEAD_FILTERED.format(total_count=count, status_cn=status_cn) if status_cn
-            else T_CARD_HEAD.format(total_count=count))
-    return "\n".join([head, *(card_line(item) for item in facts["items"])])
-
-
-def subscription_line(item: Mapping) -> str:
-    """一条订阅一行（`- ` 开头：界面用 `st.markdown` 渲染会排成项目符号列表）。
-
-    数字全部照抄 facts 对应项，不做换算：金额取 `amount_yuan` 展示串，周期取 `CYCLE_LABELS`。
-    **与 `tools/subscription.py` 的 `_subscription_line` 逐字一致**（`test_subscription_wording`
-    有一条测试钉着两层渲染同源）；周期文案直接引工具层常量，不复制副本。
-    """
-    cycle = CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"]))
-    return (f"- {item['merchant']}：{item['amount_yuan']} 元／{cycle}，"
-            f"下次扣费 {item['next_charge_date']}")
-
-
-def render_subscriptions(facts: Mapping) -> str:
-    """`subscription_list` 回执（卡 20 + F19）：汇总句 + 明细列表。
-
-    分支顺序：**空结果优先**（自己的句子，不套列表头 —— 与 `render_cards` 同口径，
-    避免「当前有 0 个订阅：」这种残句）；再看 `status` —— 查 cancelled / paused 时不套
-    「仍在进行中」那句（实测缺陷：查已取消的订阅，回执却说「其中 2 个仍在『进行中』」）；
-    最后按 `zombie_count` 分「有忘了取消的」/「都正常」两支。明细行数字全部来自 facts。
-    """
-    if not facts["items"]:
-        return T_SUBSCRIPTION_EMPTY
-    status = str(facts.get("status") or "active")
-    if status != "active":
-        head = T_SUBSCRIPTION_FILTERED.format(subscription_count=facts["subscription_count"],
-                                             status_cn=STATUS_CN.get(status, status))
-    else:
-        chosen = T_SUBSCRIPTION_ZOMBIE if facts.get("zombie_count") else T_SUBSCRIPTION_CLEAN
-        try:
-            head = chosen.format(**facts)
-        except KeyError as exc:
-            raise TemplateError(f"'subscription_list' 模板缺少 facts 键：{exc}") from exc
-    return "\n".join([head, *(subscription_line(item) for item in facts["items"])])
 
 
 def render(intent: str, facts: Mapping[str, object]) -> str:
