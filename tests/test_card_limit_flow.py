@@ -14,11 +14,45 @@ def service():
 
 
 def bind(number):
-    preview = card_binding.preview_binding(number, "000000", session_id="f06")
+    preview = card_binding.preview_binding(number, number[:6], session_id="f06")
     assert preview.ok
     result = card_binding.confirm_binding(preview.data["token"], session_id="f06")
     assert result.ok
     return result.data["card_id"]
+
+
+@pytest.mark.parametrize("digit", ["1", "2", "3"])
+def test_demo_cards_accept_distinct_pins_and_reject_old_pin(seeded, digit):
+    number = digit * 16
+    assert not card_binding.preview_binding(number, "000000", session_id="pins").ok
+    assert card_binding.preview_binding(number, digit * 6, session_id="pins").ok
+
+
+def test_existing_demo_pin_migration_preserves_binding_and_application(seeded):
+    from data import card_limit_seed
+    from data._dao_core import connection
+    from data.db import transaction
+    from guard import card_credentials
+
+    card = bind("2" * 16)
+    token = service().preview(card, "fixed", "30000", None, "f06")["data"]["token"]
+    assert service().submit(token, "123456", "f06")["ok"]
+    before = raw(seeded, "SELECT * FROM card WHERE id=?", (card,))
+    history = service().records()["data"]
+    conn = connection()
+    with transaction(conn):
+        salt, digest = card_credentials.hash_pin("000000")
+        conn.execute("UPDATE agent_card_secret SET salt=?,pin_hash=? WHERE card_id=?", (salt, digest, card))
+        conn.execute("DELETE FROM agent_card_limit_demo_pin")
+        card_limit_seed.provision(conn, card_credentials.hash_pin)
+    assert not card_binding.preview_binding("2" * 16, "000000", session_id="migration").ok
+    assert card_binding.preview_binding("2" * 16, "222222", session_id="migration").data["already_bound"]
+    assert raw(seeded, "SELECT * FROM card WHERE id=?", (card,)) == before
+    assert service().records()["data"] == history
+    secret = raw(seeded, "SELECT * FROM agent_card_secret WHERE card_id=?", (card,))
+    with transaction(conn):
+        card_limit_seed.provision(conn, card_credentials.hash_pin)
+    assert raw(seeded, "SELECT * FROM agent_card_secret WHERE card_id=?", (card,)) == secret
 
 
 @pytest.mark.parametrize("digit,status", [("1", "pending"), ("2", "approved"), ("3", "rejected")])
@@ -181,9 +215,14 @@ def test_concurrent_submission_and_otp_lockout(seeded, monkeypatch):
     assert len(flow.records()["data"]["items"]) == 1
 
 
-@pytest.mark.parametrize("text", ["不要调整额度", "我不想提高额度", "取消额度调整", "我想申请信用卡并提高额度"])
-def test_negative_and_compound_requests_do_not_open_limit_form(text):
-    assert service().recognize(text) is None
+@pytest.mark.parametrize("text", ["额度", "额度相关", "我的信用卡额度是多少", "每日限额", "能提额吗", "降额", "授信", "不要调整额度", "我不想提高额度", "取消额度调整", "我想申请信用卡并提高额度"])
+def test_any_limit_topic_opens_form_without_submitting(text):
+    assert service().recognize(text) == "adjust"
+
+
+@pytest.mark.parametrize("text", ["查询额度调整记录", "查限额修改历史", "额度申请进度"])
+def test_explicit_record_queries_keep_record_destination(text):
+    assert service().recognize(text) == "records"
 
 
 def test_demo_accounts_do_not_replace_primary_credit_balance(seeded):

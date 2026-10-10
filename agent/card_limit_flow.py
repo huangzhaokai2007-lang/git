@@ -12,13 +12,11 @@ KINDS = {"固定授信额度": "fixed", "临时授信额度": "temporary", "单�
 
 def recognize(text: str) -> str | None:
     clean = re.sub(r"[\s，。！？?!]", "", text)
-    if re.search(r"不要|不用|不想|不需要|不打算|别|取消|申请.{0,4}信用卡", clean):
+    if not re.search(r"额度|限额|提额|降额|调额|增额|减额|授信", clean):
         return None
-    if re.search(r"(额度|限额).*(记录|历史|进度|结果)|(记录|历史|进度|结果).*?(额度|限额)", clean):
+    if re.search(r"记录|历史|进度|结果", clean):
         return "records"
-    if re.search(r"(调整|修改|提高|提升|降低|调高|调低|更改|申请|增加|减少|改|调).{0,12}(额度|限额)|(额度|限额).{0,12}(调整|提高|降低|改|调)", clean):
-        return "adjust"
-    return None
+    return "adjust"
 
 
 def requested_kind(text: str) -> str | None:
