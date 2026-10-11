@@ -56,6 +56,9 @@ SUBSCRIPTION_STATUSES = ("active", "cancelled", "paused")
 #: 周期展示文案（**仅展示**，不改枚举值）。与 `tools/_query_analysis.py` 的 CYCLE_LABELS 同口径，
 #: 测试里钉住两者一致（漂移即红）；`06b` 抽共享层时合并。
 CYCLE_LABELS = {"monthly": "每月", "yearly": "每年"}
+#: 订阅状态展示文案（**仅展示**，不改枚举值）。非 `active` 的回执要说出查的是哪种状态，
+#: 否则「已取消」的列表会顶着「仍在进行中」的措辞（F19 实测缺陷）。
+STATUS_LABELS = {"active": "进行中", "cancelled": "已取消", "paused": "已暂停"}
 
 
 # ---------------- 出入参模型 ----------------
@@ -237,13 +240,47 @@ def list_subscriptions(status: str = "active") -> ToolResult:
              "zombie_as_of": AS_OF.isoformat(),
              "items": [{**item, **_money_facts(item["amount"], "amount")} for item in items]}
     if not items:
-        return _ok(data.model_dump(), facts, "当前没有符合条件的订阅。")
+        return _ok(data.model_dump(), facts, EMPTY_MESSAGE)
     # 卡 20：面向用户不说"僵尸订阅"这种行话（与 agent/templates.py 的模板逐字一致）
-    n, w = facts["subscription_count"], ZOMBIE_WINDOW_MONTHS
-    message = f"当前有 {n} 个订阅，最近 {w} 个月都有正常扣费记录。" if not facts["zombie_count"] else (
-        f"当前有 {n} 个订阅；其中 {facts['zombie_count']} 个仍在「进行中」，但最近 {w} 个月没有任何扣费记录"
-        f" —— 怀疑是您忘了取消的订阅，建议核对一下。")
+    message = _subscription_message(facts)
     return _ok(data.model_dump(), facts, message)
+
+
+#: 空结果回执（与 `agent/templates.py` 的 `T_SUBSCRIPTION_EMPTY` 逐字一致，wording 测试钉着）。
+EMPTY_MESSAGE = "当前没有符合条件的订阅。"
+
+
+def _subscription_line(item: dict) -> str:
+    """一条订阅一行（`- ` 开头：界面用 `st.markdown` 渲染会排成项目符号列表）。
+
+    数字全部照抄 facts 对应项，不做换算：金额取 `amount_yuan` 展示串，周期取 `CYCLE_LABELS`。
+    与 `agent/templates.py` 的 `subscription_line` **逐字一致**（wording 测试钉着），
+    同一份实现刻意留在两层各一份：工具层不得依赖 agent 层，agent 层不得复制业务取数。
+    """
+    cycle = CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"]))
+    return (f"- {item['merchant']}：{item['amount_yuan']} 元／{cycle}，"
+            f"下次扣费 {item['next_charge_date']}")
+
+
+def _subscription_message(facts: dict) -> str:
+    """订阅回执（卡 20 + F19）：**汇总句 + 明细列表**。
+
+    只报个数不报明细，用户拿不到「商户 / 金额 / 周期 / 下次扣费日」——那是 F19 验收清单第 1 条。
+    明细行数字全部来自 `facts["items"]`（含 `amount_yuan`），模板层同源渲染。
+
+    措辞按 `status` 分支：**「仍在进行中、但没扣费」只对 `active` 成立**。查 `cancelled` 时
+    订阅本就已取消，再套这句会自相矛盾（实测：回执出现「当前有 2 个订阅；其中 2 个仍在「进行中」」，
+    而查的正是已取消的订阅）。非 `active` 状态只报条数与窗口，不解读"是否该取消"。
+    """
+    n, w, status = facts["subscription_count"], ZOMBIE_WINDOW_MONTHS, facts.get("status")
+    if status != "active":
+        head = f"当前有 {n} 个「{STATUS_LABELS.get(str(status), status)}」的订阅。"
+    elif not facts["zombie_count"]:
+        head = f"当前有 {n} 个订阅，最近 {w} 个月都有正常扣费记录。"
+    else:
+        head = (f"当前有 {n} 个订阅；其中 {facts['zombie_count']} 个仍在「进行中」，"
+                f"但最近 {w} 个月没有任何扣费记录 —— 怀疑是您忘了取消的订阅，建议核对一下。")
+    return "\n".join([head, *(_subscription_line(item) for item in facts["items"])])
 
 
 # ---------------- T11 cancel_subscription ----------------

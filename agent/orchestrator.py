@@ -37,7 +37,7 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import classifier, confirm_card, payee_flow, templates, write_flow
+from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, templates, write_flow
 from agent.period import anchor_period, resolve_day, resolve_period
 from agent.read_routes import TOOL_ROUTES
 from data import dao
@@ -51,29 +51,25 @@ logger = logging.getLogger(__name__)
 #: 卡 20：**表单提交入口**（导出给 `interfaces/` 用 —— 界面只调 `agent/`，不直连 `tools/`）。
 #: 实现与理由见 `agent/payee_flow.py`（§5：`payee_add` → L1，不发确认卡、不要 OTP）。
 submit_payee = payee_flow.submit_payee
+#: F10：**风险测评问卷提交入口**（同上先例）。实现见 `agent/risk_flow.py`
+#: （§2 第 108 行：`assess_risk` → **L0 只读**，不计分以外的副作用为零）。
+submit_assessment = risk_flow.submit_assessment
 
 # ---------------- 阈值与契约常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
 STATES = ("IDLE", "CLASSIFY", "CLARIFY", "SLOT_FILL", "PRECHECK", "CONFIRM_CARD", "PENDING_REVIEW",
           "EXECUTE", "VERIFY_NUMBERS", "REPLY", "REFUSE", "AUDIT")     # 来源：规格 §4 的状态名
 CONFIDENCE_FLOOR = 0.6        # 来源：规格 §4「confidence < 0.6 → CLARIFY」
 MAX_CLARIFY_ROUNDS = 2        # 来源：卡 09 第 3 条「最多 2 轮」
-READ_TIER = "L0"              # 来源：规格 §2 的 8 个只读意图权限档均为 L0
-RANGE_FIELDS = ("date_from", "date_to")
+#: `READ_TIER` / `RANGE_FIELDS` / `PERIOD_INTENTS` / `REQUIRED_SLOTS` 已随实现搬到
+#: `agent/read_flow.py`（F10 接通后本文件超红线），在下面再导出。
 
-#: 卡 09 第 2 条点名的 8 个只读意图（其余意图本卡不执行）
+#: 卡 09 第 2 条点名的 8 个只读意图 + F10 的风险测评（`assess_risk` 同属 L0，规格 §2 第 108 行）
 READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
-                "subscription_list", "card_query", "wealth_recommend")
-#: 分析类意图：period 的缺省/解析口径（**完全没给**时取锚点当月；给了却认不出 → 追问，卡 17b）
-PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
-#: 缺槽即追问（代码判定）：`txn_query` 的显式区间不猜；分析类意图的 `period` 认不出也不猜
-REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {"txn_query": RANGE_FIELDS,
-                                             **{intent: ("period",) for intent in PERIOD_INTENTS}}
+                "subscription_list", "card_query", "wealth_recommend", "risk_assess")
 
 #: 写意图清单的唯一来源是 `agent/write_intents.py` 的写描述符表（card-24 泛化拆出），
 #: 经 `write_flow.WRITE_INTENTS` 转发到这里 —— 全程只有一份，避免清单漂移。
 WRITE_INTENTS = write_flow.WRITE_INTENTS
-#: 分析类意图的 period 缺省/解析口径（锚点当月）
-PERIOD_INTENTS = ("bill_analysis", "anomaly_check", "bill_report")
 
 #: 相对时间的别名表 / 偏移 / 解析实现见 `agent/period.py`（卡 17b 拆出去：纯函数，也为守住单文件 ≤300 行）
 
@@ -134,35 +130,18 @@ def _with_date_context(text: str) -> str:
     return f"{text}\n（当前日期：{AS_OF.isoformat()}）"
 
 
-def _fill_period_slot(filled: dict) -> None:
-    """period 槽位：**没给** → 锚点当月（卡 09 口径，未变）；**给了但认不出** → 清掉（→ CLARIFY）。"""
-    raw = filled.get("period")
-    resolved = anchor_period() if raw in (None, "") else resolve_period(raw)
-    if resolved is None:
-        filled.pop("period", None)
-    else:
-        filled["period"] = resolved
+#: 只读路径的槽位填充与定档已移到 `agent/read_flow.py`（F10 接通后本文件到 310 行，超红线 300）。
+#: 那些是**纯函数**（时间口径 + F10 问卷答案解析 + L0 定档），天然可独立；这里 import 即
+#: **re-export**（同一份实现，不是副本），历史调用点写 `orchestrator._fill_slots` 仍然有效。
+_fill_slots = read_flow.fill_slots
+_fill_period_slot = read_flow.fill_period_slot
+_precheck = lambda intent: read_flow.precheck(intent, READ_INTENTS)   # noqa: E731 —— 绑定本层清单
 
-
-def _fill_slots(intent: str, slots: Mapping) -> tuple[dict, list[str]]:
-    """代码补齐时间槽位，然后算缺失项（缺 → CLARIFY）。"""
-    filled = {key: value for key, value in slots.items() if value not in (None, "")}
-    if intent in PERIOD_INTENTS:
-        _fill_period_slot(filled)
-    if intent == "txn_query":
-        for field, edge in (("date_from", "start"), ("date_to", "end")):
-            resolved = resolve_day(filled.get(field), edge=edge)
-            if resolved is None:
-                filled.pop(field, None)
-            else:
-                filled[field] = resolved
-    missing = [name for name in REQUIRED_SLOTS.get(intent, ()) if not filled.get(name)]
-    return filled, missing
-
-
-def _precheck(intent: str) -> str:
-    """权限预检（代码定档）。本卡只接只读意图 → 恒 L0；写操作与风控因子属卡 10/12。"""
-    return READ_TIER if intent in READ_INTENTS else "L1+"
+#: 阈值与契约常量的**唯一来源**已随实现搬到 `read_flow.py`；这里再导出（同一批对象，不是副本）。
+PERIOD_INTENTS = read_flow.PERIOD_INTENTS
+REQUIRED_SLOTS = read_flow.REQUIRED_SLOTS
+RANGE_FIELDS = read_flow.RANGE_FIELDS
+READ_TIER = read_flow.READ_TIER
 
 
 def _code(result: ToolResult) -> str | None:
@@ -254,6 +233,17 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
         ctx.enter("PRECHECK")
         ctx.tier = payee_flow.PAYEE_ADD_TIER
         return _finish(ctx, payee_flow.PROMPT, result="pending_confirm")
+    if ctx.intent == risk_flow.INTENT and not risk_flow.answers_ready(ctx.slots.get("answers")):
+        #: F10：聊天里只说"做测评"（或一个答案都没说出来）→ 回引导语、界面弹问卷（**不计分**）；
+        #: 若用户已经把 5 题一并说了 → 落回下面的只读路径一次算完，不弹表单。判断用 `answers_ready`：
+        #: 它认两种形态（已解析的 dict / 待解析的一句话），**不依赖 `_fill_slots` 是否已跑过**
+        #: （本分支在 SLOT_FILL 之前执行，那时 `answers` 还是 LLM 抽出来的原始字符串）。
+        #: **说了一部分**（解析得出 1..4 题）不算这里，让它落到 `_read_flow` 的 SLOT_FILL ——
+        #: 那里 `answers` 会解析成 dict、判出缺哪些题走 CLARIFY 追问，比"让他重填整张卷"友好。
+        if not risk_flow.answers_started(ctx.slots.get("answers")):
+            ctx.enter("PRECHECK")
+            ctx.tier = risk_flow.TIER
+            return _finish(ctx, risk_flow.PROMPT, result="pending_confirm")
     if ctx.intent in WRITE_INTENTS:                                      # 卡 10：写路径
         return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id))
     return _read_flow(ctx, card_reader=card_reader)

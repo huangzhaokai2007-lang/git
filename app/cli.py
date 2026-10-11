@@ -36,6 +36,9 @@ OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
     (("订阅",), "subscription_list", {}),
     (("流水", "交易记录"), "txn_query", {}),
     (("异常", "可疑"), "anomaly_check", {}),
+    #: F10：「测评」必须排在「理财」**前面** —— 「帮我做个理财风险测评」同时含两个关键词，
+    #: 按顺序先匹配的那条赢；测评是更具体的意图（它有自己的问卷流程），理财推荐是泛的。
+    (("测评", "风险评估"), "risk_assess", {}),
     (("理财", "推荐"), "wealth_recommend", {}),
     (("转",), "transfer_single", {"payee": "张小美", "amount": 100}),
 )

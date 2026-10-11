@@ -36,4 +36,8 @@ TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
     "card_query": ("list_cards", lambda s: list_cards(s.get("status"))),
     "wealth_recommend": ("recommend_wealth", lambda s: wealth.recommend_wealth(
         s.get("risk_level"), s.get("horizon_days"), s.get("amount"))),
+    #: F10：T13 是 **L0 只读**（规格 §2 第 108 行 + §5），故它属于本表。槽位只有 `answers`，
+    #: 且**只在一次收齐 5 题时**才走到这里 —— 消息通道（命令行/IM/API）用 `risk_flow.parse_answers`
+    #: 解析出一句话里的 5 题；界面走表单（`risk_flow.submit_assessment`），绕过本路由。
+    "risk_assess": ("assess_risk", lambda s: wealth.assess_risk(s["answers"])),
 }
