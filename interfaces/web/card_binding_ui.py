@@ -89,11 +89,18 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
     st.rerun()
 
 
-def _row(executor: ThreadPoolExecutor, item: dict, state: dict) -> None:
+def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict) -> None:
     card_id = item["card_id"]
     columns = st.columns([3, 1.5, 2.5])
-    if columns[0].button(item["card_no_mask"], key=f"detail-{card_id}"):
-        _select(executor, card_id, state)
+    with columns[0].container(horizontal=True):
+        if st.button(item["card_no_mask"], key=f"detail-{card_id}"):
+            _select(executor, card_id, state)
+        normal = item['status'] == 'normal'
+        hint = '锁定此卡' if normal else f"{item['status_cn']}；解锁需另行验证与复核"
+        if st.button('', key=f'lock-toggle-{card_id}', disabled=not normal,
+                       icon=':material/lock_open:' if normal else ':material/lock:', help=hint):
+            locks_ui.open_card(executor, session_id, card_id)
+            st.rerun()
     columns[1].markdown(item["status_cn"])
     visible = state["visible"].get(card_id, False)
     with columns[2]:
@@ -184,7 +191,7 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
         for column, label in zip(columns, ("卡号", "状态", "余额")):
             column.markdown(f"**{label}**")
         for item in items:
-            _row(executor, item, state)
+            _row(executor, session_id, item, state)
     _details(executor, session_id, state)
 
 

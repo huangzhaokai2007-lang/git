@@ -28,11 +28,14 @@ def accept_turn(executor: ThreadPoolExecutor, session: str, ask: str | None) -> 
         st.session_state['limit-tab-request'] = '锁卡记录'
 
 
-def _dismiss() -> None:
-    state = st.session_state.get('lock-view', {})
-    if preview := state.get('preview'):
-        st.session_state['lock-cancel-request'] = preview['token']
-    state['open'] = False
+def open_card(executor: ThreadPoolExecutor, session: str, card_id: str) -> None:
+    """卡号旁的图标只创建预览，不执行锁卡。"""
+    state = _state(executor, session)
+    if state['preview'] and not state['result']:
+        executor.submit(flow.cancel, state['preview']['token'], session).result()
+    preview = executor.submit(flow.preview, card_id, session).result()
+    state.update(open=True, preview=preview['data'] if preview['ok'] else None,
+                 result=None, error=None if preview['ok'] else preview['message'])
 
 
 def _select(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
@@ -48,9 +51,7 @@ def _select(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
         st.caption(f"{item['card_no_mask']} · {card_binding_flow.STATUS_LABELS[item['status']]}")
         if st.button(f"锁定 {item['card_no_mask']}", disabled=item['status'] != 'normal',
                      key=f"lock-card-{item['card_id']}", width='stretch'):
-            preview = executor.submit(flow.preview, item['card_id'], session).result()
-            state['preview'] = preview['data'] if preview['ok'] else None
-            state['error'] = None if preview['ok'] else preview['message']
+            open_card(executor, session, item['card_id'])
             st.rerun()
 
 
@@ -69,9 +70,9 @@ def _confirm(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
         st.rerun()
 
 
-@st.dialog('临时锁定银行卡', width='large', on_dismiss=_dismiss)
-def _dialog(executor: ThreadPoolExecutor, session: str) -> None:
+def _panel(executor: ThreadPoolExecutor, session: str) -> None:
     state = _state(executor, session)
+    st.markdown('### 临时锁定银行卡')
     st.caption('模拟环境 · 卡片与验证码均为演示数据')
     if state['result']:
         st.success(state['result']['message'])
@@ -98,14 +99,13 @@ def _dialog(executor: ThreadPoolExecutor, session: str) -> None:
 
 def render(executor: ThreadPoolExecutor, session: str, *, show_button: bool = True) -> None:
     state = _state(executor, session)
-    if token := st.session_state.pop('lock-cancel-request', None):
-        executor.submit(flow.cancel, token, session).result()
     if show_button and st.button('临时锁卡', key='lock-open'):
         import card_limit_ui
         card_limit_ui.reset()
         state.update(open=True, preview=None, result=None, error=None)
     if state['open']:
-        _dialog(executor, session)
+        with st.container(border=True):
+            _panel(executor, session)
 
 
 def records(executor: ThreadPoolExecutor) -> None:
