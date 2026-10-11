@@ -216,7 +216,8 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
     ctx.tier, ctx.executed, ctx.pending_id = step.tier, step.executed, step.pending_id
     if step.missing:
         ctx.missing = step.missing
-        return _clarify(ctx, templates.clarify_missing(step.missing), reason="missing_slots")
+        ask = step.ask or templates.clarify_missing(step.missing)   # F17：写路径给了更具体的追问就用它
+        return _clarify(ctx, ask, reason="missing_slots")
     return _finish(ctx, step.reply, result=step.result, tool=step.tool, error_code=step.error_code,
                    ask=step.ask, degraded=step.degraded, to_human=step.to_human)
 
