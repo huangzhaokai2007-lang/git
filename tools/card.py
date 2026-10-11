@@ -208,17 +208,9 @@ def _manage_locked(req: ManageCardReq) -> ToolResult:
             return blocked
         if action == "apply":
             return _apply_mock(req, row, tier, record)
-        conn = dao.connection()
-        with transaction(conn):                                  # 单一事务：翻转 + 审计（不嵌套 BEGIN）
-            updated = dao.update_card(req.card_id, **_payload(action, req, row))
-            if updated is None:                                  # 防御性兜底，正常走不到
-                raise ToolError(ErrorCode.NOT_FOUND, "卡片不存在")
-            dao.insert_audit(record["trace_id"], record["session_id"], actor="agent",
-                             intent=ACTION_INTENTS[action], tool=MANAGE_ACTION,
-                             params_json={"card_id": req.card_id, "action": action,
-                                          "status_before": row["status"], "tier": tier,
-                                          **({} if tier == "L2" else _l3_facts())},
-                             risk_level=tier, permission_tier=tier, result="success")
+        updated = _write_card(req, record)
+        if isinstance(updated, ToolResult):
+            return updated
     except ToolError as exc:
         if exc.code == ErrorCode.FORBIDDEN:                  # 越权/伪造被拒 → 留痕（reviewer 钉死）
             reject_audit(MANAGE_ACTION, ACTION_INTENTS[action], req.card_id, exc.message, tier)
@@ -226,6 +218,28 @@ def _manage_locked(req: ManageCardReq) -> ToolResult:
     except ValueError as exc:
         return _dao_reject(exc)
     return _finalize(req, row, updated, tier, record)
+
+
+def _write_card(req: ManageCardReq, record: dict) -> dict | ToolResult:
+    action, tier = req.action, ACTION_TIERS[req.action]
+    conn = dao.connection()
+    with transaction(conn):                                  # 单一事务：翻转 + 审计（不嵌套 BEGIN）
+        row = dao.get_card(req.card_id)
+        if row is None:
+            raise ToolError(ErrorCode.NOT_FOUND, "卡片不存在")
+        require_owned("卡片", row["user_id"], row["id"], tool="_manage_locked")
+        if (blocked := _guard(action, row, req)) is not None:
+            return blocked
+        updated = dao.update_card(req.card_id, **_payload(action, req, row))
+        if updated is None:                                  # 防御性兜底，正常走不到
+            raise ToolError(ErrorCode.NOT_FOUND, "卡片不存在")
+        dao.insert_audit(record["trace_id"], record["session_id"], actor="agent",
+                         intent=ACTION_INTENTS[action], tool=MANAGE_ACTION,
+                         params_json={"card_id": req.card_id, "action": action,
+                                      "status_before": row["status"], "tier": tier,
+                                      **({} if tier == "L2" else _l3_facts())},
+                         risk_level=tier, permission_tier=tier, result="success")
+    return updated
 
 
 def _apply_mock(req: ManageCardReq, row: dict, tier: str, record: dict) -> ToolResult:
