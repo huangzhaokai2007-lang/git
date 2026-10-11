@@ -129,8 +129,8 @@ def _result(state: dict) -> None:
         st.rerun()
 
 
-@st.dialog("额度调整申请", width="large", on_dismiss=_cancel)
-def _dialog(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
+def _panel(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
+    st.markdown("### 额度调整申请")
     st.caption("模拟环境 · 所有卡片、审批及验证码均为演示数据")
     if state["error"]:
         st.error(state["error"])
@@ -159,7 +159,8 @@ def render(executor: ThreadPoolExecutor, session_id: str, *, show_button: bool =
         state.update(open=True, kind=None, selected=None, preview=None, result=None, error=None)
         st.session_state.pop("limit-amount", None)
     if state["open"]:
-        _dialog(executor, session_id, state)
+        with st.container(border=True):
+            _panel(executor, session_id, state)
 
 
 def records(executor: ThreadPoolExecutor) -> None:

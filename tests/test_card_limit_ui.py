@@ -8,15 +8,31 @@ from tests.conftest import raw
 
 
 @pytest.mark.parametrize("page", ["💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡"])
-def test_sidebar_limit_shortcut_opens_dialog_from_every_page(monkeypatch, seeded, page):
+def test_sidebar_limit_shortcut_opens_inline_panel_from_every_page(monkeypatch, seeded, page):
     at = app(monkeypatch, seeded)
     at.radio[0].set_value(page).run()
     click(at, "💹 调整额度")
     assert not at.exception
     assert at.radio[0].value == "💬 聊天"
+    assert any(item.value == "### 额度调整申请" for item in at.main.markdown)
+    assert not at.get("dialog")
     assert any(button.label == "固定授信额度" for button in at.button)
     assert any(button.label == "临时授信额度" for button in at.button)
     assert any(button.label == "单日交易限额" for button in at.button)
+    assert not raw(seeded, "SELECT * FROM agent_card_limit_application")
+
+
+def test_inline_limit_draft_allows_card_shortcut_and_page_navigation(monkeypatch, seeded):
+    at = app(monkeypatch, seeded)
+    click(at, "💹 调整额度")
+    click(at, "固定授信额度")
+    click(at, "💳 管卡")
+    assert not at.exception and at.chat_input
+    assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
+    at.radio[0].set_value("🧾 审计时间轴").run()
+    at.radio[0].set_value("💬 聊天").run()
+    assert not at.exception
+    assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
     assert not raw(seeded, "SELECT * FROM agent_card_limit_application")
 
 
