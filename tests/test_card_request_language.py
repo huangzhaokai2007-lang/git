@@ -44,7 +44,7 @@ def test_natural_card_requests_work_offline_without_writes(seeded, monkeypatch, 
 @pytest.mark.parametrize("text", [
     "不要绑定银行卡", "我不想申请信用卡", "取消绑定银行卡", "解绑我的银行卡",
     "帮我挂失银行卡", "冻结我的卡", "查询银行卡后转账", "绑定银行卡并转账",
-    "我想申请信用卡并提高额度", "先绑卡再还款", "请帮我支付", "我有张银行卡丢了",
+    "先绑卡再还款", "请帮我支付", "我有张银行卡丢了",
 ])
 def test_other_actions_and_negations_keep_the_original_classifier(seeded, monkeypatch, text):
     from agent import card_binding_flow as flow, classifier

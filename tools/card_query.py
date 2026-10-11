@@ -55,6 +55,10 @@ def list_cards(status: str | None = None) -> ToolResult:
     """
     if (bad := _invalid(ListCardsReq, status=status)) is not None:
         return bad
+    from tools.card_limit import refresh_due
+
+    if not (refreshed := refresh_due()).ok:
+        return refreshed
     try:
         rows = list_card_rows(current_user_id(), status)
     except ValueError as exc:

@@ -73,6 +73,10 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
                                  states=["IDLE", "CLARIFY", "REPLY", "AUDIT"], reply=result.message,
                                  ask=result.message)
     history = [safe_chat_text(turn) for turn in history] if history else None
+    from agent import card_limit_flow
+
+    if kind := card_limit_flow.recognize(text):
+        return card_limit_flow.chat_entry(text, session_id or "limit", kind)
     turn = orchestrator.handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
                                card_reader=lambda slots: card_binding.list_bound_cards(slots.get("status"), audit=False),
                                intent_resolver=_resolve_intent)

@@ -31,6 +31,10 @@ def _run(action: str, session_id: str, tier: str,
         with transaction(conn):
             store.ensure_schema(conn)
             card_binding_seed.provision(conn, credentials.hash_pin)
+            from tools.card_limit import refresh_due
+
+            if not (refreshed := refresh_due()).ok:
+                raise sqlite3.OperationalError("temporary limit expiry unavailable")
             result = operation(conn)
             if not audit:
                 return result
@@ -82,6 +86,10 @@ def preview_binding(card_no: str, password: str, *, session_id: str) -> ToolResu
         number = _valid_credentials(card_no, password, session_id)
         if number is None:
             return _fail(ErrorCode.INVALID_ARGUMENT, "请输入有效的模拟卡号与银行卡密码。")
+        from data import card_limit_seed
+
+        if number in {item[1] for item in card_limit_seed.DEMO_CARDS}:
+            card_limit_seed.provision(conn, credentials.hash_pin)
         row = _authenticate(conn, number, password)
         if row is None:
             return _fail(ErrorCode.FORBIDDEN, DENIED)

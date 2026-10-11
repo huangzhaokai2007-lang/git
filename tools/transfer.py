@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from tools._card_limit_transfer import restrict as _restrict_card_daily
 from datetime import datetime, timedelta
 
 from data import dao
@@ -120,7 +121,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         if account is None or account["user_id"] != current_user_id():
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
         flows = _today_out_flows(_now())
-        limits = _limits(flows)
+        limits = _restrict_card_daily(_limits(flows), account["id"])
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     except ValueError as exc:
@@ -129,7 +130,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
     fee = 0                                                     # 规格未定义手续费口径（见文件头）
     if amount > SINGLE_TX_MAX_CENTS:
         return _fail(ErrorCode.OVER_LIMIT, "超过单笔转账上限")
-    if limits["daily_used"] + amount > DAILY_MAX_CENTS:
+    if limits["daily_used"] + amount > limits["daily_max"]:
         return _fail(ErrorCode.OVER_LIMIT, "超过单日累计转账上限")
     if account["balance"] < amount + fee:
         return _fail(ErrorCode.INSUFFICIENT_FUNDS, "储蓄账户余额不足")
@@ -202,14 +203,17 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
         account = dao.get_balance("savings")
         if account is None or account["id"] != account_id or account["user_id"] != current_user_id():
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
-        limits = _limits(_today_out_flows(_now()))
-        if amount > SINGLE_TX_MAX_CENTS or limits["daily_used"] + amount > DAILY_MAX_CENTS:
+        limits = _restrict_card_daily(_limits(_today_out_flows(_now())), account_id)
+        if amount > SINGLE_TX_MAX_CENTS or limits["daily_used"] + amount > limits["daily_max"]:
             return _fail(ErrorCode.OVER_LIMIT, "超过转账限额")
         if account["balance"] < amount + token["fee"]:
             return _fail(ErrorCode.INSUFFICIENT_FUNDS, "储蓄账户余额不足")
         tool_guard.check_write_rate(current_user_id(), tool="execute_transfer")   # 限流：先计数再校验，重放不计数
         conn = dao.connection()
         with transaction(conn):                                 # 单一事务：扣款 + 流水 + 审计（不嵌套 BEGIN）
+            limits = _restrict_card_daily(_limits(_today_out_flows(_now())), account_id)
+            if limits["daily_used"] + amount > limits["daily_max"]:
+                return _fail(ErrorCode.OVER_LIMIT, "超过转账限额")
             updated = dao.update_account_balance(account_id, -amount)
             if updated is None:                                 # 防御性兜底，正常走不到
                 raise ToolError(ErrorCode.NOT_FOUND, "储蓄账户不存在")
