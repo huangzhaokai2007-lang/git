@@ -401,6 +401,19 @@
     padding:4px 12px;border-radius:20px;cursor:pointer;transition:.15s;user-select:none}
   .ftab:hover{color:#93c5fd}
   .ftab.on{color:#93c5fd;border-color:rgba(59,130,246,.55);background:rgba(59,130,246,.12)}
+
+  /* v3.1 F14：环比对比条 + 双维度条形 */
+  .cmp{margin-top:11px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:rgba(11,18,34,.55)}
+  .cmp-title{font-size:11px;color:var(--dim);letter-spacing:.5px;margin-bottom:7px}
+  .cmp-row{display:grid;grid-template-columns:40px 1fr 92px;gap:9px;align-items:center;font-size:11.5px;margin:5px 0}
+  .cmp-track{height:10px;background:#0b1222;border-radius:5px;overflow:hidden}
+  .cmp-fill{height:100%;border-radius:5px;width:0;transition:width .65s ease-out}
+  .cmp-fill.prev{background:#475569}
+  .cmp-fill.cur{background:linear-gradient(90deg,#f59e0b,#fbbf24)}
+  .cmp-val{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .cmp-delta{display:inline-block;padding:1px 8px;border-radius:10px;font-size:11px;font-weight:600;
+    background:rgba(252,211,77,.14);color:#fcd34d;border:1px solid rgba(252,211,77,.35)}
+  .bar-fill.ch{background:linear-gradient(90deg,#7c3aed,#c4b5fd)}
   .txn-search{background:#0b1222;border:1px solid var(--line);border-radius:20px;color:var(--txt);
     font-size:12px;padding:5px 13px;outline:none;width:150px;transition:.25s}
   .txn-search:focus{border-color:var(--blue);width:195px}
@@ -527,7 +540,7 @@
         <div class="intent-hint" id="intentHint"></div>
 
         <div class="inputrow">
-          <input id="inp" placeholder="试试：我几张卡 / 查流水 / 上个月花了多少 …（打字时实时识别意图）" onkeydown="if(event.key==='Enter')sendInput()" oninput="showIntentHint()">
+          <input id="inp" placeholder="怎么想就怎么说：卡里还剩多少钱 / 上月钱都花哪了 / 帐单报告…（错别字也认得）" onkeydown="if(event.key==='Enter')sendInput()" oninput="showIntentHint()">
           <button id="sendBtn" onclick="sendInput()">发送</button>
         </div>
         <div class="kbd-tip">
@@ -607,6 +620,12 @@
         <div class="ixcard"><b>📊 分类条形点击 → 下钻该分类当月明细</b><br>
           账单分析页每条分类占比条可点击，展开该分类当月全部交易与小计，小计与总览条形数字严格一致。
           <span class="why">工程理由：下钻明细由页面端从同一次采集的全月流水（list_txn 2026-08-01→08-31）聚合，聚合结果与 analyze_spending 工具输出互证——数据不是编的，是同一份事实的两个视图。</span></div>
+        <div class="ixcard"><b>🧠 容错理解：大白话 + 错别字（v3.2）</b><br>
+          意图匹配前先做归一化（帐→账等常见错字、去口语填充词"帮我/请问/一下"），关键词表扩到同义说法（"卡里还剩多少钱/欠多少"、"钱花哪了/花销"、"盗刷/不对劲"、"退订/月费"），≥3 字关键词再叠加<b>编辑距离≤1</b>的模糊匹配——打错一两个字照样命中。
+          <span class="why">产品理由：真实用户不会说标准指令。工程理由：这是纯规则前端的演示口径——真实交付代码里意图由 LLM 分类器（classify()）承担，天然理解口语与错字；危险词匹配放在归一化之后、口语词剥离之前不影响安全性（写操作与危险请求优先判定，不能被口语改写绕过）。</span></div>
+        <div class="ixcard"><b>📊 账单分析：分类/渠道双维度 + 环比对比（v3.1）</b><br>
+          条形图支持「按分类 / 按渠道」一键切换（对应工具 analyze_spending 的 group_by 参数），顶部附上期↔本期环比对比条；两个维度的条形均可下钻明细。
+          <span class="why">工程理由：工具真实支持 group_by=category/channel 两种口径；页面端由同一份全月流水按维度聚合，整数百分比最大余额法合计恒为 100，两个维度总额同为 4,672.29 元（467,229 分）——同一份事实的两个切面；环比条两端数字均来自 facts（prev_total_yuan / total_yuan），切换维度行为落审计。</span></div>
         <div class="ixcard"><b>🎵 订阅卡片 → 取消订阅 → 安全拦截</b><br>
           每个订阅带「取消订阅」按钮，点开确认层后选择确认——随即被写操作安全策略拦截并落审计。
           <span class="why">工程理由：铁律⑧「只读路由无写操作」的主动式演示——按钮真实存在（像真实产品），但执行层没有写通道，用户亲手触发一次拦截比看一百句描述更有说服力。</span></div>
@@ -707,7 +726,8 @@ const MONTH_TXNS = [
   {id:"txn_0335",ts:"2026-08-02T23:00",amount:-13677,dir:"out",cp:"超市",cat:"其他",ch:"二维码"},
   {id:"txn_0334",ts:"2026-08-01T22:00",amount:-6734,dir:"out",cp:"房东",cat:"住房",ch:"ATM"}
 ];
-/* 支出分类分组（analyze_spending 2026-08 group_by=category 真实输出） */
+/* 支出分类分组（analyze_spending 2026-08 group_by=category 真实输出）——采集参照；
+   页面条形图由 calcSpendGroups() 从 MONTH_TXNS 动态聚合，结果与本参照逐字段一致（同源互证） */
 const SPEND_GROUPS = [
   {key:"其他",amount:92518,pct:20},
   {key:"住房",amount:86730,pct:19},
@@ -831,23 +851,32 @@ const SC = {
   spending:{
     text:"上个月花了多少", tag:["T3 账单分析","note"], intent:"bill_analysis", conf:0.88,
     states:S_OK, tools:[{name:"analyze_spending", args:'{period:"2026-08", group_by:"category"}'}],
-    facts:[["2026-08","period"],["4,672.29","total_yuan"],["30","vs_prev_pct"]],
+    facts:[["2026-08","period"],["4,672.29","total_yuan"],["3,571.31","prev_total_yuan"],["1,100.98","环比差额（total−prev_total，分→元）"],["30","vs_prev_pct"],["8","group_count"]],
     source:"agent.handle() 编排层真实回执",
     suggest:[["📄 月度账单报告（工具直调）","report"],["⚠️ 异常检测（工具直调）","anomaly"]],
-    reply:()=>{
-      const bars = SPEND_GROUPS.map((g,i)=>`
-        <div class="bars-outer" style="display:flex;flex-direction:column">
-        <div class="bar-row" onclick="toggleDrill(this,${i})">
-        <span>${g.key}</span>
-        <div class="bar-track"><div class="bar-fill" data-w="${g.pct*5}"></div></div>
-        <span class="bar-val">${fen(g.amount)} 元 · ${g.pct}%</span></div>
-        <div class="drill-slot" id="drill-${i}"></div></div>`).join("");
-      return `<b>2026-08</b> 支出合计 <b>4,672.29 元</b>，较上一账期 <b style="color:#fcd34d">30%</b>。
-      <div class="bars">${bars}</div>
-      <div class="drill-tip">▸ <b>点击任一分类条</b>可下钻该分类当月全部交易（数据来自全月 list_txn 真实采集）</div>
-      <div style="margin-top:9px;font-size:11.5px;color:#7d8db0">▸ "上个月"由 agent/period.py 代码解析为 2026-08（锚点 2026-09-12）；占比为整数百分比，最大余额法保证合计恒为 100%（20+19+16+15+11+10+7+2=100 ✓）</div>`;
-    },
-    post:(scope)=>{(scope||document).querySelectorAll(".bar-fill").forEach(el=>setTimeout(()=>el.style.width=el.dataset.w+"%",80));}
+    reply:()=>`
+      <b>2026-08</b> 支出合计 <b>4,672.29 元</b>，比上个月（2026-07）<b style="color:#fcd34d">多花了 1,100.98 元，支出上升 30%</b>（上月支出 3,571.31 元）。
+      <div class="cmp">
+        <div class="cmp-title">📊 与上月对比（上期 2026-07 → 本期 2026-08，数字来自 facts：prev_total_yuan / total_yuan）</div>
+        <div class="cmp-row"><span style="color:#7d8db0">上月</span>
+          <div class="cmp-track"><div class="cmp-fill prev" data-w="76"></div></div>
+          <span class="cmp-val">3,571.31 元</span></div>
+        <div class="cmp-row"><span style="color:#fcd34d">本月</span>
+          <div class="cmp-track"><div class="cmp-fill cur" data-w="100"></div></div>
+          <span class="cmp-val">4,672.29 元</span></div>
+      </div>
+      <div class="txn-tools" style="margin-top:11px">
+        <span class="ftab on" onclick="switchSpendDim('cat',this)">按分类 8</span>
+        <span class="ftab" onclick="switchSpendDim('ch',this)">按渠道 5</span>
+        <span style="font-size:11px;color:#7d8db0">↔ 对应工具参数 group_by</span>
+      </div>
+      <div class="bars spend-bars"></div>
+      <div class="drill-tip">▸ <b>点击任一条形</b>可下钻该分类/渠道当月全部交易（数据来自全月 list_txn 真实采集）；<b>切换维度</b>查看同一份流水的另一个切面</div>
+      <div style="margin-top:9px;font-size:11.5px;color:#7d8db0">▸ "上个月"由 agent/period.py 代码解析为 2026-08（锚点 2026-09-12）；占比为整数百分比，最大余额法保证合计恒为 100%（分类 20+19+16+15+11+10+7+2=100 ✓；渠道 38+23+18+11+10=100 ✓）；两个维度支出总额同为 4,672.29 元 = 467,229 分 ✓ 同源</div>`,
+    post:(scope)=>{
+      (scope||document).querySelectorAll(".cmp-fill").forEach(el=>setTimeout(()=>el.style.width=el.dataset.w+"%",90));
+      renderSpendBars(scope,"cat");
+    }
   },
   anomaly:{
     text:"查一下上个月有没有异常交易（工具直调）", tag:["T4 异常检测","warn"], intent:"anomaly_check", conf:0.85,
@@ -866,7 +895,7 @@ const SC = {
   report:{
     text:"帮我生成上个月的月度账单报告（工具直调）", tag:["T5 账单报告","note"], intent:"bill_report", conf:0.87,
     states:S_OK, tools:[{name:"generate_bill_report", args:'{period:"2026-08", kind:"monthly"}'}],
-    facts:[["2026-08","period"],["4,672.29","out_sum_yuan"],["1,310.98","in_sum_yuan"],["-3,361.31","net_yuan"],["8","anomaly_count"]],
+    facts:[["2026-08","period"],["4,672.29","out_sum_yuan"],["1,310.98","in_sum_yuan"],["-3,361.31","net_yuan"],["3,571.31","prev_total_yuan"],["1,100.98","环比差额（out_sum−prev_total，分→元）"],["30","vs_prev_pct"],["8","anomaly_count"]],
     source:"tools.generate_bill_report 工具层直调（markdown 每个数字逐字取自 facts）",
     suggest:[["⚠️ 异常检测（工具直调）","anomaly"],["🎵 我的订阅","subs"]],
     reply:()=>`
@@ -875,7 +904,8 @@ const SC = {
         <h4># 2026-08 月度账单报告</h4>
         <h4>## 收支概览</h4><ul>
         <li>支出：<b>4,672.29 元</b>（20 笔）</li><li>收入：<b>1,310.98 元</b>（11 笔）</li>
-        <li>结余：<b style="color:#fca5a5">-3,361.31 元</b></li><li>较上期：30%</li></ul>
+        <li>结余：<b style="color:#fca5a5">-3,361.31 元</b></li>
+        <li>与上月比较：支出比上月<b style="color:#fcd34d">多 1,100.98 元，上升 30%</b>（上月支出 3,571.31 元）</li></ul>
         <h4>## 支出分类</h4><ul>
         <li>其他 <b>925.18 元</b> (20%) · 住房 <b>867.30 元</b> (19%) · 交通 <b>725.46 元</b> (16%)</li>
         <li>教育 <b>685.47 元</b> (15%) · 购物 <b>536.17 元</b> (11%) · 医疗 <b>481.82 元</b> (10%)</li>
@@ -943,6 +973,8 @@ const CHIPS = [
   ["📋 查流水（体验追问）","txnClarify"],
   ["📅 8月上旬流水明细（行可点开）","txnTable"],
   ["📊 上个月花了多少（分类可下钻）","spending"],
+  ["🧠 大白话：卡里还剩多少钱","balanceSavings"],
+  ["🧠 错别字：上月花在那里了","spending"],
   ["⚠️ 异常检测（工具直调）","anomaly"],
   ["📄 月度账单报告（工具直调）","report"],
   ["🎵 我的订阅（可试取消→拦截）","subs"],
@@ -1134,19 +1166,58 @@ function toggleTxnDetail(tr,i){
 }
 
 /* ================= ★ 分类下钻 ================= */
-function toggleDrill(row,i){
-  const slot=document.getElementById("drill-"+i);
+/* ================= ★ v3.1 F14：账单分析双维度（分类/渠道）同源聚合 ================= */
+/* 页面端从同一份全月流水 MONTH_TXNS 聚合（与回执 facts 同源互证）：
+   只统计支出(amount<0)绝对值；整数百分比用最大余额法，合计恒为 100（复刻工具口径）。 */
+function calcSpendGroups(dim){
+  const outs=MONTH_TXNS.filter(t=>t.amount<0);
+  const total=outs.reduce((s,t)=>s-t.amount,0);
+  const agg={};
+  outs.forEach(t=>{const k=dim==="cat"?t.cat:t.ch;agg[k]=(agg[k]||0)-t.amount;});
+  const ranked=Object.entries(agg).sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0],"zh"));
+  const pcts=ranked.map(p=>Math.floor(p[1]*100/total));
+  const order=ranked.map((_,i)=>i).sort((a,b)=>(ranked[b][1]*100-pcts[b]*total)-(ranked[a][1]*100-pcts[a]*total));
+  let rest=100-pcts.reduce((s,p)=>s+p,0);
+  for(let i=0;i<rest;i++)pcts[order[i%order.length]]++;
+  return {groups:ranked.map((p,i)=>({key:p[0],amount:p[1],pct:pcts[i]})),total};
+}
+function renderSpendBars(scope,dim){
+  const box=(scope||document).querySelector(".spend-bars");
+  if(!box)return;
+  const {groups}=calcSpendGroups(dim);
+  const maxPct=Math.max(...groups.map(g=>g.pct));
+  box.dataset.dim=dim;
+  box.innerHTML=groups.map((g,i)=>`
+    <div class="bars-outer" style="display:flex;flex-direction:column">
+    <div class="bar-row" onclick="toggleDrill(this,${i},'${dim}')">
+    <span>${g.key}</span>
+    <div class="bar-track"><div class="bar-fill ${dim==="ch"?"ch":""}" data-w="${Math.round(g.pct/maxPct*100)}"></div></div>
+    <span class="bar-val">${fen(g.amount)} 元 · ${g.pct}%</span></div>
+    <div class="drill-slot" id="drill-${dim}-${i}"></div></div>`).join("");
+  box.querySelectorAll(".bar-fill").forEach(el=>setTimeout(()=>el.style.width=el.dataset.w+"%",80));
+}
+function switchSpendDim(dim,btn){
+  const bubble=btn.closest(".bubble");
+  bubble.querySelectorAll(".txn-tools .ftab").forEach(b=>b.classList.remove("on"));
+  btn.classList.add("on");
+  renderSpendBars(bubble,dim);
+  logAction(`analyze_spending(group_by=${dim==="cat"?"category":"channel"})`,"bill_analysis","group_by","switched");
+}
+function toggleDrill(row,i,dim){
+  const slot=document.getElementById("drill-"+(dim||"cat")+"-"+i);
   if(slot.innerHTML){slot.innerHTML="";return;}
-  const g=SPEND_GROUPS[i];
-  const items=MONTH_TXNS.filter(t=>t.cat===g.key&&t.amount<0)
+  const {groups}=calcSpendGroups(dim||"cat");
+  const g=groups[i];
+  const field=dim==="ch"?"ch":"cat";
+  const items=MONTH_TXNS.filter(t=>t[field]===g.key&&t.amount<0)
     .sort((a,b)=>a.ts<b.ts?1:-1);
   const sum=items.reduce((s,t)=>s-t.amount,0);
   slot.innerHTML=`<div class="drill-box">
-    <div class="dh"><span>「${g.key}」2026-08 当月支出明细（${items.length} 笔）</span><b>${fen(sum)} 元</b></div>
+    <div class="dh"><span>「${g.key}」2026-08 当月支出明细（${items.length} 笔 · 按${dim==="ch"?"渠道":"分类"}）</span><b>${fen(sum)} 元</b></div>
     ${items.map(t=>`<div class="drill-item">
       <span class="cp">${t.cp}</span><span class="dt">${t.ts.slice(5,10).replace("-","/")} ${t.ts.slice(11,16)} · ${t.ch}</span>
       <span class="am">-${fen(-t.amount)}</span></div>`).join("")}
-    <div style="font-size:10.5px;color:#4b5b7c;margin-top:7px">▸ 由全月 31 笔真实流水按 category 过滤聚合，小计 ${fen(sum)} 元 = analyze_spending 分类「${g.key}」的 ${fen(g.amount)} 元 ✓ 同源一致</div>
+    <div style="font-size:10.5px;color:#4b5b7c;margin-top:7px">▸ 由全月 31 笔真实流水按 ${dim==="ch"?"channel":"category"} 过滤聚合，小计 ${fen(sum)} 元 = ${dim==="ch"?"页面端渠道":"analyze_spending 分类"}「${g.key}」的 ${fen(g.amount)} 元 ✓ 同源一致</div>
   </div>`;
 }
 
@@ -1301,7 +1372,7 @@ function showIntentHint(){
   hint.className="intent-hint show";
   hint.innerHTML=`⚡ 实时意图识别 <span class="ih-badge">${sc.intent}</span>
     <span class="ih-conf">conf ${sc.conf.toFixed(2)}</span>
-    <span class="ih-note">${low?"&lt; 0.6 → 发送后将触发追问（不硬猜）":"→ 将执行「"+nm+"」"}</span>`;
+    <span class="ih-note">${low?"&lt; 0.6 → 发送后将触发追问（不硬猜）":"→ 将执行「"+nm+"」 · 听得懂大白话和错别字"}</span>`;
 }
 
 /* ================= ★ v3：流水筛选与搜索（同源实时聚合） ================= */
@@ -1441,23 +1512,69 @@ function greet(){
 }
 
 /* ================= 输入匹配（复刻 Python classifier 关键词规则与判定顺序）================= */
-function matchScenario(text){
-  const t=text;
-  if(/余额|多少钱|还剩|有多少/.test(t)){
-    return /信用卡|信用/.test(t)?"balanceCredit":"balanceSavings";
+/* ================= ★ v3.2 容错理解：错别字 + 大白话 ================= */
+/* 编辑距离≤1（替换/多一字/少一字）判定——用户打错一两个字也能匹配上关键词 */
+function distLe1(a,b){
+  if(a===b)return true;
+  const la=a.length,lb=b.length;
+  if(Math.abs(la-lb)>1)return false;
+  if(la===lb){let d=0;for(let i=0;i<la;i++){if(a[i]!==b[i]&&++d>1)return false;}return d<=1;}
+  if(la>lb){const x=a;a=b;b=x;}
+  let i=0,j=0,d=0;
+  while(i<a.length&&j<b.length){
+    if(a[i]===b[j]){i++;j++;}
+    else{d++;if(d>1)return false;if(a.length===b.length){i++;j++;}else j++;}
   }
-  if(/流水|交易明细/.test(t)){
-    const dates=t.match(/\d{4}-\d{2}-\d{2}/g);
+  return d+(b.length-j)<=1;
+}
+/* 在 t 中模糊查找关键词 kw（滑窗做 distLe1；2 字词只做同长度窗口的单字替换匹配防误伤） */
+function fuzzyHas(t,kw){
+  if(t.includes(kw))return true;
+  if(kw.length===2){ // 仅单字替换：如 余额→余鹅、流水→流氷
+    for(let i=0;i+1<t.length;i++){if(t[i]===kw[0]&&t[i+1]!==kw[1]||t[i]!==kw[0]&&t[i+1]===kw[1]){
+      if(distLe1(t.substr(i,2),kw))return true;}}
+    return false;
+  }
+  if(kw.length<2)return t.includes(kw);
+  for(let i=0;i+kw.length-1<t.length;i++){
+    if(distLe1(t.substr(i,kw.length),kw))return true;
+    if(i+kw.length<t.length&&distLe1(t.substr(i,kw.length+1),kw))return true;
+  }
+  return false;
+}
+/* 归一化：常见错字/繁体统一 + 去空格（帐→账、还→还等） */
+function normalizeInput(t){
+  return t.replace(/[帐賬]/g,"账").replace(/[餘额]/g,"余额").replace(/\s+/g,"")
+    .replace(/查看|帮我|请问|麻烦|一下|查下|查查/g,"").toLowerCase();
+}
+function matchScenario(text){
+  const t=normalizeInput(text);
+  // 写操作/危险请求优先（不能被口语改写绕过）
+  if(fuzzyHas(t,"破解")||fuzzyHas(t,"绕过")||fuzzyHas(t,"注入")||fuzzyHas(t,"盗别人")) return "unsafe";
+  // 转账（写操作，未接通）先于其他匹配
+  if(/转账|转钱|打钱|汇款|转给他|转给她|转500|转个/.test(t)) return "transfer";
+  // 订阅：口语"会员/自动扣款/扣月费/退订"都算
+  if(/订阅|会员|自动扣款|扣月费|退订|月费/.test(t)) return "subs";
+  // 账单报告：明确要"报告/总结/汇总"
+  if(/报告|报表|月报|账单总结|汇总|总结一下/.test(t)) return "report";
+  // 账单分析（先于流水/余额：因为"账单/花销"类说法常含"多少"）
+  if(/花了多少|花多少|主要花|都花|花在哪|花哪儿|花哪里|钱花哪|花去哪|花哪去|花销|开销|账单分析|消费分析|支出分析|支出结构|花得最多/.test(t)
+     ||fuzzyHas(t,"花了多少")||fuzzyHas(t,"花在哪里")) return "spending";
+  // 异常
+  if(/异常|可疑|盗刷|有问题|不对劲|被骗|风险/.test(t)) return "anomaly";
+  // 流水（含日期→明细表；否则追问）
+  if(/流水|交易明细|明细|交易记录|账单明细/.test(t)||fuzzyHas(t,"流水")||fuzzyHas(t,"交易记录")){
+    const dates=text.match(/\d{4}-\d{2}-\d{2}/g);
     if(dates&&dates.length>=2) return "txnTable";
     return "txnClarify";
   }
-  if(/花了多少|消费分析/.test(t)) return "spending";
-  if(/异常交易|可疑交易/.test(t)) return "anomaly";
-  if(/账单报告|报表/.test(t)) return "report";
-  if(/订阅|会员|自动扣款/.test(t)) return "subs";
-  if(/卡|卡片|银行卡/.test(t)) return "cards";
-  if(/破解|绕过|注入/.test(t)) return "unsafe";
-  return "transfer"; // out_of_scope 低置信度 → CLARIFY
+  // 余额：卡里还剩多少 / 还有多少钱 / 存款 / 欠款
+  if(/多少钱|还剩|剩多少|有多少|卡里|还有|存款|欠款|欠多少|负债/.test(t)||fuzzyHas(t,"余额")){
+    return /信用|贷记|信用卡/.test(t)?"balanceCredit":"balanceSavings";
+  }
+  // 卡片
+  if(/卡|卡片|银行卡|几张卡/.test(t)) return "cards";
+  return "transfer"; // out_of_scope 低置信度 → CLARIFY（不硬猜）
 }
 
 /* ================= 主流程 ================= */
