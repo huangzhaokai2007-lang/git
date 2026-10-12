@@ -95,4 +95,3 @@ def test_empty_result_has_its_own_sentence_without_a_dangling_head(seeded: Path)
     rendered = templates.render("subscription_list", result.facts)
     assert rendered == result.message == subscription.EMPTY_MESSAGE
     assert not rendered.endswith("：")
-

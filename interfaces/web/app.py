@@ -1,13 +1,11 @@
-"""卡 16：交互层聊天界面（Streamlit）—— 只做「搬运 + 展示」，业务一律在 agent/ 层。
-
-分层（CLAUDE.md 架构 + 卡 16「禁止在界面里写业务逻辑」）：
+"""卡 16：交互层聊天界面（Streamlit），业务一律在 agent/ 层。
+分层（CLAUDE.md 架构）：
 - 本层**只** `import agent.orchestrator` / `agent.confirm_card`（+ 同目录展示组件）；
   **不 import `tools/`、不 import `data/`、不写 SQL、不算金额、不判权限档**；
 - 一句话交给 `orchestrator.handle(...)`，拿回 `Turn`（回执 + 状态轨迹 + 档位 + trace_id）后原样展示；
-- 确认卡的「确认 / 取消 / 提交验证码」都走编排层（铁律 3：preview → 定档 → 确认 → 幂等执行）；
 - 合成库不存在时**只调用 data/ 层的 CLI**（`python -m data.seed` 子进程），既不 import 也不写 SQL。
 
-跑法：`uv run streamlit run interfaces/web/app.py`（在仓库根目录）
+跑法：`uv run streamlit run interfaces/web/app.py`
 """
 
 from __future__ import annotations
@@ -34,6 +32,7 @@ from agent import card_binding_flow, confirm_card, orchestrator  # noqa: E402
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
 import card_limit_ui as limits_ui                                # noqa: E402
+import card_lock_ui as locks_ui                                  # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 
 load_dotenv(ROOT / ".env")
@@ -61,7 +60,6 @@ def _ensure_db() -> bool:
     st.success("合成数据已生成。")
     return True
 
-
 def _init_state() -> None:
     """会话态：对话、轨迹、余额回显、追问轮次（跨 rerun 保留）。"""
     state = st.session_state
@@ -72,7 +70,6 @@ def _init_state() -> None:
     state.setdefault("balance", [])
     state.setdefault("pending_id", None)
     state.setdefault("clarify_round", 0)
-
 
 @st.cache_resource
 def _agent_executor() -> ThreadPoolExecutor:
@@ -86,9 +83,7 @@ def _agent_executor() -> ThreadPoolExecutor:
     """
     return ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent")
 
-
 # ---------------- 与编排层的唯一入口 ----------------
-
 def _ask(text: str, *, display: str | None = None) -> None:
     """把一句话交给编排层，记录回执与轨迹（界面不解释业务、不派生数字）。
 
@@ -111,7 +106,10 @@ def _ask(text: str, *, display: str | None = None) -> None:
     dump = turn.model_dump()
     if turn.intent == "card_query":
         cards_ui.reset(turn)
+    if turn.ask == "card_lock": limits_ui.reset()
+    if turn.ask == "limit_adjust": locks_ui.reset()
     limits_ui.accept_turn(_agent_executor(), state["session_id"], text, turn.ask)
+    locks_ui.accept_turn(_agent_executor(), state["session_id"], turn.ask)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
@@ -192,7 +190,7 @@ def _sidebar() -> str:
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:
-            if prompt in ("卡片查询", "调整额度"):
+            if prompt in ("卡片查询", "调整额度", "锁卡"):
                 st.session_state["navigate-page"] = PAGES[0]
             _ask(prompt)
             st.rerun()
@@ -202,6 +200,7 @@ def _sidebar() -> str:
             confirm_card.reset_state()
             cards_ui.reset()
             limits_ui.reset()
+            locks_ui.reset()
             st.session_state["bound-card-query"] = False
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0)):
                 st.session_state[key] = value
@@ -226,6 +225,7 @@ def _chat_page() -> None:
         cards_ui.render(_agent_executor(), st.session_state["session_id"])
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
+        locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()
