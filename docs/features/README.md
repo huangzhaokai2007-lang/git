@@ -20,13 +20,13 @@
 | [F20 送礼计划](F20-gift-plan.md) | 黄 | W4 | 莫 | 待复核 | — |
 | [F21 单笔转账](F21-single-transfer.md) | 黄 | W2 | 莫 | 待复核 | — |
 | [F22 新增收款人](F22-add-payee.md) | 黄 | W1 | 莫 | 待复核 | — |
-| [F04 订阅取消](F04-cancel-subscription.md) | 莫 | W1 | 舒 | 待审核（实现与测试已就绪，待 PR 与舒复核） | — |
-| [F10 风险测评](F10-risk-assessment.md) | 莫 | W2 | 舒 | 待复核 | — |
-| [F11 理财推荐](F11-wealth-recommend.md) | 莫 | W2 | 舒 | 待复核 | — |
+| [F04 订阅取消](F04-cancel-subscription.md) | 莫 | W1 | 舒 | 待审核 | [#13](https://github.com/huangzhaokai2007-lang/git/pull/13) |
+| [F10 风险测评](F10-risk-assessment.md) | 莫 | W2 | 舒 | 待审核 | [#13](https://github.com/huangzhaokai2007-lang/git/pull/13) |
+| [F11 理财推荐](F11-wealth-recommend.md) | 莫 | W2 | 舒 | 待审核 | [#13](https://github.com/huangzhaokai2007-lang/git/pull/13) |
 | [F12 理财申购](F12-wealth-buy.md) | 莫 | W3 | 舒 | 待复核 | — |
 | [F13 理财赎回](F13-wealth-redeem.md) | 莫 | W3 | 舒 | 待复核 | — |
 | [F18 订阅提醒](F18-subscription-reminder.md) | 莫 | W4 | 舒 | 待复核 | — |
-| [F19 订阅列表](F19-subscriptions.md) | 莫 | W1 | 舒 | 待复核 | — |
+| [F19 订阅列表](F19-subscriptions.md) | 莫 | W1 | 舒 | 待审核 | [#13](https://github.com/huangzhaokai2007-lang/git/pull/13) |
 | [F02 流水查询](F02-transactions.md) | 舒 | W1 | 汤 | 待复核 | — |
 | [F03 异常检测](F03-anomalies.md) | 舒 | W3 | 汤 | 待复核 | — |
 | [F14 账单分析](F14-bill-analysis.md) | 舒 | W2 | 汤 | 待复核 | — |

@@ -204,9 +204,15 @@ def test_every_request_writes_exactly_one_audit_row(seeded: Path,
 
 def test_read_intents_are_exactly_the_eight_from_the_card(seeded: Path,
                                                           monkeypatch: pytest.MonkeyPatch) -> None:
+    """只读意图清单 = 卡 09 的 8 个 + F10 的 `risk_assess`（规格 §2 第 108 行：T13 权限档 = L0）。
+
+    卡 09 当时只接 8 个只读意图；F10 把 `assess_risk` 接通后本表扩到 9 个 —— 这是**契约扩展**，
+    故同步更新这条锚定断言（原断言见 git 历史），而不是绕过它。`set(TOOL_ROUTES) == set(READ_INTENTS)`
+    这条不变式保留：**每个只读意图都必须有路由**（否则会静默落到「未接通」）。
+    """
     assert orchestrator.READ_INTENTS == ("balance_query", "txn_query", "bill_analysis", "anomaly_check",
                                          "bill_report", "subscription_list", "card_query",
-                                         "wealth_recommend")
+                                         "wealth_recommend", "risk_assess")
     assert all(intent in classifier.INTENT_LABELS for intent in orchestrator.READ_INTENTS)
     assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS)   # 卡 23 起 card_query 也有路由
 
@@ -218,8 +224,11 @@ def test_no_write_intent_has_a_route(seeded: Path, monkeypatch: pytest.MonkeyPat
     assert not (set(orchestrator.TOOL_ROUTES) & write_intent_names)
     assert not (set(orchestrator.TOOL_ROUTES) & set(orchestrator.WRITE_INTENTS))
     source = Path(orchestrator.__file__).read_text(encoding="utf-8")
+    #: `assess_risk` 曾在本清单里（卡 09 时它未接通、按"写工具名"防御性禁入）。F10 接通后它
+    #: 是**只读**（规格 §2 第 108 行 L0），故从禁入清单移除；它出现在 orchestrator 里的两处
+    #: （`READ_INTENTS` 与 `submit_assessment` 再导出）都是只读路径，不构成写入口。
     for forbidden in ("cancel_subscription", "manage_card", "trade_wealth",
-                      "plan_gift", "create_aa_request", "assess_risk"):
+                      "plan_gift", "create_aa_request"):
         assert forbidden not in source
     # card-10b 拆分后：唯一放行的写工具在写路径模块里，且只能经确认流程调用。
     # card-24：写路径再拆成 write_flow（通用四步骨架）+ write_intents（每意图写描述符），

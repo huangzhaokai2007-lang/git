@@ -30,9 +30,10 @@ from dotenv import load_dotenv                                  # noqa: E402  �
 from agent import card_binding_flow, confirm_card, orchestrator  # noqa: E402
 
 import components as ui                                         # noqa: E402
-import card_binding_ui as cards_ui                              # noqa: E402
+import card_binding_ui as cards_ui                               # noqa: E402
 import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
+import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 
 load_dotenv(ROOT / ".env")
 
@@ -163,45 +164,14 @@ def _render_confirm() -> None:
         st.rerun()
 
 
-# ---------------- 卡 20：收款人自助添加（聊天触发 → 表单 → 经 agent 落库） ----------------
+# ---------------- 表单桥（卡 20 收款人 / F10 风险测评） ----------------
+# 两个表单的渲染与提交都拆到 `interfaces/web/forms.py`（F10 接通后本文件超红线 300）；
+# 这里只负责"交给它、按结果 rerun"，会话状态仍由本模块唯一持有。
 
-def _render_payee_form() -> None:
-    """编排层判出 `payee_add` 时弹表单；提交**经 agent 层**落库。
-
-    界面只判断"该不该弹"（看 `turn.intent`）并把两个输入原样交出去 —— 脱敏、校验、落库、审计
-    全在 `agent/payee_flow.py` → `tools/payee.py`（界面不写业务逻辑）。
-    """
-    turn = st.session_state["messages"][-1].get("turn") or {}
-    if turn.get("intent") != "payee_add" or turn.get("executed"):
-        return                       # 提交成功（executed=True）就把表单收起来，避免重复提交；失败则保留可重试
-    submitted = ui.payee_form()
-    if submitted is None:
-        return
-    _submit_payee(*submitted)
-    st.rerun()
-
-
-def _submit_payee(name: str, phone: str) -> None:
-    """表单提交：走 `orchestrator.submit_payee`（agent 层入口），不直连 `tools/`。
-
-    手机号**只经手不记录**：聊天记录只写"（表单提交）"，脱敏后的号码由回执（agent 层）给出。
-    记账口径与 `_ask` 相同（刻意不复用：`_ask` 走的是"一句话"入口，签名与副作用都不同）。
-    """
-    state = st.session_state
-    state["messages"].append({"role": "user", "text": "（表单提交）新增收款人"})
-    try:
-        turn = _agent_executor().submit(orchestrator.submit_payee, name, phone,
-                                        session_id=state["session_id"]).result()
-    except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
-        state["messages"].append({"role": "assistant", "turn": None,
-                                  "text": f"这次提交没能完成（{type(exc).__name__}: {exc}）。"
-                                          "如果是库结构问题，在仓库根目录跑 "
-                                          "`uv run python -m data.seed --reset` 后重试。"})
-        return
-    dump = turn.model_dump()
-    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": "（表单提交）新增收款人", "turn": dump})
-    state["clarify_round"] = 0                  # 表单提交不是追问的后续
+def _render_forms() -> None:
+    """渲染全部表单桥；任一表单提交了 → rerun（与历史 `_render_payee_form` 的行为一致）。"""
+    if forms.render_all(st.session_state, _agent_executor()):
+        st.rerun()
 
 
 # ---------------- 侧边栏 ----------------
@@ -248,7 +218,9 @@ def _chat_page() -> None:
             ui.bill_panel(ui.bill_series(messages), latest)
     _render_pending()
     _render_confirm()
-    _render_payee_form()
+    #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
+    #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
+    _render_forms()
     if st.session_state.get("bound-card-query"):
         cards_ui.render(_agent_executor(), st.session_state["session_id"])
     else:

@@ -13,6 +13,12 @@
     表现：侧边栏点「💸 转账」当场报错，整条写路径在界面上不可用。
 
 本文件用真实 `AppTest` 跑 `interfaces/web/app.py`，把这两条渲染路径钉住。
+
+**必须钉假时钟**（`clock` fixture）：转账档位是**纯代码**按规格 §5 算的，其中含 `night`
+因子（`23:00–06:00` 升一档）。本例的「张小美」（非白名单）**白天是 L2（出确认卡 + OTP），
+深夜会被顶到 L3（转待复核，卡上没有「确认」按钮）** —— 不钉时钟，这条用例只在白天绿、
+夜间必挂（`StopIteration`）。`_app()` 因此显式接收 `clock`，把时间钉在 conftest 的
+`2026-09-12 12:00`（白天、无凌晨因子）。
 """
 
 from __future__ import annotations
@@ -34,8 +40,13 @@ import demo                                                       # noqa: E402
 MERCHANT = "云音乐"          # sub_0001（data/seed.py）：active、15.00 元／月、唯一命中
 
 
-def _app(monkeypatch: pytest.MonkeyPatch, verdict: dict) -> AppTest:
-    """起一份临时合成库（AppTest 在进程内跑 app.py，故 `DB_PATH` 指向它）+ 假分类器。"""
+def _app(monkeypatch: pytest.MonkeyPatch, verdict: dict, clock: object) -> AppTest:
+    """起一份临时合成库（AppTest 在进程内跑 app.py，故 `DB_PATH` 指向它）+ 假分类器。
+
+    `clock` 不是这里用的，而是**依赖它把 `transfer._now` 钉在白天**：AppTest 进程内执行
+    `app.py`，会看到 conftest 已 patch 的同一个 `tools.transfer` 模块对象。不传它则测试读
+    真实系统时间，深夜的 `night` 因子会把档位顶高一档（见模块 docstring）。
+    """
     path = demo.build_temp_db()
     monkeypatch.setenv("DB_PATH", str(path))
 
@@ -70,20 +81,24 @@ def _metric_labels(at: AppTest) -> list[str]:
     return [str(element.label) for element in at.metric]
 
 
-def test_transfer_confirm_card_renders(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_transfer_confirm_card_renders(monkeypatch: pytest.MonkeyPatch, clock: object) -> None:
     """回归（用户实测的崩溃点）：转账走到确认卡必须能渲染。"""
     at = _say(_app(monkeypatch, {"intent": "transfer_single", "confidence": 0.95,
-                                 "slots": {"payee": "王五", "amount": "100.00"}}),
+                                 "slots": {"payee": "王五", "amount": "100.00"}}, clock),
               "给王五转 100 元")
     assert "转账确认卡" in _markdown(at)
     assert _metric_labels(at) == ["金额（元）", "收款人", "权限档（风险等级）", "短信验证码"]
     assert "王五" in _markdown(at) or "王五" in _caption(at)
 
 
-def test_transfer_otp_card_renders(monkeypatch: pytest.MonkeyPatch) -> None:
-    """同族的第二个崩溃点：点「确认」进入 OTP 阶段，`otp_card` 也读了 `payee_name`。"""
+def test_transfer_otp_card_renders(monkeypatch: pytest.MonkeyPatch, clock: object) -> None:
+    """同族的第二个崩溃点：点「确认」进入 OTP 阶段，`otp_card` 也读了 `payee_name`。
+
+    「张小美」非白名单 → 基础档 L2；**白天无升档因子**，正是本例要的「L2 + OTP」。
+    （深夜的 `night` 因子会把它顶到 L3，卡上就没有「确认」按钮了 —— 故必须钉 `clock`。）
+    """
     at = _say(_app(monkeypatch, {"intent": "transfer_single", "confidence": 0.95,
-                                 "slots": {"payee": "张小美", "amount": "100.00"}}),   # 非白名单 → L2
+                                 "slots": {"payee": "张小美", "amount": "100.00"}}, clock),   # 非白名单 → L2
               "给张小美转 100 元")
     confirm = next(b for b in at.button if str(getattr(b, "key", "")) == "confirm-ok")
     confirm.click().run()
@@ -92,10 +107,11 @@ def test_transfer_otp_card_renders(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "张小美" in _caption(at)                                   # OTP 卡也要正确显示主对象
 
 
-def test_subscription_cancel_card_uses_the_generic_label(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_subscription_cancel_card_uses_the_generic_label(monkeypatch: pytest.MonkeyPatch,
+                                                         clock: object) -> None:
     """card-24 泛化的正面用例：同一张卡对订阅取消要显示「商户」，不能写死「收款人」。"""
     at = _say(_app(monkeypatch, {"intent": "subscription_cancel", "confidence": 0.95,
-                                 "slots": {"merchant": MERCHANT}}),
+                                 "slots": {"merchant": MERCHANT}}, clock),
               f"取消{MERCHANT}订阅")
     assert "订阅取消确认卡" in _markdown(at)
     labels = _metric_labels(at)
