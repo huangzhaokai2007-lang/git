@@ -159,6 +159,10 @@ class Confirmation(BaseModel):
     requires_otp: bool
     stage: str = "confirm"            # confirm → otp → 完成/放弃
     card_text: str = ""
+    #: SLOT_FILL 补齐后的槽位快照，供描述符的 `execute` 取用（card-24 泛化后的补充）。
+    #: **为什么需要它**：`target_id` 只装得下单主键 —— T9 `create_aa_request(payee_ids, amount)`
+    #: 要一个列表、T16 `plan_gift(contact, date, budget)` 要三个参数，都装不进去（F15/F20 的实测障碍）。
+    filled: dict = {}
 
 
 class Pending(BaseModel):

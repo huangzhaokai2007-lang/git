@@ -87,7 +87,9 @@ class WriteSpec:
     prepare: Callable[[dict], Prepared]
     card: Callable[[str, dict, Mapping, str, bool], confirm_card.CardInput]
     plain: Callable[[dict, Mapping, str], str]
-    execute: Callable[[str, str, str | None], ToolResult]
+    execute: Callable[["confirm_card.Confirmation", str | None], ToolResult]
+    # ↑ 入参是**整张确认卡**（而非旧的 `target_id`）：单主键装不下 T9 的收款人列表与
+    #   T16 的 `(contact, date, budget)`；快照在 `Confirmation.filled` 里（F15/F20 的改造）。
 
 
 # ---------------- 转账（T6/T7）：preview_token 族，OTP 在工具层 ----------------
@@ -170,10 +172,9 @@ def _plain_transfer(filled: dict, facts: Mapping, tier: str) -> str:
             f"权限档 {tier}。")
 
 
-def _execute_transfer(target_id: str, credential: str, otp: str | None) -> ToolResult:
+def _execute_transfer(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
     """OTP 校验与幂等**都在工具层**（card-05 已 PASS）；本层不重写。"""
-    del target_id                                                    # 工具层只认 token
-    return transfer.execute_transfer(credential, otp)
+    return transfer.execute_transfer(confirmation.credential, otp)   # 工具层只认 token，不看 payee_id
 
 
 # ---------------- 订阅取消（T11）：confirm_ref 族，OTP 在编排层 ----------------
@@ -245,10 +246,10 @@ def _plain_subscription(filled: dict, facts: Mapping, tier: str) -> str:
             f"{_cycle_cn(facts['cycle'])}），权限档 {tier}。")
 
 
-def _execute_subscription(target_id: str, credential: str, otp: str | None) -> ToolResult:
+def _execute_subscription(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
     """T11 的 OTP 闸门**在编排层**（工具签名没有 otp 参数），本函数只把 `(sub_id, ref)` 交给工具层。"""
     del otp
-    return subscription.cancel_subscription(target_id, credential)
+    return subscription.cancel_subscription(confirmation.target_id, confirmation.credential)
 
 
 # ---------------- 描述符表（唯一来源） ----------------
