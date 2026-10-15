@@ -44,6 +44,13 @@ from agent._write_aa import (
     _prepare_aa,
     _shape_aa,
 )
+from agent._write_gift import (
+    _card_gift,
+    _execute_gift,
+    _plain_gift,
+    _prepare_gift,
+    _shape_gift,
+)
 from agent._write_subscription import (
     CANCEL_ACTION,
     CANCEL_CN,
@@ -97,6 +104,17 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="aa_target",
         what="AA 收款", shape=_shape_aa, prepare=_prepare_aa,
         card=_card_aa, plain=_plain_aa, execute=_execute_aa),
+    # F20：**无凭证族**（T16 签名没有凭证参数），L2 要 OTP —— 闸门落在编排层（同 T11/T15）。
+    # 确认卡数字取自 T19 `preview_gift`（L0 只读，SPEC-CHANGE 新增）：它一调不锁款，
+    # 真锁款只在 `execute` 调 T16 `plan_gift` 时发生。
+    "gift_plan": WriteSpec(
+        intent="gift_plan", intent_cn="送礼计划", title="送礼计划确认卡",
+        credential_kind="none", otp_in_tool=False,
+        missing=("contact", "date", "budget"), tools=("preview_gift",),
+        execute_tool="plan_gift",
+        target_key="contact",
+        what="送礼计划", shape=_shape_gift, prepare=_prepare_gift,
+        card=_card_gift, plain=_plain_gift, execute=_execute_gift),
 }
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
