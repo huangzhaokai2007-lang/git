@@ -99,7 +99,7 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
 #: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
-_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡"}
+_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡"}
 _CARD_TARGET = {"subscription_cancel": "商户"}
 
 

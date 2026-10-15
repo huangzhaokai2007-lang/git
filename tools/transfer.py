@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from tools._aa_split import aa_facts
 from tools._card_limit_transfer import restrict as _restrict_card_daily
 from datetime import datetime, timedelta
 
@@ -286,13 +287,10 @@ def create_aa_request(payee_ids: list[str], amount: int) -> ToolResult:
         return _fail(exc.code, exc.message)
     except ValueError as exc:
         return _dao_reject(exc)
-    per_person = amount // len(payees)
-    share = amount - per_person * len(payees)                   # 余数给发起人
-    facts = {"request_id": request_id, "payee_count": len(payees), "tier": "L1",
-             **_money_facts(amount, "amount"), **_money_facts(per_person, "per_person_amount"),
-             **_money_facts(share, "initiator_share"), "total_check": per_person * len(payees) + share,
-             "payees": [{"id": payee["id"], "name": payee["name"]} for payee in payees]}
-    data = AaData(request_id=request_id, per_person_amount=per_person)
+    # 分摊与事实包走 `tools/_aa_split.py` 的**唯一实现**：编排层确认卡（只算不执行）用的是同一份，
+    # 改一处即两处同步，避免「卡上说 33.33、执行回执说 33.34」这类口径漂移（F15）。
+    facts = aa_facts(payees, amount, extra={"request_id": request_id})
+    data = AaData(request_id=request_id, per_person_amount=facts["per_person_amount"])
     message = (f"已发起 AA 收款 {facts['amount_yuan']} 元，{facts['payee_count']} 人各 "
                f"{facts['per_person_amount_yuan']} 元，余数 {facts['initiator_share_yuan']} 元由你承担。")
     return _ok(data.model_dump(), facts, message)
