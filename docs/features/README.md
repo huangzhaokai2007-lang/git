@@ -17,7 +17,7 @@
 | [F15 AA 收款](F15-aa-collect.md) | 黄 | W2 | 莫 | 待审核 | [#18](https://github.com/huangzhaokai2007-lang/git/pull/18) |
 | [F16 定时转账](F16-scheduled-transfer.md) | 黄 | W3 | 莫 | 待复核 | — |
 | [F17 收款人解析](F17-resolve-payee.md) | 黄 | W1 | 莫 | 待审核 | [#3](https://github.com/huangzhaokai2007-lang/git/pull/3) |
-| [F20 送礼计划](F20-gift-plan.md) | 黄 | W4 | 莫 | 待复核 | — |
+| [F20 送礼计划](F20-gift-plan.md) | 黄 | W4 | 莫 | 待审核 | [#19](https://github.com/huangzhaokai2007-lang/git/pull/19) |
 | [F21 单笔转账](F21-single-transfer.md) | 黄 | W2 | 莫 | 待审核 | [#9](https://github.com/huangzhaokai2007-lang/git/pull/9) |
 | [F22 新增收款人](F22-add-payee.md) | 黄 | W1 | 莫 | 待审核 | [#10](https://github.com/huangzhaokai2007-lang/git/pull/10) |
 | [F04 订阅取消](F04-cancel-subscription.md) | 莫 | W1 | 舒 | 待审核 | [#13](https://github.com/huangzhaokai2007-lang/git/pull/13) |
