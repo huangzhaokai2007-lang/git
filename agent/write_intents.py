@@ -37,6 +37,20 @@ from agent._write_common import (       # noqa: F401 —— 再导出，保住 `
     WriteSpec,
     yuan_to_cents,
 )
+from agent._write_aa import (
+    _card_aa,
+    _execute_aa,
+    _plain_aa,
+    _prepare_aa,
+    _shape_aa,
+)
+from agent._write_gift import (
+    _card_gift,
+    _execute_gift,
+    _plain_gift,
+    _prepare_gift,
+    _shape_gift,
+)
 from agent._write_subscription import (
     CANCEL_ACTION,
     CANCEL_CN,
@@ -79,6 +93,28 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="sub_id",
         what="取消订阅", shape=_shape_subscription, prepare=_prepare_subscription,
         card=_card_subscription, plain=_plain_subscription, execute=_execute_subscription),
+    # F15：**无凭证族**（T9 签名没有 preview_token / confirm_ref），L1 不要 OTP。
+    # `otp_in_tool=False` 表示「编排层不管 OTP」；因 L1 的 `requires_otp=False`，
+    # `write_flow._execute` 的闸门不会触发（闸门条件已加 `confirmation.requires_otp`）。
+    "aa_collect": WriteSpec(
+        intent="aa_collect", intent_cn="AA 收款", title="AA 收款确认卡",
+        credential_kind="none", otp_in_tool=False,
+        missing=("payee_ids", "amount"), tools=(),      # PRECHECK 阶段**不调任何工具**（T9 无 preview）
+        execute_tool="create_aa_request",
+        target_key="aa_target",
+        what="AA 收款", shape=_shape_aa, prepare=_prepare_aa,
+        card=_card_aa, plain=_plain_aa, execute=_execute_aa),
+    # F20：**无凭证族**（T16 签名没有凭证参数），L2 要 OTP —— 闸门落在编排层（同 T11/T15）。
+    # 确认卡数字取自 T19 `preview_gift`（L0 只读，SPEC-CHANGE 新增）：它一调不锁款，
+    # 真锁款只在 `execute` 调 T16 `plan_gift` 时发生。
+    "gift_plan": WriteSpec(
+        intent="gift_plan", intent_cn="送礼计划", title="送礼计划确认卡",
+        credential_kind="none", otp_in_tool=False,
+        missing=("contact", "date", "budget"), tools=("preview_gift",),
+        execute_tool="plan_gift",
+        target_key="contact",
+        what="送礼计划", shape=_shape_gift, prepare=_prepare_gift,
+        card=_card_gift, plain=_plain_gift, execute=_execute_gift),
 }
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
