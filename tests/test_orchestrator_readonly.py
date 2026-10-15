@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from agent import classifier, llm, orchestrator, templates, write_flow, write_intents
+from agent import (classifier, llm, orchestrator, templates, write_flow, write_intents,
+                   _write_subscription, _write_transfer)
 from data import dao
 
 from tests.conftest import count, raw
@@ -233,7 +234,11 @@ def test_no_write_intent_has_a_route(seeded: Path, monkeypatch: pytest.MonkeyPat
     # card-10b 拆分后：唯一放行的写工具在写路径模块里，且只能经确认流程调用。
     # card-24：写路径再拆成 write_flow（通用四步骨架）+ write_intents（每意图写描述符），
     # 执行调用随描述符落到 write_intents；**红线不变** —— orchestrator 里一个写工具名都不许出现。
+    # F15/F20 拆卡：描述符再按意图族拆到 `_write_transfer` / `_write_subscription`
+    # （write_intents 曾 296 行、装不下新描述符），故扫描范围随之扩到这两个模块
+    # —— 同 card-10b 的先例：拆分即同步扫描范围，红线本身不变。
     flow = "".join(Path(module.__file__).read_text(encoding="utf-8")
-                   for module in (write_flow, write_intents))
+                   for module in (write_flow, write_intents,
+                                  _write_transfer, _write_subscription))
     assert "transfer.execute_transfer" in flow
     assert "transfer.execute_transfer" not in source and "execute_transfer(" not in source
