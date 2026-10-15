@@ -120,7 +120,7 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     if not spec.otp_in_tool and not write_intents.otp_ok(otp):       # confirm_ref 族：本层闸门
         step.result = "error"
         return _otp_rejected(session_id, step, spec)
-    result = spec.execute(confirmation.target_id, confirmation.credential, otp)
+    result = spec.execute(confirmation, otp)                         # 入参是整张确认卡（含槽位快照）
     if not result.ok:
         code = error_code_of(result)
         step.result, step.error_code = "error", code
@@ -199,7 +199,7 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
         masked_phone=confirm_card.mask_phone(str(filled.get("masked_phone") or "")),
         amount_yuan=str(prepared.facts.get("amount_yuan") or ""),
         amount_cents=context["amount_cents"], tier=verdict.tier,
-        requires_otp=verdict.requires_otp, card_text=card_text))
+        requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled)))
     return Step(states=["CONFIRM_CARD"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, reply=card_text, ask=card_text, degraded=degraded)
 
