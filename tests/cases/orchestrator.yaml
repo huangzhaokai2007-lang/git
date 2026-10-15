@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 7 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 = 37 条
+# 分组：bill 5 / trf 7 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 = 42 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -107,6 +107,41 @@
   # 零命中 → 缺槽追问，**绝不擅自选一个**（F15 验收第 1 条）。
   expect: {intent: aa_collect, tool_calls: [], tier: null, executed: false,
            must_contain: ["没有找到匹配的收款人"]}
+
+# ---------------- 送礼计划 5（F20） ----------------
+- id: gft-001
+  input: "2026-10-20 给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  # F20 验收第 1/2 条：确认前**只调 T19 只读预览**（不锁资金），卡面并列「可用余额 / 账户余额」。
+  expect: {intent: gift_plan, tool_calls: [preview_gift], tier: L2, executed: false, requires_otp: true,
+           must_contain: ["送礼计划确认卡", "预算", "礼物清单", "可用余额", "账户余额"],
+           must_not_contain: ["已锁定", "已为"]}
+- id: gft-002
+  input: "2026-10-20 给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  turns: ["确认"]
+  # L2：确认之后要 OTP（闸门在编排层，T16 签名没有 otp 参数）。
+  expect: {intent: gift_plan, tool_calls: [], tier: L2, executed: false, requires_otp: true,
+           must_contain: ["验证码"]}
+- id: gft-003
+  input: "2026-10-20 给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  turns: ["确认", "123456"]
+  # 确认 + 正确 OTP 后才真锁款：T16 生成 plan_id/lock_id 并扣 available。
+  expect: {intent: gift_plan, tool_calls: [plan_gift], tier: L2, executed: true,
+           must_contain: ["已为", "锁定", "可用余额"]}
+- id: gft-004
+  input: "2026-10-20 给张三送生日礼物，预算 100 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "100.00"}
+  # 失败路径：预算低于最便宜的一件礼物（鲜花 199 元）→ 工具层直接拒，不出确认卡。
+  expect: {intent: gift_plan, tool_calls: [preview_gift], tier: null, executed: false,
+           must_contain: ["预算不足"]}
+- id: gft-005
+  input: "给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, budget: "500.00"}
+  # 缺日期 → 追问，**绝不猜一个日期**（不擅自取今天）。
+  expect: {intent: gift_plan, tool_calls: [], tier: null, executed: false,
+           must_contain: ["日期"]}
 
 # ---------------- 订阅 5 ----------------
 - id: sub-001
