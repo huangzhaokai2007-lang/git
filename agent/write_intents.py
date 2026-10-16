@@ -51,6 +51,7 @@ from agent._write_transfer import (
     _execute_transfer,
     _plain_transfer,
     _prepare_transfer,
+    _shape_scheduled,
     _shape_transfer,
 )
 from tools.transfer import OTP_CODE     # agent→tools 合法；OTP 明文绝不进日志/facts/回执
@@ -65,12 +66,17 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="payee_id",
         what="转账", shape=_shape_transfer, prepare=_prepare_transfer,
         card=_card_transfer, plain=_plain_transfer, execute=_execute_transfer),
+    # ⚠️ F16 止损：`shape` 走 `_shape_scheduled` —— **一律追问转即时，绝不出确认卡**
+    # （修前会出「预计到账：实时到账」的即时转账卡，点确认即扣款）。
+    # 故本条的 prepare/card/plain/execute 目前**不可达**（F16 落地时整体替换）；
+    # 保留它们是为满足 `WriteSpec` 的字段约束，并让 F16 的改动面一眼可见。
+    # 完整方案见 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md`。
     "transfer_scheduled": WriteSpec(
         intent="transfer_scheduled", intent_cn="定时转账", title="转账确认卡",
         credential_kind="preview_token", otp_in_tool=True,
         missing=("payee", "amount"), tools=("preview_transfer",), execute_tool="execute_transfer",
         target_key="payee_id",
-        what="转账", shape=_shape_transfer, prepare=_prepare_transfer,
+        what="转账", shape=_shape_scheduled, prepare=_prepare_transfer,
         card=_card_transfer, plain=_plain_transfer, execute=_execute_transfer),
     "subscription_cancel": WriteSpec(
         intent="subscription_cancel", intent_cn=CANCEL_CN, title="订阅取消确认卡",

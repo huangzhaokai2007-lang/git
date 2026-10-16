@@ -3,8 +3,9 @@
 F15/F20 拆卡时从 `agent/write_intents.py` 按意图族拆出；核心契约类型与共享工具见
 `agent/_write_common.py`，注册表见 `agent/write_intents.py`。
 
-**本族覆盖两个意图**：`transfer_single` 与 `transfer_scheduled` —— 它们共用同一组五个纯函数
-（`preview_transfer` 的 `schedule` 参数语义属 F16，尚未实现，见 `_prepare_transfer`）。
+**本族覆盖两个意图**：`transfer_single`（完整可用）与 `transfer_scheduled`（**F16 未接通，
+当前为「止损」状态**：`shape` 一律走 `_shape_scheduled` 追问转即时，绝不降级成即时转账）。
+`preview_transfer` 的 `schedule` 参数语义属 F16，见 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md`。
 """
 
 from __future__ import annotations
@@ -17,6 +18,28 @@ from tools import transfer
 
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
 TRANSFER_CN = {"transfer_single": "单笔转账", "transfer_scheduled": "定时转账"}
+
+#: F16 未接通期间的止损文案（纯措辞，不含任何业务数字）
+SCHEDULED_UNSUPPORTED = ("定时转账还没接通（F16 排 W3），预约暂时无法受理。"
+                         "如需立即转账，请说「立即给某某转多少钱」。")
+
+
+def _shape_scheduled(slots: Mapping) -> ShapeResult:
+    """F16 **止损**：定时转账一律追问转即时，**绝不降级成即时转账**。
+
+    修复的问题（实机复现）：此前 `transfer_scheduled` 复用 `_shape_transfer` / `_prepare_transfer`，
+    而 `_prepare_transfer` **不传 `schedule`** —— 于是「明天给王五转100元」会出**即时转账**
+    确认卡（卡面写「预计到账：实时到账」），L1 档点一下确认**钱立刻出去**，预约日期被静默丢弃。
+    这违反 F16 验收第 2 条「**预约时间到达前不能按即时转账扣款**」。
+
+    止损口径（与完整方案 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md` 解耦）：
+    **不论用户有没有给时间，一律不出确认卡** —— 给了时间我们也做不到（F16 未实现）；
+    没给时间说明模型识别到了时间却没抽出来。两种情况都**不能**当成即时转账。
+
+    走 `ShapeResult.clarify`（追问渠道）而非 `error_code`：后者会被 `templates.tool_error`
+    套上「这次没能查到您要的信息」，用在这里语义不对；追问还能给出可执行的下一步。
+    """
+    return ShapeResult(filled=dict(slots), missing=["schedule"], clarify=SCHEDULED_UNSUPPORTED)
 
 
 def _shape_transfer(slots: Mapping) -> ShapeResult:
