@@ -217,3 +217,46 @@ def test_l3_pending_can_be_revoked_before_it_takes_effect(wired, clock, monkeypa
     assert confirm_card.due(turn.pending_id, confirm_card.now_iso()) is False  # 撤销后永不生效
     assert balance(wired) == before_balance
     assert raw(wired, "SELECT COUNT(*) AS n FROM txn WHERE memo LIKE '%李四%'")[0]["n"] >= 0
+
+
+# ---------------- F16 止损：定时转账绝不降级成即时转账 ----------------
+
+def scheduled_intent(slots: dict) -> dict:
+    """一条定时转账意图（槽位名与 `classifier.SLOT_SCHEMA['transfer_scheduled']` 一致）。"""
+    return {"intent": "transfer_scheduled", "confidence": 0.95,
+            "slots": slots, "missing_slots": []}
+
+
+def test_scheduled_transfer_never_falls_back_to_an_immediate_one(wired, monkeypatch) -> None:
+    """F16 止损：说了预约时间 → **不出确认卡、不扣款**（此前会出「实时到账」的即时转账卡）。
+
+    钉的是 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」在 F16 落地前的**下限保证**：
+    修前实机表现为 `意图：定时转账 … 预计到账：实时到账 · L1`，点确认即扣款。
+    """
+    before_balance, before_txn = balance(wired), count(wired, "txn")
+    step = turn_for(monkeypatch, f"明天给{WANGWU}转 100 元",
+                    [scheduled_intent({"payee": WANGWU, "amount": "100.00", "schedule": "明天"})])
+    assert step.executed is False and "CONFIRM_CARD" not in step.states
+    assert "还没接通" in step.reply
+    assert "实时到账" not in step.reply and "【转账确认卡】" not in step.reply
+    assert confirm_card.current(SESSION) is None                      # 没有留下在途确认
+    assert balance(wired) == before_balance and count(wired, "txn") == before_txn
+
+
+def test_scheduled_transfer_without_a_time_is_also_refused(wired, monkeypatch) -> None:
+    """模型识别到定时意图但**没抽出时间** → 同样不能当成即时转账（否则就是猜）。"""
+    before_balance = balance(wired)
+    step = turn_for(monkeypatch, f"下个月给{WANGWU}转 100 元",
+                    [scheduled_intent({"payee": WANGWU, "amount": "100.00"})])
+    assert step.executed is False and "CONFIRM_CARD" not in step.states
+    assert "还没接通" in step.reply
+    assert confirm_card.current(SESSION) is None
+    assert balance(wired) == before_balance
+
+
+def test_immediate_transfer_still_works_after_the_stopgap(wired, monkeypatch) -> None:
+    """止损**不能误伤即时转账** —— 同一收款人的即时转账仍照常出确认卡。"""
+    step = turn_for(monkeypatch, f"给{WANGWU}转 100 元",
+                    [intent({"payee": WANGWU, "amount": "100.00"})])
+    assert "CONFIRM_CARD" in step.states and "【转账确认卡】" in step.reply
+    assert "还没接通" not in step.reply
