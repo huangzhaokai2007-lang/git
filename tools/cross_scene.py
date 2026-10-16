@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime
 import logging
 import uuid
+from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -28,7 +29,8 @@ from data import dao
 from data.db import transaction
 from data.seed import AS_OF
 from tools._query_common import (
-    ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_session_id, current_user_id,
+    ToolError, _dao_reject, _fail, _invalid, _money, _money_facts, _ok, current_session_id,
+    current_user_id,
 )
 from tools.schemas import ErrorCode, ToolResult
 from tools.subscription import reject_audit
@@ -83,18 +85,33 @@ def _pick_items(budget: int) -> list[dict]:
     return [max(affordable, key=lambda item: item["price"])]
 
 
-def _lock_funds(amount: int) -> dict:
-    """锁定资金：`available` 扣减（**不动 balance**），返回锁后的账户行；余额不足 → `INSUFFICIENT_FUNDS`。
+def _savings_row() -> dict:
+    """当前用户的储蓄账户行（**归属校验 fail-closed**）。
 
-    TODO(07b)：DDL 补锁资金表 + DAO 补 `lock_funds/unlock_funds`，替掉这里的直查直改。
+    T16 锁资金与 T19 只读预览共用同一份取数 —— 两处若各写一遍，口径迟早分叉。
     """
     conn = dao.connection()
     row = conn.execute("SELECT * FROM account WHERE user_id = ? AND type = 'savings' ORDER BY id LIMIT 1",
                        (current_user_id(),)).fetchone()
     if row is None or row["user_id"] != current_user_id():
         raise ToolError(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
-    if row["available"] < amount:
+    return dict(row)
+
+
+def _require_available(account: Mapping, amount: int) -> None:
+    """可用余额够不够本笔预算；不够 → `INSUFFICIENT_FUNDS`（T16 与 T19 同一句措辞）。"""
+    if account["available"] < amount:
         raise ToolError(ErrorCode.INSUFFICIENT_FUNDS, "可用余额不足以锁定本次预算")
+
+
+def _lock_funds(amount: int) -> dict:
+    """锁定资金：`available` 扣减（**不动 balance**），返回锁后的账户行；余额不足 → `INSUFFICIENT_FUNDS`。
+
+    TODO(07b)：DDL 补锁资金表 + DAO 补 `lock_funds/unlock_funds`，替掉这里的直查直改。
+    """
+    conn = dao.connection()
+    row = _savings_row()
+    _require_available(row, amount)
     conn.execute("UPDATE account SET available = available - ? WHERE id = ?", (amount, row["id"]))
     locked = dict(conn.execute("SELECT * FROM account WHERE id = ?", (row["id"],)).fetchone())
     logger.info("锁定资金：lock 账户=%s 金额=%s 锁后 available=%s", row["id"], amount, locked["available"])
@@ -159,3 +176,49 @@ def plan_gift(contact: str, date: str, budget: int) -> ToolResult:
     except ValueError as exc:
         return _dao_reject(exc)
     return _receipt(contact, date, budget, ids, items, total, locked)
+
+
+# ---------------- T19 preview_gift（F20 · SPEC-CHANGE 新增，L0 只读） ----------------
+
+def _gift_facts(contact: str, date: str, budget: int, items: list[dict], account: Mapping,
+                total: int) -> dict:
+    """T19 的事实包：预算 / 清单（含每件 `price_yuan`）/ 合计 / 可用余额 / 账户余额。
+
+    每件礼物带 `price_yuan` 是**必须的**：F20 的确认卡要列出清单与价格，而卡上每个数字都得能在
+    事实包里找到（铁律 2 + `guard.facts_check` 守门）—— 只给整数分不够，校验器比对的是「元」写法。
+    """
+    return {"contact": contact, "date": date, "tier": GIFT_TIER, "requires_otp": True,
+            "item_count": len(items), "total": total,
+            "available": account["available"], "balance": account["balance"],
+            "items": [{**item, "price_yuan": _money(item["price"])} for item in items],
+            **_money_facts(budget, "budget"), **_money_facts(total, "total"),
+            **_money_facts(account["available"], "available"),
+            **_money_facts(account["balance"], "balance")}
+
+
+def preview_gift(contact: str, date: str, budget: int) -> ToolResult:
+    """T19 送礼计划**只读预览**（L0）：挑礼物 + 算合计 + 读余额；**不锁资金、不写审计**。
+
+    依据 F20 设计（`docs/superpowers/specs/2026-10-12-f20-gift-plan-design.md`）的 Q1/Q2：
+    确认卡要显示预算与清单，而**卡上数字必须有工具层来源**（铁律 2）—— T16 是写操作（一调就锁款），
+    不能拿它当预览，故单独给一个只读入口。选品与日期口径与 T16 **共用** `_pick_items` / `_wanted_date`，
+    不会出现「预览说买得起、执行时拒了」这种分叉。
+
+    与 T16 的区别：**不调 `_lock_funds`、不写 `audit_log`、不生成 `plan_id`/`lock_id`**。
+    """
+    if (bad := _invalid(PlanGiftReq, contact=contact, date=date, budget=budget)) is not None:
+        return bad
+    try:
+        _wanted_date(date)
+        items = _pick_items(budget)
+        total = sum(item["price"] for item in items)
+        account = _savings_row()
+        _require_available(account, total)          # 与 T16 同一判据：预览就报，不让用户白确认
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    except ValueError as exc:
+        return _dao_reject(exc)
+    facts = _gift_facts(contact, date, budget, items, account, total)
+    message = (f"已为 {contact} 的 {date} 选好 {facts['item_count']} 件礼物，合计 "
+               f"{facts['total_yuan']} 元；可用余额 {facts['available_yuan']} 元，**尚未锁定**。")
+    return _ok({}, facts, message)
