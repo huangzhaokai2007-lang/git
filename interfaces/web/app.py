@@ -222,7 +222,7 @@ def _chat_page() -> None:
     #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
     _render_forms()
     if st.session_state.get("bound-card-query"):
-        cards_ui.render(_agent_executor(), st.session_state["session_id"])
+        cards_ui.render(_agent_executor(), st.session_state["session_id"], show_limit_button=False)
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)

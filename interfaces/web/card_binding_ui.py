@@ -195,7 +195,7 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     _details(executor, session_id, state)
 
 
-def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+def render(executor: ThreadPoolExecutor, session_id: str, *, show_limit_button: bool = True) -> None:
     if requested := st.session_state.pop("limit-tab-request", None):
         st.session_state["cards-tabs"] = requested
     tabs = st.tabs(["银行卡", "额度调整记录", "锁卡记录"], key="cards-tabs", on_change="rerun")
@@ -205,5 +205,5 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         limits_ui.records(executor)
     with tabs[2]:
         locks_ui.records(executor)
-    limits_ui.render(executor, session_id)
+    limits_ui.render(executor, session_id, show_button=show_limit_button)
     locks_ui.render(executor, session_id)
