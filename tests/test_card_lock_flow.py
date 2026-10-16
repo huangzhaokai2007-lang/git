@@ -131,4 +131,4 @@ def test_lock_language(text):
 @pytest.mark.parametrize('text', ['不要锁卡', '解锁银行卡', '银行卡挂失', '冻结账户', '查额度'])
 def test_other_actions_do_not_open_lock(text):
     from agent import card_lock_flow as flow
-    assert flow.recognize(text) is None
+    assert flow.recognize(text) not in ('lock', 'records', 'missing')

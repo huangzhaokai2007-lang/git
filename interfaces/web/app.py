@@ -106,7 +106,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     dump = turn.model_dump()
     if turn.intent == "card_query":
         cards_ui.reset(turn)
-    if turn.ask == "card_lock": limits_ui.reset()
+    if turn.ask in ("card_lock", "card_missing", "card_unlock"): limits_ui.reset()
     if turn.ask == "limit_adjust": locks_ui.reset()
     limits_ui.accept_turn(_agent_executor(), state["session_id"], text, turn.ask)
     locks_ui.accept_turn(_agent_executor(), state["session_id"], turn.ask)

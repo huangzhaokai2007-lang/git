@@ -40,7 +40,15 @@ def _view(result: ToolResult) -> dict:
 
 
 def list_cards(status: str | None = None) -> dict:
-    return _view(card_binding.list_bound_cards(status))
+    from tools import card_unlock
+    result = card_binding.list_bound_cards(status)
+    if result.ok:
+        permissions = card_unlock.cards()
+        allowed = {item['card_id']: item.get('can_unlock', False)
+                   for item in (permissions.data or {}).get('items', [])} if permissions.ok else {}
+        for item in result.data['items']:
+            item['self_unlockable'] = allowed.get(item['card_id'], False)
+    return _view(result)
 
 
 def detail(card_id: str) -> dict:

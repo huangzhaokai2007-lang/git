@@ -52,17 +52,26 @@ def test_card_icon_opens_inline_confirmation_and_keeps_other_controls(monkeypatc
     button.click().run()
     assert not at.exception
     assert not at.get('dialog')
-    assert any('即将锁定：6222 **** **** 0001' in item.value for item in at.markdown)
+    assert not any('临时锁定银行卡' in item.value for item in at.markdown)
+    assert any(item.key == f'lock-inline-otp-{CARD}' for item in at.text_input)
     next(button for button in at.button if button.key == f'balance-{CARD}').click().run()
     assert any('46,634.00' in item.value for item in at.text)
     click(at, '6222 **** **** 0001')
     assert any(button.label == '查看完整卡号' for button in at.button)
     assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'
-    fill(at, '模拟短信验证码', '123456')
-    click(at, '确认锁卡')
+    next(item for item in at.text_input if item.key == f'lock-inline-otp-{CARD}').set_value('000000')
+    click(at, '确认锁定')
+    assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'
+    next(item for item in at.text_input if item.key == f'lock-inline-otp-{CARD}').set_value('123456')
+    click(at, '确认锁定')
     button = next(button for button in at.button if button.key == f'lock-toggle-{CARD}')
-    assert button.proto.icon == ':material/lock:' and button.disabled
+    assert button.proto.icon == ':material/lock:' and not button.disabled
     assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'locked'
+    button.click().run()
+    assert not any(item.label == '银行卡密码' for item in at.text_input)
+    next(item for item in at.text_input if item.key == f'lock-inline-otp-{CARD}').set_value('123456')
+    click(at, '确认解锁')
+    assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'
 
 
 def test_chat_lock_selection_is_inline(monkeypatch, seeded):
@@ -71,3 +80,16 @@ def test_chat_lock_selection_is_inline(monkeypatch, seeded):
     assert not at.exception
     assert not at.get('dialog')
     assert any('临时锁定银行卡' in item.value for item in at.markdown)
+
+
+def test_missing_card_offers_temporary_lock_without_executing(monkeypatch, seeded):
+    at = app(monkeypatch, seeded)
+    click(at, '💳 管卡')
+    bind(at)
+    at.chat_input[0].set_value('我找不到我的信用卡了').run()
+    assert not at.exception
+    assert any(button.label == '临时锁定' for button in at.button)
+    assert any(button.label == '挂失说明' for button in at.button)
+    click(at, '临时锁定')
+    assert any(button.label == '锁定 6222 **** **** 0001' for button in at.button)
+    assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'
