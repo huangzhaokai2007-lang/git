@@ -16,14 +16,16 @@ from pydantic import BaseModel, ValidationError
 
 from agent import classifier, llm
 
-#: 规格 §3 的 26 个意图（字面量抄录，不复用被测常量 —— 复用等于自证）
+#: 规格 §3 的 27 个意图（字面量抄录，不复用被测常量 —— 复用等于自证）。
+#: `payee_list` 由 `SPEC-CHANGE`（T20 `list_payees`，查看白名单）新增 → 26 → 27；
+#: 这是**契约扩展**，故同步更新这份独立抄录，而不是让它去迁就被测常量。
 SPEC_INTENTS = (
     "balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
     "transfer_single", "transfer_scheduled", "aa_collect",
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
-    "gift_plan", "payee_add", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "smalltalk", "out_of_scope", "unsafe_request",
 )
 _TIMEOUT_REQUEST = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
 
@@ -178,7 +180,7 @@ def test_import_does_not_build_a_client_or_read_secrets() -> None:
 # ---------------- classifier.py：契约 ----------------
 
 def test_intent_labels_match_the_spec_verbatim() -> None:
-    assert classifier.INTENT_LABELS == SPEC_INTENTS and len(SPEC_INTENTS) == 26
+    assert classifier.INTENT_LABELS == SPEC_INTENTS and len(SPEC_INTENTS) == 27
 
 
 def test_slot_schema_covers_every_intent_exactly() -> None:

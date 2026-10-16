@@ -83,3 +83,50 @@ def add_payee(name: str, phone: str) -> ToolResult:
     except ValueError as exc:
         return _dao_reject(exc)
     return _ok(_payload(row), _facts(row), f"已添加 {clean_name}（{masked}）")
+
+
+# ---------------- T20 list_payees（查看白名单 · SPEC-CHANGE 新增，L0 只读） ----------------
+
+#: 归属过滤写在 SQL 里（fail-closed）；白名单优先 + 姓名/编号稳定排序，渲染层直接照抄顺序、不重排。
+_PAYEE_SQL = "SELECT * FROM payee WHERE user_id = ? ORDER BY is_whitelist DESC, name, id"
+
+
+def _rows(user_id: str) -> list[dict]:
+    """当前 user 的收款人行。
+
+    ⚠️ **为什么直查而不用 DAO 原语**：`data/dao.py` 已**正好 300 行**（`CLAUDE.md` 单文件红线），
+    加不下 `list_payees`；且现有 `dao.find_payee` 的空关键词会抛 `ValueError`、也不做归属过滤。
+    `tools/` 直查在仓内有先例（`tools/cross_scene.py:_savings_row`）。
+    **补 DAO 原语并拆 `dao.py` 属另一张卡**，已在 PR 的「剩余限制」登记。
+    """
+    conn = dao.connection()
+    return [dict(row) for row in conn.execute(_PAYEE_SQL, (user_id,))]
+
+
+def list_payees() -> ToolResult:
+    """T20 列出当前用户的全部收款人（L0 只读）。`data` = `items[]` / `total_count` / `whitelist_count`。
+
+    依据用户需求「新增一个查看白名单的功能，可以看到白名单与非白名单人员的手机号」。
+
+    口径：
+    - **只读当前 user**（他人的收款人一条都不能出现）—— 归属 fail-closed，越权 `FORBIDDEN`；
+    - 手机号**照抄入库的脱敏值**（`data.masked_phone`），不拼接、不补全、**绝不还原完整号**（铁律 8）；
+    - `is_whitelist` 一并返回；**分组文案由编排层渲染**，本层不做措辞。
+    """
+    user_id = current_user_id()
+    try:                                            # demo 期只有一个用户：非该身份一律 fail-closed
+        require_owned("该用户的收款人列表", DEMO_USER_ID, user_id,
+                      tool="list_payees", intent="payee_list")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    try:
+        rows = _rows(user_id)
+    except ValueError as exc:
+        return _dao_reject(exc)
+    items = [{"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
+              "bank": row["bank"], "is_whitelist": bool(row["is_whitelist"])} for row in rows]
+    whitelisted = [item for item in items if item["is_whitelist"]]
+    facts = {"total_count": len(items), "whitelist_count": len(whitelisted),
+             "non_whitelist_count": len(items) - len(whitelisted), "items": items}
+    data = {"items": items, "total_count": len(items), "whitelist_count": len(whitelisted)}
+    return _ok(data, facts, f"您共有 {len(items)} 位收款人，其中白名单 {len(whitelisted)} 位。")

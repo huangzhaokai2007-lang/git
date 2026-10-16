@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Callable
 
-from tools import query, subscription, wealth
+from tools import payee, query, subscription, wealth
 from tools.card_query import list_cards
 from tools.schemas import ToolResult
 
@@ -40,4 +40,7 @@ TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
     #: 且**只在一次收齐 5 题时**才走到这里 —— 消息通道（命令行/IM/API）用 `risk_flow.parse_answers`
     #: 解析出一句话里的 5 题；界面走表单（`risk_flow.submit_assessment`），绕过本路由。
     "risk_assess": ("assess_risk", lambda s: wealth.assess_risk(s["answers"])),
+    #: SPEC-CHANGE 新增（用户需求「查看白名单」）：T20 `list_payees`，**L0 只读**、**无槽位**
+    #: （不传参数 = 列全部）。返回白名单标记，分组文案由 `render_lists.render_payees` 渲染。
+    "payee_list": ("list_payees", lambda s: payee.list_payees()),
 }

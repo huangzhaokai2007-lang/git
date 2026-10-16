@@ -20,8 +20,8 @@ from tools.subscription import (
 )
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "TemplateError", "card_line",
-           "render_cards", "render_subscriptions", "render_wealth", "subscription_line",
-           "wealth_line"]
+           "payee_line", "render_cards", "render_payees", "render_subscriptions", "render_wealth",
+           "subscription_line", "wealth_line"]
 
 # ---------------- 卡片查询（卡 23） ----------------
 #: facts 键见 `tools/card_query.py`（`total_count` + `items[]`；每项含 `card_no_mask`
@@ -198,3 +198,46 @@ def render_subscriptions(facts: Mapping) -> str:
         except KeyError as exc:
             raise TemplateError(f"'subscription_list' 模板缺少 facts 键：{exc}") from exc
     return "\n".join([head, *(subscription_line(item) for item in facts["items"])])
+
+
+# ---------------- 收款人 / 白名单（T20 · SPEC-CHANGE 新增） ----------------
+#: facts 键见 `tools/payee.py:list_payees`（`total_count` / `whitelist_count` /
+#: `non_whitelist_count` / `items[]`）。空结果**自己的句子**，不套列表头
+#: （与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径，避免「共 0 位：」这种残句）。
+T_PAYEE_HEAD = "您共有 {total_count} 位收款人：白名单 {whitelist_count} 位、其它 {non_whitelist_count} 位。"
+T_PAYEE_EMPTY = "您还没有收款人。可以说「我要加个收款人」来添加。"
+#: 分组小标题：**纯文案，不含数字**；顺带说明两组的转账验证差别（这是用户看这张表的实际用途）。
+T_PAYEE_WHITELIST = "【白名单】（转账时只需会话内确认）"
+T_PAYEE_OTHER = "【非白名单】（转账时需确认卡 + 短信验证码）"
+
+
+def payee_line(item: Mapping) -> str:
+    """一位收款人一行（`- ` 开头：界面用 `st.markdown` 渲染会排成项目符号列表）。
+
+    手机号**照抄 facts 的脱敏值**（`139****1001`），不拼接、不补全、**绝不还原完整号**（铁律 8）；
+    银行名照抄入库值，为空则整截不印（不补「未知银行」这类编造值）。
+    """
+    line = f"- {item['name']}　{item['masked_phone']}"
+    return f"{line}（{item['bank']}）" if item.get("bank") else line
+
+
+def render_payees(facts: Mapping) -> str:
+    """`payee_list` 回执（T20）：总数 + **白名单 / 非白名单分组**。
+
+    分组是这条回执的重点 —— 用户要的就是「哪些是白名单、哪些不是」（两组的转账验证方式不同）。
+    组内顺序**照抄 facts 的 `items` 顺序**（工具层已按「白名单优先 + 姓名」稳定排序），
+    编排层不重排 —— 重排就是自己造顺序。
+    空组不印小标题（避免「【非白名单】」下面一行都没有）。
+    """
+    if int(facts["total_count"]) == 0:
+        return T_PAYEE_EMPTY
+    head = T_PAYEE_HEAD.format(total_count=int(facts["total_count"]),
+                               whitelist_count=int(facts["whitelist_count"]),
+                               non_whitelist_count=int(facts["non_whitelist_count"]))
+    lines = [head]
+    for label, wanted in ((T_PAYEE_WHITELIST, True), (T_PAYEE_OTHER, False)):
+        group = [item for item in facts["items"] if bool(item["is_whitelist"]) is wanted]
+        if group:
+            lines.append(label)
+            lines.extend(payee_line(item) for item in group)
+    return "\n".join(lines)
