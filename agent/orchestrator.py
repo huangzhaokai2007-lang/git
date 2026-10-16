@@ -64,8 +64,9 @@ MAX_CLARIFY_ROUNDS = 2        # 来源：卡 09 第 3 条「最多 2 轮」
 #: `agent/read_flow.py`（F10 接通后本文件超红线），在下面再导出。
 
 #: 卡 09 第 2 条点名的 8 个只读意图 + F10 的风险测评（`assess_risk` 同属 L0，规格 §2 第 108 行）
+#: + SPEC-CHANGE 新增的 `payee_list`（T20 `list_payees`，L0 只读、无槽位）
 READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
-                "subscription_list", "card_query", "wealth_recommend", "risk_assess")
+                "subscription_list", "card_query", "wealth_recommend", "risk_assess", "payee_list")
 
 #: 写意图清单的唯一来源是 `agent/write_intents.py` 的写描述符表（card-24 泛化拆出），
 #: 经 `write_flow.WRITE_INTENTS` 转发到这里 —— 全程只有一份，避免清单漂移。

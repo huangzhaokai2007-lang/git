@@ -31,7 +31,7 @@ INTENT_LABELS = (
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
-    "gift_plan", "payee_add", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -40,7 +40,7 @@ IntentLabel = Literal[
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
-    "gift_plan", "payee_add", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -70,6 +70,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "wealth_redeem": ("product_id", "amount"),                             # T15 trade_wealth
     "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
+    "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段

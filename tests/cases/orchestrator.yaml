@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 9 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 = 44 条
+# 分组：bill 5 / trf 9 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 47 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -156,6 +156,28 @@
   # 缺日期 → 追问，**绝不猜一个日期**（不擅自取今天）。
   expect: {intent: gift_plan, tool_calls: [], tier: null, executed: false,
            must_contain: ["日期"]}
+
+# ---------------- 收款人 / 白名单 3（SPEC-CHANGE 新增） ----------------
+- id: pay-001
+  input: "我的白名单有哪些"
+  slots: {}
+  # 需求「查看白名单」：T20 `list_payees`，L0 只读、无槽位。
+  # 种子（干净库）：白名单 2 位（李四 139****1001 / 王五 137****2003）+ 非白名单 3 位。
+  # 不断言 requires_otp：只读意图没有确认卡（那一项取自 `confirm_card.current`，此处恒为 None）。
+  expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
+           must_contain: ["白名单", "137****2003", "136****3004"]}
+- id: pay-002
+  input: "看看我的收款人"
+  slots: {}
+  # 分组是重点：两组都要出现（转账验证方式不同）。
+  expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
+           must_contain: ["【白名单】", "【非白名单】"]}
+- id: pay-003
+  input: "我有多少收款人"
+  slots: {}
+  # 数字全部来自事实包（铁律 2）：干净库 5 位、白名单 2 位、非白名单 3 位。
+  expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
+           must_contain: ["5 位", "2 位", "3 位"]}
 
 # ---------------- 订阅 5 ----------------
 - id: sub-001
