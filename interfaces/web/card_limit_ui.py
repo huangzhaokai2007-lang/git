@@ -45,10 +45,11 @@ def _cancel() -> None:
 
 def _types(state: dict) -> None:
     st.write("您希望调整哪一种额度？")
-    for label, kind in flow.KINDS.items():
-        if st.button(label, key=f"limit-kind-{kind}", width="stretch"):
-            state["kind"] = kind
-            st.rerun()
+    with st.container(horizontal=True, gap="small"):
+        for label, kind in flow.KINDS.items():
+            if st.button(label, key=f"limit-kind-{kind}"):
+                state["kind"] = kind
+                st.rerun()
 
 
 def _cards(executor: ThreadPoolExecutor, state: dict) -> None:
@@ -159,7 +160,7 @@ def render(executor: ThreadPoolExecutor, session_id: str, *, show_button: bool =
         state.update(open=True, kind=None, selected=None, preview=None, result=None, error=None)
         st.session_state.pop("limit-amount", None)
     if state["open"]:
-        with st.container(border=True):
+        with st.container(border=True, width=640, gap="small", key="credit-limit-panel"):
             _panel(executor, session_id, state)
 
 

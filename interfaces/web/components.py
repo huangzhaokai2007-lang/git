@@ -36,6 +36,7 @@ SCENES: tuple[tuple[str, str], ...] = (
 BALANCE_PROMPT = "查一下余额"
 
 CSS = """<style>
+.st-key-credit-limit-panel h3{font-size:1.2rem;padding:.15rem 0 .3rem}
 .sim-banner{background:#fff4e5;border:1px solid #ffd8a8;border-radius:10px;padding:8px 14px;
             color:#8a5a00;font-size:13px;font-weight:700}
 ul.tl{list-style:none;margin:0;padding:0 0 0 4px}
