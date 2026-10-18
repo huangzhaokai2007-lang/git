@@ -68,6 +68,7 @@ from agent._write_transfer import (
     _shape_scheduled,
     _shape_transfer,
 )
+from agent._write_wealth import specs as _wealth_specs          # F12/F13（T15，confirm_ref 族）
 from tools.transfer import OTP_CODE     # agent→tools 合法；OTP 明文绝不进日志/facts/回执
 
 # ---------------- 描述符表（唯一来源） ----------------
@@ -122,6 +123,9 @@ _SPECS: dict[str, WriteSpec] = {
         what="送礼计划", shape=_shape_gift, prepare=_prepare_gift,
         card=_card_gift, plain=_plain_gift, execute=_execute_gift),
 }
+
+#: F12/F13 理财申购赎回（按意图族拆出，同 `_write_subscription` 先例）
+_SPECS.update(_wealth_specs())
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)
