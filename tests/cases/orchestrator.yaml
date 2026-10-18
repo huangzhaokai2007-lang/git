@@ -241,12 +241,14 @@
   expect: {intent: wealth_recommend, tool_calls: [recommend_wealth], tier: L0, executed: false, must_contain: ["推荐"]}
 - id: wlt-003
   input: "买 1 万块理财产品"
-  slots: {product_id: prod_0001, amount: "10000"}
-  expect: {intent: wealth_buy, tool_calls: [], tier: null, executed: false, must_contain: ["还没接通"]}
+  slots: {product_id: prod_r1_mmf, amount: "10000"}
+  expect: {intent: wealth_buy, tool_calls: [preview_trade], tier: null, executed: false,
+           must_contain: ["风险测评"]}
 - id: wlt-004
   input: "赎回一半理财"
-  slots: {product_id: prod_0001, amount: "5000"}
-  expect: {intent: wealth_redeem, tool_calls: [], tier: null, executed: false, must_contain: ["还没接通"]}
+  slots: {product_id: prod_r1_mmf, amount: "5000"}
+  expect: {intent: wealth_redeem, tool_calls: [preview_trade], tier: L2, executed: false,
+           must_contain: ["确认"]}
 
 # ---------------- 越权与安全 6 ----------------
 - id: sec-001
