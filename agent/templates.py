@@ -19,10 +19,11 @@ from pydantic import BaseModel, ConfigDict
 from agent import llm
 from agent.render_lists import (          # noqa: F401 —— 列表类回执按职责拆出后**再导出**（同一份实现）
     CARD_STATUS_CN, CARD_TYPE_CN, CYCLE_LABELS, T_CARD_HEAD, T_CARD_HEAD_FILTERED, T_CARD_NO_CARD,
-    T_CARD_NO_CARD_FILTERED, T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
+    T_CARD_NO_CARD_FILTERED, T_PAYEE_EMPTY, T_PAYEE_HEAD, T_PAYEE_OTHER, T_PAYEE_WHITELIST,
+    T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
     T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, T_WEALTH, T_WEALTH_CLEAN, T_WEALTH_EMPTY,
-    TemplateError, card_line, render_cards, render_subscriptions, render_wealth, subscription_line,
-    term_cn, wealth_line,
+    TemplateError, card_line, payee_line, render_cards, render_payees, render_subscriptions,
+    render_wealth, subscription_line, term_cn, wealth_line,
 )
 from guard import facts_check, injection
 from tools.schemas import ToolResult
@@ -134,6 +135,8 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_subscriptions(facts)
     if intent == "wealth_recommend":                         # F11：汇总 + 产品明细，空结果单独一句
         return render_wealth(facts)
+    if intent == "payee_list":                               # SPEC-CHANGE：白名单 / 非白名单分组
+        return render_payees(facts)
     if intent == "risk_assess":                              # F10：总分/满分/等级/有效期（不走单行 format）
         try:
             return T_RISK_RESULT.format(**facts)
