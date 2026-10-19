@@ -8,6 +8,7 @@ import streamlit as st
 from agent import card_binding_flow as flow
 import card_limit_ui as limits_ui
 import card_lock_ui as locks_ui
+import card_gallery_ui as gallery_ui
 
 FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost", "已冻结": "frozen"}
 
@@ -91,10 +92,12 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
 
 def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict) -> None:
     card_id = item["card_id"]
-    columns = st.columns([5, 1, 2.5])
+    if gallery_ui.face(item):
+        _select(executor, card_id, state)
+    st.caption('点击卡片查看详情')
+    columns = st.columns([1, 2], vertical_alignment='center')
     with columns[0].container(horizontal=True, vertical_alignment='center'):
-        if st.button(item["card_no_mask"], key=f"detail-{card_id}"):
-            _select(executor, card_id, state)
+        st.caption(item['status_cn'])
         normal = item['status'] == 'normal'
         locked = item['status'] == 'locked'
         unlockable = locked and item.get('self_unlockable', False)
@@ -103,10 +106,8 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict)
                        icon=':material/lock_open:' if normal else ':material/lock:', help=hint):
             locks_ui.open_card(executor, session_id, card_id, 'unlock' if locked else 'lock', inline=True)
             st.rerun()
-        locks_ui.row_confirmation(executor, session_id, card_id)
-    columns[1].markdown(item["status_cn"])
     visible = state["visible"].get(card_id, False)
-    with columns[2]:
+    with columns[1]:
         amount, button = st.columns([3, 2])
         amount.text(f"{item['balance_yuan']} 元" if visible else "******")
         if button.button("隐藏" if visible else "显示", key=f"balance-{card_id}",
@@ -114,6 +115,7 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict)
                          help="隐藏余额" if visible else "显示余额"):
             state["visible"][card_id] = not visible
             st.rerun()
+    locks_ui.row_confirmation(executor, session_id, card_id)
 
 
 def _reveal(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
@@ -190,11 +192,14 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     if not items:
         st.info("您还未绑定银行卡。" if selected_filter == "全部" else "没有该状态的已绑定银行卡。")
     else:
-        columns = st.columns([5, 1, 2.5])
-        for column, label in zip(columns, ("卡号", "状态", "余额")):
-            column.markdown(f"**{label}**")
-        for item in items:
-            _row(executor, session_id, item, state)
+        gallery_ui.styles()
+        for offset in range(0, len(items), 2):
+            columns = st.columns(2, gap='medium')
+            for column, item in zip(columns, items[offset:offset + 2]):
+                with column.container(key=f"bank-tile-{item['type']}-{item['card_id']}"):
+                    selected = state['selected'] == item['card_id']
+                    with st.container(key=f"bank-selected-{item['card_id']}" if selected else None):
+                        _row(executor, session_id, item, state)
     _details(executor, session_id, state)
 
 
