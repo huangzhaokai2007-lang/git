@@ -79,6 +79,7 @@ def _form(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
 
 
 def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
+    state['detail_revision'] = state.get('detail_revision', 0) + 1
     result = executor.submit(flow.detail, card_id).result()
     if not result["ok"]:
         state["notice"] = (False, result["message"])
@@ -164,6 +165,7 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
         st.rerun()
     _reveal(executor, session_id, state)
     if st.button("关闭详情", key="detail-close"):
+        state['detail_revision'] = state.get('detail_revision', 0) + 1
         state["selected"], state["full_number"], state["reveal_form"] = None, None, False
         st.rerun()
 
@@ -183,6 +185,7 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     selected_filter = st.selectbox("卡片状态", list(FILTERS), key="cards-filter")
     if selected_filter != state["last_filter"]:
         state["visible"], state["full_number"] = {}, None
+        state['selected'], state['reveal_form'], state['detail_balance'] = None, False, False
         state["last_filter"] = selected_filter
     result = executor.submit(flow.list_cards, FILTERS[selected_filter]).result()
     if not result["ok"]:
@@ -192,15 +195,9 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     if not items:
         st.info("您还未绑定银行卡。" if selected_filter == "全部" else "没有该状态的已绑定银行卡。")
     else:
-        gallery_ui.styles()
-        for offset in range(0, len(items), 2):
-            columns = st.columns(2, gap='medium')
-            for column, item in zip(columns, items[offset:offset + 2]):
-                with column.container(key=f"bank-tile-{item['type']}-{item['card_id']}"):
-                    selected = state['selected'] == item['card_id']
-                    with st.container(key=f"bank-selected-{item['card_id']}" if selected else None):
-                        _row(executor, session_id, item, state)
-    _details(executor, session_id, state)
+        gallery_ui.deck(items, state['selected'], lambda item: _row(executor, session_id, item, state), state.get('detail_revision', 0))
+    with st.container(key='bank-gallery-details'):
+        _details(executor, session_id, state)
 
 
 def render(executor: ThreadPoolExecutor, session_id: str, *, show_limit_button: bool = True) -> None:

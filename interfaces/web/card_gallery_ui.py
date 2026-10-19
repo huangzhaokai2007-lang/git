@@ -1,8 +1,23 @@
 """银行卡卡面和轻量动效；金额和卡号只由调用方提供。"""
+from html import escape
+from pathlib import Path
+
 import streamlit as st
+import streamlit.components.v2 as components
+
+_FOCUS_JS = Path(__file__).with_name('card_focus.js').read_text(encoding='utf-8')
 
 
 CSS = """<style>
+.bank-gallery-state,.bank-card-identity {display:none}
+.st-key-bank-gallery {position:relative;isolation:isolate}
+.st-key-bank-gallery [class*="st-key-bank-tile-"] {margin-bottom:0}
+.st-key-bank-gallery-details:has(.st-key-detail-close) {animation:bank-details-reveal .5s ease .4s both}
+.st-key-bank-gallery:not([data-focus=""]) [class*="st-key-detail-"] button:hover {animation:none;transform:none}
+@keyframes bank-details-reveal {
+ from {opacity:0;transform:translateY(20px);filter:blur(4px)}
+ to {opacity:1;transform:translateY(0);filter:blur(0)}
+}
 /* Only the gallery face is animated; action buttons and other pages stay still. */
 [class*="st-key-bank-tile-"] {margin-bottom:1.1rem}
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button {
@@ -47,6 +62,7 @@ CSS = """<style>
  65%{transform:translateY(-5px) rotate(.75deg)}
 }
 @media(prefers-reduced-motion:reduce) {
+ .st-key-bank-gallery-details:has(.st-key-detail-close) {animation:none}
  [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button,
  [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button:hover {
  animation:none;transition:none;transform:none;
@@ -62,3 +78,15 @@ def styles() -> None:
 def face(item: dict) -> bool:
     return st.button(item['card_no_mask'], key=f"detail-{item['card_id']}",
                      help='点击卡片查看详情', width='stretch')
+
+
+def deck(items: list[dict], selected: str | None, render_card, revision: int = 0) -> None:
+    styles()
+    with st.container(key='bank-gallery'):
+        st.markdown(f'<span class="bank-gallery-state" data-selected="{escape(selected or "", quote=True)}" data-revision="{revision}"></span>', unsafe_allow_html=True)
+        for item in items:
+            with st.container(key=f"bank-tile-{item['type']}-{item['card_id']}"):
+                st.markdown(f'<span class="bank-card-identity" data-card="{escape(item["card_id"], quote=True)}"></span>', unsafe_allow_html=True)
+                render_card(item)
+    animator = components.component('bank_card_focus', js=_FOCUS_JS)
+    animator(key='cards-focus-animation')
