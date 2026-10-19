@@ -39,11 +39,12 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_user_id,
 )
 from tools._wealth_risk import (             # noqa: F401 —— assess_risk/recommend_wealth/_ASSESSMENTS 为 re-export
-    _ASSESSMENTS, _rank, assess_risk, recommend_wealth, require_assessment,
+    _ASSESSMENTS, _rank, _yield_text, assess_risk, recommend_wealth, require_assessment,
 )
 from tools.schemas import ErrorCode, ToolResult
 from tools.subscription import (
-    _CONFIRM_LOCK, check_confirm_ref, confirmed_result, finish_confirm_ref, reject_audit,
+    _CONFIRM_LOCK, check_confirm_ref, confirmed_result, finish_confirm_ref,
+    issue_confirm_ref, reject_audit,          # noqa: F401 —— issue_confirm_ref 为 re-export（编排层签发用）
 )
 
 logger = logging.getLogger(__name__)
@@ -203,3 +204,63 @@ def _trade_locked(product_id: str, action: str, amount: int, confirm_ref: str) -
                f"预计确认日 {facts['expected_confirm_date']}，账户余额 {facts['balance_after_yuan']} 元。")
     finish_confirm_ref(confirm_ref, data.model_dump(), facts, message)
     return _ok(data.model_dump(), facts, message)
+
+
+# ---------------- T15 preview_trade（F12/F13 只读预览：只校验，不执行） ----------------
+
+class PreviewTradeReq(BaseModel):
+    """只读预览入参：与 `TradeWealthReq` 同款，**去掉 `confirm_ref`**（预览不消费凭证）。"""
+
+    model_config = STRICT
+
+    product_id: str = Field(min_length=1)
+    action: Literal["buy", "redeem"]
+    amount: int = Field(gt=0)
+
+
+def _resolve_product(query: str) -> dict | None:
+    """产品定位：先按 id 精确；未命中则按**名称包含**匹配，**唯一命中**才认（重名不猜）。"""
+    product = dao.get_product(query)
+    if product is not None:
+        return product
+    hits = [row for row in dao.list_products() if query and query in str(row["name"])]
+    return hits[0] if len(hits) == 1 else None
+
+
+def preview_trade(product_id: str, action: str, amount: int) -> ToolResult:
+    """T15 只读预览（L0，**只校验不执行**）。
+
+    复用 `_buy_plan` / `_redeem_plan` 的**同一套**业务校验（不复制第二份），产出确认卡要显示的
+    事实包；`trade_wealth` 的执行入口与契约不变（规格 §2 T15 未动，本函数是同族只读入口）。
+
+    facts：产品名 / 风险等级 / 预期年化 / 期限 / 起购额 / 金额；申购再带用户风险等级与账户余额，
+    赎回再带可赎持仓与已持有天数 —— 卡上多一个数字都过不了数字校验器（铁律 2）。
+    """
+    if (bad := _invalid(PreviewTradeReq, product_id=product_id, action=action,
+                        amount=amount)) is not None:
+        return bad
+    try:
+        product = _resolve_product(product_id)
+        if product is None:
+            return _fail(ErrorCode.NOT_FOUND, "找不到该理财产品")
+        plan = _buy_plan(product, amount) if action == "buy" else _redeem_plan(product, amount)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    except ValueError as exc:
+        return _dao_reject(exc)
+    facts = {"product_id": product["id"], "product_name": product["name"],
+             "product_risk_level": product["risk_level"], "action": action,
+             "action_cn": "申购" if action == "buy" else "赎回",
+             "yield": _yield_text(product["expected_yield"]),
+             "term_days": product["term_days"], "tier": TRADE_TIER, "requires_otp": True,
+             **_money_facts(amount, "amount"),
+             **_money_facts(product["min_amount"], "min_amount")}
+    if action == "buy":
+        facts["user_risk_level"] = plan["user_risk_level"]
+        facts.update(_money_facts(dao.get_balance("savings")["balance"], "balance"))
+    else:
+        facts.update(_money_facts(plan["holding"]["amount"], "holding_amount"))
+        facts["held_days"] = (AS_OF - date.fromisoformat(plan["holding"]["purchase_date"])).days
+    message = (f"{facts['action_cn']}{product['name']}（{facts['product_risk_level']} 级，"
+               f"预期年化 {facts['yield']}）{facts['amount_yuan']} 元，请确认。")
+    return _ok(dict(facts), facts, message)

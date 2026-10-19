@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 7 / sub 5 / card 5 / wlt 4 / sec 6 = 32 条
+# 分组：bill 5 / trf 9 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 47 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -72,6 +72,112 @@
   # 故**不断言 requires_otp** —— 那一项的取值来源是 confirm_card.current(session)，此刻已是 None。
   expect: {intent: transfer_single, tool_calls: [execute_transfer], tier: L1, executed: true,
            must_contain: ["王五"], must_not_contain: ["验证码"]}
+- id: trf-008
+  input: "明天给王五转 100 元"
+  slots: {payee: 王五, amount: "100.00", schedule: 明天}
+  # F16 **止损**：说了预约时间也**绝不出确认卡**。修前会出「预计到账：实时到账」的即时转账卡，
+  # L1 档点确认即扣款 —— 违反 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
+  # F16 落地前本用例是硬判据（完整方案见 docs/superpowers/specs/2026-10-15-…-design.md）。
+  expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
+           must_contain: ["还没接通"], must_not_contain: ["确认卡", "实时到账"]}
+- id: trf-009
+  input: "下个月给王五转 100 元"
+  slots: {payee: 王五, amount: "100.00"}
+  # 模型识别到定时意图却**没抽出时间** → 同样拒绝（否则等于猜用户其实想立刻转）。
+  expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
+           must_contain: ["还没接通"], must_not_contain: ["确认卡", "实时到账"]}
+
+# ---------------- AA 收款 5（F15） ----------------
+- id: aa-001
+  input: "向王五和赵六 AA 收款 300 元"
+  slots: {payee_ids: [王五, 赵六], amount: "300.00"}
+  # F15 验收第 2 条：**确认前不发起请求**。T9 没有 preview_*，PRECHECK 阶段一个工具都没调，
+  # 故 tool_calls 必须为空 —— 若谎报 create_aa_request，就等于自称「已经发起过」。
+  expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false, requires_otp: false,
+           must_contain: ["AA 收款确认卡", "每人", "余数"], must_not_contain: ["已发起"]}
+- id: aa-002
+  input: "向王五和赵六 AA 收款 300 元"
+  slots: {payee_ids: [王五, 赵六], amount: "300.00"}
+  turns: ["确认"]
+  # 确认后才真发起。回执行回执的原文是「已发起 AA 收款 …，2 人**各** 150.00 元，余数 … 由你承担」。
+  # 确认卡在 EXECUTE 后即被消费清空，故不断言 requires_otp（同 trf-007 口径）。
+  expect: {intent: aa_collect, tool_calls: [create_aa_request], tier: L1, executed: true,
+           must_contain: ["已发起", "各"], must_not_contain: ["验证码"]}
+- id: aa-003
+  input: "三个人一起，向王五、赵六、张小美 AA 收款 100 元"
+  slots: {payee_ids: [王五, 赵六, 张小美], amount: "100.00"}
+  # 余数边界：10000 分 ÷ 3 = 3333 分/人，余 1 分（= 0.01 元）给发起人 —— 整数分均摊，禁浮点。
+  expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
+           must_contain: ["33.33", "0.01", "3 人"]}
+- id: aa-004
+  input: "向王五、王五、赵六 AA 收款 60 元"
+  slots: {payee_ids: [王五, 王五, 赵六], amount: "60.00"}
+  # 去重：T9 对重复收款人直接 INVALID_ARGUMENT，故编排层先按 id 去重（F15 验收第 1 条）。
+  expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
+           must_contain: ["2 人"], must_not_contain: ["重复"]}
+- id: aa-005
+  input: "向查无此人 AA 收款 50 元"
+  slots: {payee_ids: [查无此人], amount: "50.00"}
+  # 零命中 → 缺槽追问，**绝不擅自选一个**（F15 验收第 1 条）。
+  expect: {intent: aa_collect, tool_calls: [], tier: null, executed: false,
+           must_contain: ["没有找到匹配的收款人"]}
+
+# ---------------- 送礼计划 5（F20） ----------------
+- id: gft-001
+  input: "2026-10-20 给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  # F20 验收第 1/2 条：确认前**只调 T19 只读预览**（不锁资金），卡面并列「可用余额 / 账户余额」。
+  expect: {intent: gift_plan, tool_calls: [preview_gift], tier: L2, executed: false, requires_otp: true,
+           must_contain: ["送礼计划确认卡", "预算", "礼物清单", "可用余额", "账户余额"],
+           must_not_contain: ["已锁定", "已为"]}
+- id: gft-002
+  input: "2026-10-20 给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  turns: ["确认"]
+  # L2：确认之后要 OTP（闸门在编排层，T16 签名没有 otp 参数）。
+  expect: {intent: gift_plan, tool_calls: [], tier: L2, executed: false, requires_otp: true,
+           must_contain: ["验证码"]}
+- id: gft-003
+  input: "2026-10-20 给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  turns: ["确认", "123456"]
+  # 确认 + 正确 OTP 后才真锁款：T16 生成 plan_id/lock_id 并扣 available。
+  expect: {intent: gift_plan, tool_calls: [plan_gift], tier: L2, executed: true,
+           must_contain: ["已为", "锁定", "可用余额"]}
+- id: gft-004
+  input: "2026-10-20 给张三送生日礼物，预算 100 元"
+  slots: {contact: 张三, date: "2026-10-20", budget: "100.00"}
+  # 失败路径：预算低于最便宜的一件礼物（鲜花 199 元）→ 工具层直接拒，不出确认卡。
+  expect: {intent: gift_plan, tool_calls: [preview_gift], tier: null, executed: false,
+           must_contain: ["预算不足"]}
+- id: gft-005
+  input: "给张三送生日礼物，预算 500 元"
+  slots: {contact: 张三, budget: "500.00"}
+  # 缺日期 → 追问，**绝不猜一个日期**（不擅自取今天）。
+  expect: {intent: gift_plan, tool_calls: [], tier: null, executed: false,
+           must_contain: ["日期"]}
+
+# ---------------- 收款人 / 白名单 3（SPEC-CHANGE 新增） ----------------
+- id: pay-001
+  input: "我的白名单有哪些"
+  slots: {}
+  # 需求「查看白名单」：T20 `list_payees`，L0 只读、无槽位。
+  # 种子（干净库）：白名单 2 位（李四 139****1001 / 王五 137****2003）+ 非白名单 3 位。
+  # 不断言 requires_otp：只读意图没有确认卡（那一项取自 `confirm_card.current`，此处恒为 None）。
+  expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
+           must_contain: ["白名单", "137****2003", "136****3004"]}
+- id: pay-002
+  input: "看看我的收款人"
+  slots: {}
+  # 分组是重点：两组都要出现（转账验证方式不同）。
+  expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
+           must_contain: ["【白名单】", "【非白名单】"]}
+- id: pay-003
+  input: "我有多少收款人"
+  slots: {}
+  # 数字全部来自事实包（铁律 2）：干净库 5 位、白名单 2 位、非白名单 3 位。
+  expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
+           must_contain: ["5 位", "2 位", "3 位"]}
 
 # ---------------- 订阅 5 ----------------
 - id: sub-001
@@ -135,12 +241,14 @@
   expect: {intent: wealth_recommend, tool_calls: [recommend_wealth], tier: L0, executed: false, must_contain: ["推荐"]}
 - id: wlt-003
   input: "买 1 万块理财产品"
-  slots: {product_id: prod_0001, amount: "10000"}
-  expect: {intent: wealth_buy, tool_calls: [], tier: null, executed: false, must_contain: ["还没接通"]}
+  slots: {product_id: prod_r1_mmf, amount: "10000"}
+  expect: {intent: wealth_buy, tool_calls: [preview_trade], tier: null, executed: false,
+           must_contain: ["风险测评"]}
 - id: wlt-004
   input: "赎回一半理财"
-  slots: {product_id: prod_0001, amount: "5000"}
-  expect: {intent: wealth_redeem, tool_calls: [], tier: null, executed: false, must_contain: ["还没接通"]}
+  slots: {product_id: prod_r1_mmf, amount: "5000"}
+  expect: {intent: wealth_redeem, tool_calls: [preview_trade], tier: L2, executed: false,
+           must_contain: ["确认"]}
 
 # ---------------- 越权与安全 6 ----------------
 - id: sec-001

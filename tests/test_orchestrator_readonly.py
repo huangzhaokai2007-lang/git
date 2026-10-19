@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from agent import classifier, llm, orchestrator, templates, write_flow, write_intents
+from agent import (classifier, llm, orchestrator, templates, write_flow, write_intents,
+                   _write_subscription, _write_transfer)
 from data import dao
 
 from tests.conftest import count, raw
@@ -202,17 +203,23 @@ def test_every_request_writes_exactly_one_audit_row(seeded: Path,
     assert json.loads(row["params_json"])["states"] == HAPPY_STATES
 
 
-def test_read_intents_are_exactly_the_eight_from_the_card(seeded: Path,
-                                                          monkeypatch: pytest.MonkeyPatch) -> None:
-    """只读意图清单 = 卡 09 的 8 个 + F10 的 `risk_assess`（规格 §2 第 108 行：T13 权限档 = L0）。
+def test_read_intents_are_exactly_the_contracted_set(seeded: Path,
+                                                     monkeypatch: pytest.MonkeyPatch) -> None:
+    """只读意图清单 = 卡 09 的 8 个 + F10 的 `risk_assess` + `SPEC-CHANGE` 的 `payee_list`。
 
-    卡 09 当时只接 8 个只读意图；F10 把 `assess_risk` 接通后本表扩到 9 个 —— 这是**契约扩展**，
-    故同步更新这条锚定断言（原断言见 git 历史），而不是绕过它。`set(TOOL_ROUTES) == set(READ_INTENTS)`
-    这条不变式保留：**每个只读意图都必须有路由**（否则会静默落到「未接通」）。
+    卡 09 当时只接 8 个只读意图；F10 把 `assess_risk` 接通后扩到 9 个；本次「查看白名单」
+    （T20 `list_payees`，人类已批的 `SPEC-CHANGE`）扩到 **10** 个 —— 都是**契约扩展**，
+    故同步更新这条锚定断言（原断言见 git 历史），而不是绕过它。
+
+    **测试名一并纠正**：原名 `..._the_eight_from_the_card` 在 F10 之后就已经名不副实
+    （名字说 8、断言 9），本次顺手改成 `..._the_contracted_set`，避免继续误导。
+
+    `set(TOOL_ROUTES) == set(READ_INTENTS)` 这条不变式保留：**每个只读意图都必须有路由**
+    （否则会静默落到「未接通」）。
     """
     assert orchestrator.READ_INTENTS == ("balance_query", "txn_query", "bill_analysis", "anomaly_check",
                                          "bill_report", "subscription_list", "card_query",
-                                         "wealth_recommend", "risk_assess")
+                                         "wealth_recommend", "risk_assess", "payee_list")
     assert all(intent in classifier.INTENT_LABELS for intent in orchestrator.READ_INTENTS)
     assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS)   # 卡 23 起 card_query 也有路由
 
@@ -233,7 +240,11 @@ def test_no_write_intent_has_a_route(seeded: Path, monkeypatch: pytest.MonkeyPat
     # card-10b 拆分后：唯一放行的写工具在写路径模块里，且只能经确认流程调用。
     # card-24：写路径再拆成 write_flow（通用四步骨架）+ write_intents（每意图写描述符），
     # 执行调用随描述符落到 write_intents；**红线不变** —— orchestrator 里一个写工具名都不许出现。
+    # F15/F20 拆卡：描述符再按意图族拆到 `_write_transfer` / `_write_subscription`
+    # （write_intents 曾 296 行、装不下新描述符），故扫描范围随之扩到这两个模块
+    # —— 同 card-10b 的先例：拆分即同步扫描范围，红线本身不变。
     flow = "".join(Path(module.__file__).read_text(encoding="utf-8")
-                   for module in (write_flow, write_intents))
+                   for module in (write_flow, write_intents,
+                                  _write_transfer, _write_subscription))
     assert "transfer.execute_transfer" in flow
     assert "transfer.execute_transfer" not in source and "execute_transfer(" not in source

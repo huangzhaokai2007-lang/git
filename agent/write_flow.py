@@ -117,10 +117,11 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     spec = write_intents.spec_of(confirmation.intent)
     step = Step(states=["EXECUTE"], tool=spec.execute_tool, tier=confirmation.tier,
                 intent=confirmation.intent)
-    if not spec.otp_in_tool and not write_intents.otp_ok(otp):       # confirm_ref 族：本层闸门
+    # `confirm_ref` 族且**本档需要 OTP** 时才在编排层设闸门；L1 意图（如 AA 收款，T9 无 OTP）不走闸门。
+    if not spec.otp_in_tool and confirmation.requires_otp and not write_intents.otp_ok(otp):
         step.result = "error"
         return _otp_rejected(session_id, step, spec)
-    result = spec.execute(confirmation.target_id, confirmation.credential, otp)
+    result = spec.execute(confirmation, otp)                         # 入参是整张确认卡（含槽位快照）
     if not result.ok:
         code = error_code_of(result)
         step.result, step.error_code = "error", code
@@ -195,11 +196,12 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
         session_id=context["session_id"], intent=context["intent"],
         credential_kind=spec.credential_kind, credential=prepared.credential,
         target_id=context["target_id"],
-        target_name=str(prepared.facts.get("merchant") or prepared.facts.get("payee_name") or ""),
+        target_name=str(prepared.facts.get("target_name") or prepared.facts.get("merchant")
+                        or prepared.facts.get("payee_name") or ""),
         masked_phone=confirm_card.mask_phone(str(filled.get("masked_phone") or "")),
         amount_yuan=str(prepared.facts.get("amount_yuan") or ""),
         amount_cents=context["amount_cents"], tier=verdict.tier,
-        requires_otp=verdict.requires_otp, card_text=card_text))
+        requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled)))
     return Step(states=["CONFIRM_CARD"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, reply=card_text, ask=card_text, degraded=degraded)
 
@@ -223,7 +225,8 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
                     reply=confirm_card.otp_locked_text(spec.what), error_code="FORBIDDEN")
     prepared = spec.prepare(filled)                                    # 工具层事实包 + 签发凭证
     if not prepared.ok:
-        return Step(states=["PRECHECK"], intent=intent, result="error", tool=spec.tools[0],
+        return Step(states=["PRECHECK"], intent=intent, result="error",
+                    tool=spec.tools[0] if spec.tools else None,
                     error_code=prepared.error_code,
                     reply=templates.tool_error(prepared.error_code, prepared.message))
     verdict = permission.assess_write(intent, tier=prepared.facts.get("tier"),       # 纯代码档位
@@ -234,7 +237,10 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
     branch = (_to_pending(context, verdict) if verdict.delayed                       # L3：延迟 + 撤销
               else _to_confirmation_card(context, verdict, filled, prepared))        # L1/L2：确认卡
     branch.states = ["SLOT_FILL", "PRECHECK", *branch.states]
-    branch.tool = branch.tool or spec.tools[0]                         # 铁律 3 第一步：只算不执行
+    #: AA 收款（T9 无 `preview_*`）在 PRECHECK 阶段**不调任何工具** → `spec.tools` 为空，
+    #: 工具名必须留空，否则 `/api/chat` 的 `tool_calls` 会谎报“已调用”，与 F15 验收点
+    #: 「确认前不发起请求」直接冲突。
     branch.tools = list(spec.tools)
+    branch.tool = branch.tool or (spec.tools[0] if spec.tools else None)
     branch.tier = verdict.tier
     return branch

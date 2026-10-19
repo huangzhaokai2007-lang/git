@@ -1,9 +1,21 @@
-"""写意图描述符表（card-24 从 `write_flow.py` 拆出）：把「转账专属」的写路径泛化成
-「每个写意图声明自己的形状」，新增写功能只需加一条描述符。
+"""写意图描述符表（card-24 从 `write_flow.py` 拆出；F15/F20 按意图族再拆）：
+把「转账专属」的写路径泛化成「每个写意图声明自己的形状」，新增写功能只需加一条描述符。
 
-**为什么单独一个文件**：`agent/write_flow.py` 与 `agent/orchestrator.py` 都已逼近单文件 300 行红线
-（单文件 ≤300、单函数 ≤40），per-intent 的差异必须外置；`orchestrator` 只 import 本模块，
-**源码里不出现任何工具名字面量**（`tests/test_orchestrator_readonly.py` 的静态红线）。
+**本模块现在只留「注册表 + 对外 API」**（F15/F20 拆卡）：
+
+| 模块 | 内容 |
+|---|---|
+| `agent/_write_common.py` | 核心契约类型（`ShapeResult` / `Prepared` / `WriteSpec`）+ `_code_of` / `yuan_to_cents` |
+| `agent/_write_transfer.py` | 转账族 T6/T7（`preview_token` 族，**OTP 在工具层**） |
+| `agent/_write_subscription.py` | 订阅取消族 T11（`confirm_ref` 族，**OTP 在编排层**） |
+| **本模块** | `_SPECS` 注册表 + `spec_of` / `WRITE_INTENTS` / `otp_ok`，并**再导出**核心类型与 `yuan_to_cents` |
+
+**为什么拆**：本文件曾到 **296 行**，距 `CLAUDE.md`「单文件 ≤300 行」红线只剩 4 行，装不下 F15
+（AA 收款）与 F20（送礼计划）的描述符。拆法照 card-04b / card-05b 的先例（按域拆 + 只许单向依赖）：
+`_write_common` ← 各意图族 ← 本模块，无环。
+
+**orchestrator 只 import 本模块**，其源码里不出现任何写工具名字面量
+（`tests/test_orchestrator_readonly.py` 的静态红线）。
 
 **两种凭证（card-24 台账口径，不得混用）**：
 
@@ -12,244 +24,52 @@
 | `preview_token` | 工具层 `preview_*`（T7） | 转账 | **工具层** |
 | `confirm_ref` | 工具层私有约定 `issue_confirm_ref`（T11/T12/T15） | 订阅取消 | **编排层** |
 
-`confirm_ref` 族的工具签名**没有 otp 参数**（`cancel_subscription(sub_id, confirm_ref)`），
-故 OTP 闸门落在编排层 —— 依据 `tools/cross_scene.py`「确认与 OTP 落在编排层（同 T11/T15 的分工）」。
-
-**新增写意图的步骤**：① 在 `_SPECS` 加一条 `WriteSpec`；② 实现五个纯函数；
-③ 在 `tests/cases/orchestrator.yaml` 加用例。**动到转账相关代码时，既有 trf-* 用例是硬判据。**
+**新增写意图的步骤**：① 在 `_SPECS` 加一条 `WriteSpec`；② 在对应族的 `_write_*.py` 实现五个纯函数
+（新族则新建 `agent/_write_<族>.py`）；③ 在 `tests/cases/orchestrator.yaml` 加用例。
+**动到转账相关代码时，既有 trf-* 用例是硬判据。**
 """
 
 from __future__ import annotations
 
-import re
-from dataclasses import dataclass, field
-from typing import Callable, Mapping
-
-from agent import confirm_card, payee_clarify
-from tools import subscription, transfer
-from tools.schemas import ToolResult
-from tools.transfer import OTP_CODE                    # agent→tools 合法；OTP 明文绝不进日志/facts/回执
-
-#: 金额文本形状：最多两位小数的十进制（禁科学计数/负号/多余位数）
-_YUAN = re.compile(r"\d+(?:\.\d{1,2})?")
-
-#: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
-TRANSFER_CN = {"transfer_single": "单笔转账", "transfer_scheduled": "定时转账"}
-
-#: 订阅取消（T11）：工具层的动作名必须与 `tools/subscription.CANCEL_ACTION` 同值
-CANCEL_ACTION = "cancel_subscription"
-CANCEL_CN = "订阅取消"
-
-
-def _code_of(result: ToolResult) -> str | None:
-    """工具结果的错误码字符串（枚举与裸字符串都接受）。"""
-    code = result.error_code
-    return str(getattr(code, "value", code)) if code else None
-
-
-@dataclass(frozen=True)
-class ShapeResult:
-    """SLOT_FILL 的结果：补齐的槽位 / 缺槽（追问）/ 直接报错（零命中）。"""
-
-    filled: dict
-    missing: list[str] = field(default_factory=list)
-    error_code: str | None = None
-    message: str = ""
-    clarify: str = ""                 # 缺槽时的具体追问（F17：收款人候选）；空 = 用通用模板追问
-
-
-@dataclass(frozen=True)
-class Prepared:
-    """PRECHECK 的输入：工具层事实包 + **工具层签发**的凭证（编排层不得自己造串）。"""
-
-    ok: bool
-    facts: Mapping = field(default_factory=dict)
-    credential: str = ""
-    error_code: str | None = None
-    message: str = ""
-
-
-@dataclass(frozen=True)
-class WriteSpec:
-    """一个写意图的完整形状（写路径四步里「因意图而异」的那部分）。"""
-
-    intent: str
-    intent_cn: str
-    title: str                        # 确认卡标题（不含书名号）
-    credential_kind: str              # "preview_token" | "confirm_ref"
-    otp_in_tool: bool                 # True=工具层校验 OTP；False=编排层校验
-    missing: tuple[str, ...]          # 缺槽时回给用户的槽位名（CLARIFY 措辞用）
-    tools: tuple[str, ...]            # PRECHECK 阶段调用的工具（审计 tool_calls）
-    execute_tool: str                 # EXECUTE 阶段的工具名
-    target_key: str                   # 工具层主键在槽位里的键名（`payee_id` / `sub_id`）
-    what: str                         # 中文宾语（「这笔{what}」）
-    shape: Callable[[Mapping], ShapeResult]
-    prepare: Callable[[dict], Prepared]
-    card: Callable[[str, dict, Mapping, str, bool], confirm_card.CardInput]
-    plain: Callable[[dict, Mapping, str], str]
-    execute: Callable[[str, str, str | None], ToolResult]
-
-
-# ---------------- 转账（T6/T7）：preview_token 族，OTP 在工具层 ----------------
-
-def yuan_to_cents(value: object) -> int | None:
-    """元 → 整数分：**字符串拆分整数运算，禁 float**（analyst 裁决；避免 0.1 类精度问题）。
-
-    认不出或非正数 → None（由调用方判为缺槽并追问）。
-    """
-    text = str(value).strip().replace(",", "").replace("元", "")
-    if not _YUAN.fullmatch(text):
-        return None
-    whole, _, frac = text.partition(".")
-    cents = int(whole) * 100 + int((frac + "00")[:2])
-    return cents if cents > 0 else None                              # 非正数 → 视为缺槽（不猜 0 元）
-
-
-def _shape_transfer(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL 对齐工具层签名：`payee`（名字/手机号）→ `payee_id`；`amount`（元）→ 整数分。
-
-    没找到或同名多个 → 记缺槽（**绝不擅自选一个**）；金额认不出 → 记缺槽。
-
-    缺收款人时把 `resolve_payee` 的**事实包**交给 `payee_clarify.ask_for` 生成追问（F17）：
-    候选的姓名与脱敏手机号由它透出给用户 —— 编排层不自己拼手机号、不自己数候选（铁律 2）。
-    """
-    filled, missing = dict(slots), []
-    payee_facts: Mapping = {}
-    if not filled.get("payee_id"):
-        query = str(filled.get("payee") or "").strip()
-        found = transfer.resolve_payee(query) if query else None
-        candidates = (found.facts.get("candidates") or []) if found is not None and found.ok else []
-        if len(candidates) == 1:
-            filled["payee_id"] = candidates[0]["id"]
-            filled["payee_name"] = candidates[0]["name"]
-            filled["masked_phone"] = candidates[0]["phone"]
-        else:
-            missing.append("payee")
-            payee_facts = found.facts if found is not None and found.ok else {}
-    if filled.get("amount_cents") is None:
-        cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
-        if cents is None:
-            missing.append("amount")
-        else:
-            filled["amount_cents"] = cents
-    clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
-
-
-def _prepare_transfer(filled: dict) -> Prepared:
-    """T7 预览：**只算不执行**，凭证由工具层签发（编排层不造串）。
-
-    事实包补一个 `payee_phone`（脱敏手机号）—— 它来自工具层 `resolve_payee` 的候选，不是编排层编的；
-    确认卡上要显示它，`verify_numbers` 必须能在事实包里找到（铁律 2）。
-    """
-    preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"])
-    if not preview.ok:
-        return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
-    masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    return Prepared(ok=True, facts={**preview.facts, "payee_phone": masked},
-                    credential=str(preview.data["preview_token"]))
-
-
-def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
-                   requires_otp: bool) -> confirm_card.CardInput:
-    """转账确认卡：金额、档位、风险因子**全部来自 facts**（卡面行与 card-10 逐字一致）。"""
-    masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    return confirm_card.CardInput(
-        title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
-        rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
-              ("金额", f"{facts['amount_yuan']} 元"),
-              ("预计到账", confirm_card.expected_arrival(tier))],
-        tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
-
-
-def _plain_transfer(filled: dict, facts: Mapping, tier: str) -> str:
-    """纯事实版确认文本：确认卡出现 facts 之外的数字时的降级回执（只引用传入值）。"""
-    masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    return (f"请确认：向 {facts['payee_name']}（{masked}）转账 {facts['amount_yuan']} 元，"
-            f"权限档 {tier}。")
-
-
-def _execute_transfer(target_id: str, credential: str, otp: str | None) -> ToolResult:
-    """OTP 校验与幂等**都在工具层**（card-05 已 PASS）；本层不重写。"""
-    del target_id                                                    # 工具层只认 token
-    return transfer.execute_transfer(credential, otp)
-
-
-# ---------------- 订阅取消（T11）：confirm_ref 族，OTP 在编排层 ----------------
-
-def _shape_subscription(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：`merchant` → `sub_id`（照 `resolve_payee` 先例）。
-
-    唯一命中 → 补 `sub_id`；**重名 → 追问**（CLARIFY）；**零命中 → 报错**（NOT_FOUND）。
-    这两条是 F04 的验收点，与转账「一律追问」的口径不同。
-    """
-    filled = dict(slots)
-    if filled.get("sub_id"):
-        return ShapeResult(filled=filled)
-    query = str(filled.get("merchant") or "").strip()
-    if not query:
-        return ShapeResult(filled=filled, missing=["merchant"])
-    listed = subscription.list_subscriptions()
-    if not listed.ok:
-        return ShapeResult(filled=filled, error_code=_code_of(listed), message=listed.message)
-    items = listed.facts.get("items") or []
-    hits = [item for item in items if query in str(item.get("merchant") or "")]
-    if not hits:
-        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="找不到匹配的订阅")
-    if len(hits) > 1:
-        return ShapeResult(filled=filled, missing=["merchant"])       # 重名：追问，绝不擅自选一个
-    filled["sub_id"], filled["merchant"] = hits[0]["id"], hits[0]["merchant"]
-    return ShapeResult(filled=filled)
-
-
-def _prepare_subscription(filled: dict) -> Prepared:
-    """订阅取消**没有** `preview_*`（T11 签名就是 `(sub_id, confirm_ref)`）：
-
-    事实包取自 T10 的列表（F19 为 F04 提供事实 —— 卡面数字必须有来源），
-    凭证由工具层私有约定 `issue_confirm_ref` 签发，绑定 `(action + target_id + 当前用户)`。
-    """
-    sub_id = filled["sub_id"]
-    listed = subscription.list_subscriptions()
-    if not listed.ok:
-        return Prepared(ok=False, error_code=_code_of(listed), message=listed.message)
-    item = next((row for row in (listed.facts.get("items") or []) if row.get("id") == sub_id), None)
-    if item is None:
-        return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该订阅")
-    facts = {"merchant": item["merchant"], "cycle": item["cycle"],
-             "next_charge_date": item["next_charge_date"], "amount_yuan": item["amount_yuan"]}
-    return Prepared(ok=True, facts=facts,
-                    credential=subscription.issue_confirm_ref(CANCEL_ACTION, sub_id))
-
-
-def _cycle_cn(cycle: object) -> str:
-    """周期中文（与 `tools/subscription.CYCLE_LABELS` 同源，缺省原样回显）。"""
-    return subscription.CYCLE_LABELS.get(str(cycle), str(cycle))
-
-
-def _card_subscription(intent: str, filled: dict, facts: Mapping, tier: str,
-                       requires_otp: bool) -> confirm_card.CardInput:
-    """订阅取消确认卡：商户、金额、周期、下次扣费日**全部来自 facts**（T10 的事实包）。"""
-    return confirm_card.CardInput(
-        title="订阅取消确认卡", intent_cn=CANCEL_CN,
-        rows=[("商户", str(facts["merchant"])),
-              ("金额", f"{facts['amount_yuan']} 元／{_cycle_cn(facts['cycle'])}"),
-              ("下次扣费", str(facts["next_charge_date"]))],
-        tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], "取消订阅"))
-
-
-def _plain_subscription(filled: dict, facts: Mapping, tier: str) -> str:
-    """纯事实版确认文本（订阅版降级回执）。"""
-    return (f"请确认：取消订阅 {facts['merchant']}（{facts['amount_yuan']} 元／"
-            f"{_cycle_cn(facts['cycle'])}），权限档 {tier}。")
-
-
-def _execute_subscription(target_id: str, credential: str, otp: str | None) -> ToolResult:
-    """T11 的 OTP 闸门**在编排层**（工具签名没有 otp 参数），本函数只把 `(sub_id, ref)` 交给工具层。"""
-    del otp
-    return subscription.cancel_subscription(target_id, credential)
-
+from agent._write_common import (       # noqa: F401 —— 再导出，保住 `write_intents.<name>` 历史调用点
+    Prepared,
+    ShapeResult,
+    WriteSpec,
+    yuan_to_cents,
+)
+from agent._write_aa import (
+    _card_aa,
+    _execute_aa,
+    _plain_aa,
+    _prepare_aa,
+    _shape_aa,
+)
+from agent._write_gift import (
+    _card_gift,
+    _execute_gift,
+    _plain_gift,
+    _prepare_gift,
+    _shape_gift,
+)
+from agent._write_subscription import (
+    CANCEL_ACTION,
+    CANCEL_CN,
+    _card_subscription,
+    _execute_subscription,
+    _plain_subscription,
+    _prepare_subscription,
+    _shape_subscription,
+)
+from agent._write_transfer import (
+    _card_transfer,
+    _execute_transfer,
+    _plain_transfer,
+    _prepare_transfer,
+    _shape_scheduled,
+    _shape_transfer,
+)
+from agent._write_wealth import specs as _wealth_specs          # F12/F13（T15，confirm_ref 族）
+from tools.transfer import OTP_CODE     # agent→tools 合法；OTP 明文绝不进日志/facts/回执
 
 # ---------------- 描述符表（唯一来源） ----------------
 
@@ -261,12 +81,17 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="payee_id",
         what="转账", shape=_shape_transfer, prepare=_prepare_transfer,
         card=_card_transfer, plain=_plain_transfer, execute=_execute_transfer),
+    # ⚠️ F16 止损：`shape` 走 `_shape_scheduled` —— **一律追问转即时，绝不出确认卡**
+    # （修前会出「预计到账：实时到账」的即时转账卡，点确认即扣款）。
+    # 故本条的 prepare/card/plain/execute 目前**不可达**（F16 落地时整体替换）；
+    # 保留它们是为满足 `WriteSpec` 的字段约束，并让 F16 的改动面一眼可见。
+    # 完整方案见 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md`。
     "transfer_scheduled": WriteSpec(
         intent="transfer_scheduled", intent_cn="定时转账", title="转账确认卡",
         credential_kind="preview_token", otp_in_tool=True,
         missing=("payee", "amount"), tools=("preview_transfer",), execute_tool="execute_transfer",
         target_key="payee_id",
-        what="转账", shape=_shape_transfer, prepare=_prepare_transfer,
+        what="转账", shape=_shape_scheduled, prepare=_prepare_transfer,
         card=_card_transfer, plain=_plain_transfer, execute=_execute_transfer),
     "subscription_cancel": WriteSpec(
         intent="subscription_cancel", intent_cn=CANCEL_CN, title="订阅取消确认卡",
@@ -275,7 +100,32 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="sub_id",
         what="取消订阅", shape=_shape_subscription, prepare=_prepare_subscription,
         card=_card_subscription, plain=_plain_subscription, execute=_execute_subscription),
+    # F15：**无凭证族**（T9 签名没有 preview_token / confirm_ref），L1 不要 OTP。
+    # `otp_in_tool=False` 表示「编排层不管 OTP」；因 L1 的 `requires_otp=False`，
+    # `write_flow._execute` 的闸门不会触发（闸门条件已加 `confirmation.requires_otp`）。
+    "aa_collect": WriteSpec(
+        intent="aa_collect", intent_cn="AA 收款", title="AA 收款确认卡",
+        credential_kind="none", otp_in_tool=False,
+        missing=("payee_ids", "amount"), tools=(),      # PRECHECK 阶段**不调任何工具**（T9 无 preview）
+        execute_tool="create_aa_request",
+        target_key="aa_target",
+        what="AA 收款", shape=_shape_aa, prepare=_prepare_aa,
+        card=_card_aa, plain=_plain_aa, execute=_execute_aa),
+    # F20：**无凭证族**（T16 签名没有凭证参数），L2 要 OTP —— 闸门落在编排层（同 T11/T15）。
+    # 确认卡数字取自 T19 `preview_gift`（L0 只读，SPEC-CHANGE 新增）：它一调不锁款，
+    # 真锁款只在 `execute` 调 T16 `plan_gift` 时发生。
+    "gift_plan": WriteSpec(
+        intent="gift_plan", intent_cn="送礼计划", title="送礼计划确认卡",
+        credential_kind="none", otp_in_tool=False,
+        missing=("contact", "date", "budget"), tools=("preview_gift",),
+        execute_tool="plan_gift",
+        target_key="contact",
+        what="送礼计划", shape=_shape_gift, prepare=_prepare_gift,
+        card=_card_gift, plain=_plain_gift, execute=_execute_gift),
 }
+
+#: F12/F13 理财申购赎回（按意图族拆出，同 `_write_subscription` 先例）
+_SPECS.update(_wealth_specs())
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)
