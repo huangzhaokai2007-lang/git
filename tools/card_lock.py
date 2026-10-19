@@ -38,8 +38,8 @@ def _safe(operation: Callable[..., ToolResult]) -> Callable[..., ToolResult]:
     return run
 
 
-def _audit(session: str, card_id: str | None, result: str, action: str) -> None:
-    dao.insert_audit(secrets.token_hex(12), session, actor='user', intent='card_lock',
+def _audit(session: str, card_id: str | None, result: str, action: str, trace: str | None = None) -> None:
+    dao.insert_audit(trace or secrets.token_hex(12), session, actor='user', intent='card_lock',
                      tool=action, params_json={'card_id': card_id}, risk_level='L2',
                      permission_tier='L2', result=result)
 
@@ -69,7 +69,8 @@ def preview(card_id: str, session_id: str) -> ToolResult:
             if _REQUESTS[stale]['expires'] < _now():
                 del _REQUESTS[stale]
         with transaction(connection()):
-            _audit(session_id, card_id, 'pending_confirm', 'preview_card_lock')
+            record = subscription.check_confirm_ref(ref, card.MANAGE_ACTION, card_id)
+            _audit(session_id, card_id, 'pending_confirm', 'preview_card_lock', record['trace_id'])
         data = {'token': token, 'card_id': card_id, 'card_no_mask': row['card_no_mask'],
                 'status': 'normal', 'impact': IMPACT, 'tier': 'L2'}
         return _ok(data, {k: v for k, v in data.items() if k != 'token'}, '请核对卡片并确认锁定。')

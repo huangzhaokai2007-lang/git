@@ -44,7 +44,7 @@ def test_natural_card_requests_work_offline_without_writes(seeded, monkeypatch, 
 @pytest.mark.parametrize("text", [
     "不要绑定银行卡", "我不想申请信用卡", "取消绑定银行卡", "解绑我的银行卡",
     "帮我挂失银行卡", "冻结我的卡", "查询银行卡后转账", "绑定银行卡并转账",
-    "先绑卡再还款", "请帮我支付", "我有张银行卡丢了",
+    "先绑卡再还款", "请帮我支付",
 ])
 def test_other_actions_and_negations_keep_the_original_classifier(seeded, monkeypatch, text):
     from agent import card_binding_flow as flow, classifier
@@ -58,3 +58,13 @@ def test_other_actions_and_negations_keep_the_original_classifier(seeded, monkey
     monkeypatch.setattr(classifier, "classify", classify)
     turn = flow.handle(text, session_id="language-negative")
     assert calls and turn.intent == "out_of_scope" and turn.tool_calls == []
+
+
+def test_missing_card_routes_to_choice_without_classifying_or_writing(seeded, monkeypatch):
+    from agent import card_binding_flow as flow, classifier
+    def unexpected(*args, **kwargs):
+        raise AssertionError('找不到卡应走确定性的临时锁卡选项')
+    monkeypatch.setattr(classifier, 'classify', unexpected)
+    turn = flow.handle('我有张银行卡丢了', session_id='missing-card')
+    assert turn.ask == 'card_missing' and not turn.executed
+    assert raw(seeded, "SELECT status FROM card WHERE id='card_savings_0001'")[0]['status'] == 'normal'

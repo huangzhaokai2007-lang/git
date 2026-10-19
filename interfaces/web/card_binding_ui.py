@@ -8,6 +8,7 @@ import streamlit as st
 from agent import card_binding_flow as flow
 import card_limit_ui as limits_ui
 import card_lock_ui as locks_ui
+import card_gallery_ui as gallery_ui
 
 FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost", "已冻结": "frozen"}
 
@@ -78,6 +79,7 @@ def _form(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
 
 
 def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
+    state['detail_revision'] = state.get('detail_revision', 0) + 1
     result = executor.submit(flow.detail, card_id).result()
     if not result["ok"]:
         state["notice"] = (False, result["message"])
@@ -91,19 +93,22 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
 
 def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict) -> None:
     card_id = item["card_id"]
-    columns = st.columns([3, 1.5, 2.5])
-    with columns[0].container(horizontal=True):
-        if st.button(item["card_no_mask"], key=f"detail-{card_id}"):
-            _select(executor, card_id, state)
+    if gallery_ui.face(item):
+        _select(executor, card_id, state)
+    st.caption('点击卡片查看详情')
+    columns = st.columns([1, 2], vertical_alignment='center')
+    with columns[0].container(horizontal=True, vertical_alignment='center'):
+        st.caption(item['status_cn'])
         normal = item['status'] == 'normal'
-        hint = '锁定此卡' if normal else f"{item['status_cn']}；解锁需另行验证与复核"
-        if st.button('', key=f'lock-toggle-{card_id}', disabled=not normal,
+        locked = item['status'] == 'locked'
+        unlockable = locked and item.get('self_unlockable', False)
+        hint = '临时锁定此卡' if normal else '短信验证后自助解锁' if unlockable else '锁定来源无法确认，不能自助解锁' if locked else f"{item['status_cn']}，不能自助解锁"
+        if st.button('', key=f'lock-toggle-{card_id}', disabled=not (normal or unlockable),
                        icon=':material/lock_open:' if normal else ':material/lock:', help=hint):
-            locks_ui.open_card(executor, session_id, card_id)
+            locks_ui.open_card(executor, session_id, card_id, 'unlock' if locked else 'lock', inline=True)
             st.rerun()
-    columns[1].markdown(item["status_cn"])
     visible = state["visible"].get(card_id, False)
-    with columns[2]:
+    with columns[1]:
         amount, button = st.columns([3, 2])
         amount.text(f"{item['balance_yuan']} 元" if visible else "******")
         if button.button("隐藏" if visible else "显示", key=f"balance-{card_id}",
@@ -111,6 +116,7 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict)
                          help="隐藏余额" if visible else "显示余额"):
             state["visible"][card_id] = not visible
             st.rerun()
+    locks_ui.row_confirmation(executor, session_id, card_id)
 
 
 def _reveal(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
@@ -159,6 +165,7 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
         st.rerun()
     _reveal(executor, session_id, state)
     if st.button("关闭详情", key="detail-close"):
+        state['detail_revision'] = state.get('detail_revision', 0) + 1
         state["selected"], state["full_number"], state["reveal_form"] = None, None, False
         st.rerun()
 
@@ -178,6 +185,7 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     selected_filter = st.selectbox("卡片状态", list(FILTERS), key="cards-filter")
     if selected_filter != state["last_filter"]:
         state["visible"], state["full_number"] = {}, None
+        state['selected'], state['reveal_form'], state['detail_balance'] = None, False, False
         state["last_filter"] = selected_filter
     result = executor.submit(flow.list_cards, FILTERS[selected_filter]).result()
     if not result["ok"]:
@@ -187,15 +195,12 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
     if not items:
         st.info("您还未绑定银行卡。" if selected_filter == "全部" else "没有该状态的已绑定银行卡。")
     else:
-        columns = st.columns([3, 1.5, 2.5])
-        for column, label in zip(columns, ("卡号", "状态", "余额")):
-            column.markdown(f"**{label}**")
-        for item in items:
-            _row(executor, session_id, item, state)
-    _details(executor, session_id, state)
+        gallery_ui.deck(items, state['selected'], lambda item: _row(executor, session_id, item, state), state.get('detail_revision', 0))
+    with st.container(key='bank-gallery-details'):
+        _details(executor, session_id, state)
 
 
-def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+def render(executor: ThreadPoolExecutor, session_id: str, *, show_limit_button: bool = True) -> None:
     if requested := st.session_state.pop("limit-tab-request", None):
         st.session_state["cards-tabs"] = requested
     tabs = st.tabs(["银行卡", "额度调整记录", "锁卡记录"], key="cards-tabs", on_change="rerun")
@@ -205,5 +210,5 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         limits_ui.records(executor)
     with tabs[2]:
         locks_ui.records(executor)
-    limits_ui.render(executor, session_id)
+    limits_ui.render(executor, session_id, show_button=show_limit_button)
     locks_ui.render(executor, session_id)

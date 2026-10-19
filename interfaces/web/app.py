@@ -106,7 +106,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     dump = turn.model_dump()
     if turn.intent == "card_query":
         cards_ui.reset(turn)
-    if turn.ask == "card_lock": limits_ui.reset()
+    if turn.ask in ("card_lock", "card_missing", "card_unlock"): limits_ui.reset()
     if turn.ask == "limit_adjust": locks_ui.reset()
     limits_ui.accept_turn(_agent_executor(), state["session_id"], text, turn.ask)
     locks_ui.accept_turn(_agent_executor(), state["session_id"], turn.ask)
@@ -222,7 +222,7 @@ def _chat_page() -> None:
     #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
     _render_forms()
     if st.session_state.get("bound-card-query"):
-        cards_ui.render(_agent_executor(), st.session_state["session_id"])
+        cards_ui.render(_agent_executor(), st.session_state["session_id"], show_limit_button=False)
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
