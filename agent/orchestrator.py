@@ -37,7 +37,7 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, templates, write_flow
+from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, templates, write_flow
 from agent.period import anchor_period, resolve_day, resolve_period
 from agent.read_routes import TOOL_ROUTES
 from data import dao
@@ -205,6 +205,23 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
            session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None,
            intent_resolver: Callable[[str, list[str] | None], classifier.IntentOut] | None = None) -> Turn:
+    """**对外唯一入口**（F16）：先**惰性结算到期预约**（Q1/Q9），再处理本次请求。
+
+    结算告知拼在回执**前面** —— 用户下次交互即可看到「预约到期执行成功 / 失败」（F16 验收第 3 条）。
+    结算自身出错只记日志、**绝不影响本次请求**（见 `agent/scheduled_runner.py`）。
+    **无到期项时不写任何表**，故这条钩子对正常请求是零副作用的。
+    """
+    notices = scheduled_runner.settle_due()
+    turn = _handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
+                   card_reader=card_reader, intent_resolver=intent_resolver)
+    if notices:
+        turn.reply = "\n".join([*notices, turn.reply])
+    return turn
+
+
+def _handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
+            session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None,
+            intent_resolver: Callable[[str, list[str] | None], classifier.IntentOut] | None = None) -> Turn:
     """处理一句用户输入，返回 `Turn`（含到达过的状态序列与调用过的工具）。
 
     `clarify_round`：调用方在追问后续接时自增（0 → 最多 2 轮追问后转人工）。

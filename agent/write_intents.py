@@ -61,9 +61,13 @@ from agent._write_subscription import (
     _shape_subscription,
 )
 from agent._write_transfer import (
+    _book_scheduled,
+    _card_scheduled,
     _card_transfer,
     _execute_transfer,
+    _plain_scheduled,
     _plain_transfer,
+    _prepare_scheduled,
     _prepare_transfer,
     _shape_scheduled,
     _shape_transfer,
@@ -81,18 +85,17 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="payee_id",
         what="转账", shape=_shape_transfer, prepare=_prepare_transfer,
         card=_card_transfer, plain=_plain_transfer, execute=_execute_transfer),
-    # ⚠️ F16 止损：`shape` 走 `_shape_scheduled` —— **一律追问转即时，绝不出确认卡**
-    # （修前会出「预计到账：实时到账」的即时转账卡，点确认即扣款）。
-    # 故本条的 prepare/card/plain/execute 目前**不可达**（F16 落地时整体替换）；
-    # 保留它们是为满足 `WriteSpec` 的字段约束，并让 F16 的改动面一眼可见。
-    # 完整方案见 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md`。
+    # F16：定时转账**已接通**（止损已移除）。与即时转账只差两处 —— PRECHECK 把 `schedule`
+    # 一起传给 T7、EXECUTE 调 **T21 `schedule_transfer`** 落 `pending` 预约（**不扣款**）。
+    # 到点执行由 `agent/scheduled_runner.py` 的惰性结算调 T22 完成。
     "transfer_scheduled": WriteSpec(
-        intent="transfer_scheduled", intent_cn="定时转账", title="转账确认卡",
+        intent="transfer_scheduled", intent_cn="定时转账", title="定时转账确认卡",
         credential_kind="preview_token", otp_in_tool=True,
-        missing=("payee", "amount"), tools=("preview_transfer",), execute_tool="execute_transfer",
+        missing=("payee", "amount", "schedule"), tools=("preview_transfer",),
+        execute_tool="schedule_transfer",
         target_key="payee_id",
-        what="转账", shape=_shape_scheduled, prepare=_prepare_transfer,
-        card=_card_transfer, plain=_plain_transfer, execute=_execute_transfer),
+        what="预约转账", shape=_shape_scheduled, prepare=_prepare_scheduled,
+        card=_card_scheduled, plain=_plain_scheduled, execute=_book_scheduled),
     "subscription_cancel": WriteSpec(
         intent="subscription_cancel", intent_cn=CANCEL_CN, title="订阅取消确认卡",
         credential_kind="confirm_ref", otp_in_tool=False,
