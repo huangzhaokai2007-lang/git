@@ -111,7 +111,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     if schedule is not None or split_with is not None:        # F16 补 `schedule` 语义（人类已批 Q1–Q10）
-        from tools._transfer_schedule import schedule_args_error as _schedule_err  # 延迟 import：避开循环依赖
+        from tools._scheduled_common import schedule_args_error as _schedule_err  # 延迟 import：避开循环依赖
         if (msg := _schedule_err(schedule, split_with)) is not None:
             return _fail(ErrorCode.INVALID_ARGUMENT, msg)
     try:

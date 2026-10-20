@@ -134,3 +134,44 @@ def test_no_settlement_writes_nothing_when_nothing_is_due(wired, clock, monkeypa
     assert schedules_of(wired) == []
     # 审计只多本次请求那一条（`scheduled_runner` 不额外写）
     assert len(raw(wired, "SELECT 1 FROM audit_log")) - before_audit <= 1
+
+
+# ---------------- ③ 取消预约（Q4：L1、不要 OTP、不动钱） ----------------
+
+def cancel_intent() -> dict:
+    return {"intent": "scheduled_cancel", "confidence": 0.95, "slots": {}, "missing_slots": []}
+
+
+def test_cancel_books_nothing_and_moves_no_money(wired, clock, monkeypatch) -> None:
+    """走完整路径：**先预约 → 再取消** → 状态 cancelled、**余额一分没动**、L1 不要 OTP。"""
+    book(monkeypatch)
+    assert schedules_of(wired)[0]["status"] == "pending"
+    before = account_of(wired)
+    card = turn(monkeypatch, "取消那个定时转账", [cancel_intent()])
+    assert "CONFIRM_CARD" in card.states and card.tier == "L1"
+    assert "取消预约确认卡" in card.reply or "【取消预约" in card.reply
+    assert "验证码" not in card.reply                      # Q4：不要 OTP
+    done = orchestrator.handle("确认", session_id=SESSION)
+    assert done.executed is True and done.tool_calls == ["cancel_scheduled"]
+    assert account_of(wired) == before                     # ← 取消不动钱
+    assert schedules_of(wired)[0]["status"] == "cancelled"
+
+
+def test_cancel_without_any_pending_schedule_is_reported(wired, clock, monkeypatch) -> None:
+    """没有任何待执行预约 → 直接报「没有待执行的预约」，**不出确认卡**。"""
+    step = turn(monkeypatch, "取消那个定时转账", [cancel_intent()])
+    assert step.executed is False and "CONFIRM_CARD" not in step.states
+    assert "没有待执行的预约" in step.reply
+    assert schedules_of(wired) == []
+
+
+def test_cancelled_schedule_is_never_settled(wired, clock, monkeypatch) -> None:
+    """取消后即使过了预约时间，惰性结算也**不会扣款**（状态已不是 pending）。"""
+    book(monkeypatch)
+    turn(monkeypatch, "取消那个定时转账", [cancel_intent()])
+    orchestrator.handle("确认", session_id=SESSION)
+    before = account_of(wired)
+    clock.moment = clock.moment.replace(day=13, hour=9, minute=30)     # 过了预约时刻
+    turn(monkeypatch, "你好", [chitchat()])
+    assert account_of(wired) == before
+    assert schedules_of(wired)[0]["status"] == "cancelled"

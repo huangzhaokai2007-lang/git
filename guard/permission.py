@@ -43,6 +43,7 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "card_report_lost": "L3",         # §5 L3「挂失」
     "card_unlock": "L3",              # §5 L3「解锁」
     "payee_add": "L1",                # §5 SPEC-CHANGE（F22 补记）：加收款人只加联系人、不动钱
+    "scheduled_cancel": "L1",         # F16 Q4 SPEC-CHANGE：取消预约是「撤回尚未发生的动作」、且不动钱
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）
