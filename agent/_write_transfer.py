@@ -3,13 +3,17 @@
 F15/F20 拆卡时从 `agent/write_intents.py` 按意图族拆出；核心契约类型与共享工具见
 `agent/_write_common.py`，注册表见 `agent/write_intents.py`。
 
-**本族覆盖两个意图**：`transfer_single`（完整可用）与 `transfer_scheduled`（**F16 未接通，
-当前为「止损」状态**：`shape` 一律走 `_shape_scheduled` 追问转即时，绝不降级成即时转账）。
-`preview_transfer` 的 `schedule` 参数语义属 F16，见 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md`。
+**本族覆盖两个意图**：`transfer_single`（即时）与 `transfer_scheduled`（**F16 定时转账**）。
+
+F16 的关键差异只有两处：① PRECHECK 时把 `schedule` 一起传给 T7（此前不传，导致「明天转」被当即时转账）；
+② EXECUTE 走 **T21 `schedule_transfer`**（落 `pending` 预约、**不扣款**），而不是 T8 立即扣款。
+到点执行由 `agent/scheduled_runner.py` 的惰性结算调 T22 完成。
+方案见 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md`（Q1–Q10 人类已批）。
 """
 
 from __future__ import annotations
 
+import datetime
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify
@@ -19,27 +23,37 @@ from tools import transfer
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
 TRANSFER_CN = {"transfer_single": "单笔转账", "transfer_scheduled": "定时转账"}
 
-#: F16 未接通期间的止损文案（纯措辞，不含任何业务数字）
-SCHEDULED_UNSUPPORTED = ("定时转账还没接通（F16 排 W3），预约暂时无法受理。"
-                         "如需立即转账，请说「立即给某某转多少钱」。")
+#: 预约时间认不出时的追问（纯措辞，不含业务数字）。**相对日（明天/下周一）暂不支持**（Q10）。
+SCHEDULE_CLARIFY = ("请说明预约时间，格式如 2026-10-21 09:00（也接受 2026-10-21）；"
+                    "「明天」「下周一」这类相对说法暂不支持。")
+
+
+def _iso_schedule(value: object) -> str | None:
+    """预约时间：接受 ISO8601 日期或日期时间；**认不出 → `None`**（当缺槽追问，绝不猜）。"""
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(text).isoformat(timespec="minutes")
+    except ValueError:
+        return None
 
 
 def _shape_scheduled(slots: Mapping) -> ShapeResult:
-    """F16 **止损**：定时转账一律追问转即时，**绝不降级成即时转账**。
+    """SLOT_FILL：收款人 / 金额沿用转账口径，另加 `schedule`（ISO8601）。
 
-    修复的问题（实机复现）：此前 `transfer_scheduled` 复用 `_shape_transfer` / `_prepare_transfer`，
-    而 `_prepare_transfer` **不传 `schedule`** —— 于是「明天给王五转100元」会出**即时转账**
-    确认卡（卡面写「预计到账：实时到账」），L1 档点一下确认**钱立刻出去**，预约日期被静默丢弃。
-    这违反 F16 验收第 2 条「**预约时间到达前不能按即时转账扣款**」。
-
-    止损口径（与完整方案 `docs/superpowers/specs/2026-10-15-f16-scheduled-transfer-design.md` 解耦）：
-    **不论用户有没有给时间，一律不出确认卡** —— 给了时间我们也做不到（F16 未实现）；
-    没给时间说明模型识别到了时间却没抽出来。两种情况都**不能**当成即时转账。
-
-    走 `ShapeResult.clarify`（追问渠道）而非 `error_code`：后者会被 `templates.tool_error`
-    套上「这次没能查到您要的信息」，用在这里语义不对；追问还能给出可执行的下一步。
+    收款人解析与金额换算**直接复用 `_shape_transfer`**（同一份实现，不复制）—— 同名追问、
+    脱敏手机号透出等 F17 行为因此自动一致。预约时间认不出 → 追问并给出格式。
     """
-    return ShapeResult(filled=dict(slots), missing=["schedule"], clarify=SCHEDULED_UNSUPPORTED)
+    shaped = _shape_transfer(slots)
+    filled, missing = dict(shaped.filled), list(shaped.missing)
+    when = _iso_schedule(filled.get("schedule"))
+    if when is None:
+        missing.append("schedule")
+    else:
+        filled["schedule"] = when
+    clarify = shaped.clarify or (SCHEDULE_CLARIFY if "schedule" in missing else "")
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
 def _shape_transfer(slots: Mapping) -> ShapeResult:
@@ -113,3 +127,58 @@ def _plain_transfer(filled: dict, facts: Mapping, tier: str) -> str:
 def _execute_transfer(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
     """OTP 校验与幂等**都在工具层**（card-05 已 PASS）；本层不重写。"""
     return transfer.execute_transfer(confirmation.credential, otp)   # 工具层只认 token，不看 payee_id
+
+
+# ---------------- 定时转账（F16）：预约时间进卡面、执行只落预约 ----------------
+
+def _prepare_scheduled(filled: dict) -> Prepared:
+    """T7 预览（**只算不执行**）：把 `schedule` 一起传进去 —— 这正是 F16 修掉的那个洞。
+
+    预约**尚未落库**（落库在 EXECUTE 步调 T21）。事实包里额外放 `schedule` 字符串是必须的：
+    卡面要印预约时间，而 `card_numbers_outside_facts` 会把「2026」「09」这类数字当成 facts
+    之外的数字 → 整张卡降级（铁律 2 守门），故预约时间必须可溯源。
+    """
+    preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"],
+                                        schedule=str(filled["schedule"]))
+    if not preview.ok:
+        return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
+    masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    return Prepared(ok=True,
+                    facts={**preview.facts, "payee_phone": masked,
+                           "schedule": str(filled["schedule"])},
+                    credential=str(preview.data["preview_token"]))
+
+
+def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
+                    requires_otp: bool) -> confirm_card.CardInput:
+    """定时转账确认卡：**多一行「预约时间」、且不印「预计到账」**。
+
+    不印「预计到账」是刻意的 —— 那是即时转账的措辞，用在这里会被理解成「马上到账」，
+    而 F16 验收第 2 条正是不许把预约当即时。
+    """
+    masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    return confirm_card.CardInput(
+        title="定时转账确认卡", intent_cn="定时转账",
+        rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
+              ("金额", f"{facts['amount_yuan']} 元"),
+              ("预约时间", str(facts["schedule"]).replace("T", " ")),
+              ("执行说明", "到预约时间后才扣款，此前不会动钱")],
+        tier=tier, requires_otp=requires_otp,
+        risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
+
+
+def _plain_scheduled(filled: dict, facts: Mapping, tier: str) -> str:
+    """纯事实版确认文本（定时转账的降级回执）。"""
+    masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    return (f"请确认：预约 {facts.get('schedule')} 向 {facts['payee_name']}（{masked}）转账 "
+            f"{facts['amount_yuan']} 元，权限档 {tier}，到点之前不会扣款。")
+
+
+def _book_scheduled(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
+    """EXECUTE：调 **T21** 落一条 `pending` 预约（**不扣款**）—— 验收第 2 条的落点。
+
+    延迟 import：本模块属编排层，`_transfer_schedule` 属工具层且反过来依赖 `tools.transfer`，
+    在函数内导入可彻底避开导入顺序问题（同 `tools/transfer.py` 调 `schedule_args_error` 的做法）。
+    """
+    from tools import _transfer_schedule
+    return _transfer_schedule.schedule_transfer(confirmation.credential, otp)

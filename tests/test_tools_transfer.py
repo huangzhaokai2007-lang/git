@@ -180,8 +180,14 @@ def test_preview_rejects_unknown_or_foreign_payee(seeded: Path, foreign_payee: P
     assert refused.error_code == "FORBIDDEN" and refused.facts == {}
 
 
-def test_preview_refuses_unimplemented_schedule_and_split(seeded: Path) -> None:
-    assert transfer.preview_transfer(PAYEE, 100, schedule="2026-10-01").error_code == "INVALID_ARGUMENT"
+def test_preview_supports_schedule_but_still_refuses_split(seeded: Path) -> None:
+    """F16 落地后 `schedule` **不再被拒**（合法时间 → 正常出预览）；`split_with` 仍属后续卡。
+
+    原用例名 `..._refuses_unimplemented_schedule_and_split` 断言的是「schedule 传了就拒」——
+    F16（Q1–Q10 人类已批）改变了这条口径，故同步更新并改名（名字要跟行为一致）。
+    """
+    assert transfer.preview_transfer(PAYEE, 100, schedule="2026-10-01T09:00").ok is True
+    assert transfer.preview_transfer(PAYEE, 100, schedule="2026-10-01").ok is True   # 仅日期也认（00:00）
     assert transfer.preview_transfer(PAYEE, 100, split_with=[PAYEE_NEW]).error_code == "INVALID_ARGUMENT"
 
 

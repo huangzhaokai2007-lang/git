@@ -110,9 +110,10 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         tool_guard.require_payee_exists(payee_id, tool="preview_transfer")   # 卡 14b-4：按 id 精确校验
     except ToolError as exc:
         return _fail(exc.code, exc.message)
-    if schedule is not None or split_with is not None:
-        logger.warning("本卡未实现定时/拆分转账：schedule=%r split_with=%r", schedule, split_with)
-        return _fail(ErrorCode.INVALID_ARGUMENT, "本卡还不支持定时转账或拆分转账")
+    if schedule is not None or split_with is not None:        # F16 补 `schedule` 语义（人类已批 Q1–Q10）
+        from tools._transfer_schedule import schedule_args_error as _schedule_err  # 延迟 import：避开循环依赖
+        if (msg := _schedule_err(schedule, split_with)) is not None:
+            return _fail(ErrorCode.INVALID_ARGUMENT, msg)
     try:
         payee = dao.get_payee(payee_id)
         if payee is None:
@@ -158,6 +159,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
                          "payee_id": payee["id"], "payee_name": payee["name"], "amount": amount,
                          "fee": fee, "tier": judged["tier"], "requires_otp": judged["requires_otp"],
                          "factors": judged["factors"], "account_id": account["id"], "trace_id": trace_id,
+                         "schedule": schedule,              # F16：T21 落预约时要用（None = 即时转账）
                          "created_at": _now(), "state": "preview"})
     message = (f"转账 {facts['amount_yuan']} 元给 {payee['name']}：档位 {judged['tier']}，"
                f"手续费 {facts['fee_yuan']} 元，"
