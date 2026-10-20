@@ -15,7 +15,7 @@
 | [F08 解锁](F08-card-unlock.md) | 汤 | W3 | 黄 | 待复核 | — |
 | [F09 挂失](F09-card-lost.md) | 汤 | W3 | 黄 | 待复核 | — |
 | [F15 AA 收款](F15-aa-collect.md) | 黄 | W2 | 莫 | 待审核 | [#18](https://github.com/huangzhaokai2007-lang/git/pull/18) |
-| [F16 定时转账](F16-scheduled-transfer.md) | 黄 | W3 | 莫 | 待审核（Stage 1 存储+工具层已交付；编排层待做，**功能尚不可用，止损生效中**） | [#26](https://github.com/huangzhaokai2007-lang/git/pull/26) |
+| [F16 定时转账](F16-scheduled-transfer.md) | 黄 | W3 | 莫 | 待审核（预约可用 · 到点惰性结算 · 可取消；含 SPEC-CHANGE：+1 表 / +4 工具 / +1 意图） | [#26](https://github.com/huangzhaokai2007-lang/git/pull/26) |
 | [F17 收款人解析](F17-resolve-payee.md) | 黄 | W1 | 莫 | 待审核 | [#3](https://github.com/huangzhaokai2007-lang/git/pull/3) |
 | [F20 送礼计划](F20-gift-plan.md) | 黄 | W4 | 莫 | 待审核 | [#19](https://github.com/huangzhaokai2007-lang/git/pull/19) |
 | [F21 单笔转账](F21-single-transfer.md) | 黄 | W2 | 莫 | 待审核 | [#9](https://github.com/huangzhaokai2007-lang/git/pull/9) |
