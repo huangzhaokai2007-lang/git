@@ -34,8 +34,8 @@ from data.db import transaction
 from tools import transfer
 from tools._card_limit_transfer import restrict as _restrict_card_daily
 from tools._query_common import (
-    ToolError, _dao_reject, _fail, _money_facts, _ok, current_session_id, current_user_id,
-    require_owned,
+    DEMO_USER_ID, ToolError, _dao_reject, _fail, _money_facts, _ok, current_session_id,
+    current_user_id, require_owned,
 )
 from tools._transfer_risk import SINGLE_TX_MAX_CENTS, _limits, _today_out_flows
 from tools._transfer_token import _load_token_authoritative, _raw_snapshot, _store_token
@@ -43,81 +43,47 @@ from tools.schemas import ErrorCode, ToolResult
 
 logger = logging.getLogger(__name__)
 
-#: 预约状态机（DDL 的 `status` 取值域）。**只允许这四个值** —— 渲染与测试都按它比。
-STATUS_PENDING, STATUS_SUCCESS = "pending", "success"
-STATUS_FAILED, STATUS_CANCELLED = "failed", "cancelled"
-SCHEDULE_STATUSES = (STATUS_PENDING, STATUS_SUCCESS, STATUS_FAILED, STATUS_CANCELLED)
+# ---------------- 状态机与共享助手（F16 拆卡：本模块超红线 → 见 _scheduled_common） ----------------
+#: 状态机 / 行读取 / 抢锁 / 事实包 / T7 参数校验都在 `tools/_scheduled_common.py`。
+#: 这里 **import 即再导出** —— 历史调用点（`scheduled.SCHEDULE_STATUSES` 等）与测试行为不变，
+#: 同一份实现、不是副本（照 `_transfer_token.py` / `_transfer_risk.py` 的拆法）。
+from tools._scheduled_common import (      # noqa: F401 —— 再导出，保住历史调用点
+    CANCEL_TOOL, RUN_TOOL, SCHEDULE_STATUSES, SCHEDULE_TOOL, STATUS_CANCELLED, STATUS_FAILED,
+    STATUS_PENDING, STATUS_SUCCESS, _claim, _mark_failed, _owned, _row, _schedule_facts,
+)
 
-#: 审计里的 tool 名（与函数名一致）
-SCHEDULE_TOOL, RUN_TOOL, CANCEL_TOOL = "schedule_transfer", "execute_scheduled", "cancel_scheduled"
+# ---------------- T24 list_scheduled（L0 只读 · 供取消流程取事实包） ----------------
 
+def list_scheduled(status: str | None = None) -> ToolResult:
+    """T24 列出**当前用户**的预约（L0 只读）。`data` = `items[]` / `total_count`。
 
-def _row(schedule_id: str) -> dict | None:
-    """按 id 取预约行（**不做归属判断** —— 越权判定在下面各函数里 fail-closed）。"""
-    conn = dao.connection()
-    row = conn.execute("SELECT * FROM scheduled_transfer WHERE id = ?", (schedule_id,)).fetchone()
-    return None if row is None else dict(row)
-
-
-def _owned(schedule_id: str, *, tool: str) -> dict:
-    """取预约行并校验归属；不存在 → `NOT_FOUND`，他人的 → `FORBIDDEN`。"""
-    row = _row(schedule_id)
-    if row is None:
-        raise ToolError(ErrorCode.NOT_FOUND, "找不到该预约")
-    require_owned("预约", row["user_id"], row["id"], tool=tool, intent="transfer_scheduled")
-    return row
-
-
-def _claim(schedule_id: str, status: str, *, settled_at: str | None = None) -> bool:
-    """**条件更新抢锁**：仅当仍是 `pending` 才改成 `status`。返回是否抢到（受影响行 > 0）。
-
-    这是 T22/T23 的唯一并发防线 —— 受影响行 0 = 已被别的调用抢先，调用方据此幂等返回。
+    依据 F16 设计 **Q4**（取消档位 L1）：取消的确认卡要显示「取消哪一笔」（时间/收款人/金额），
+    而编排层禁止直查库（`agent/` 不写 SQL）—— 故单开一个只读工具。
+    `status` 省略 = 全部；**认不出的取值 → `INVALID_ARGUMENT`**（不静默忽略，同 T18 口径）。
     """
-    conn = dao.connection()
-    if settled_at is None:
-        cur = conn.execute("UPDATE scheduled_transfer SET status = ? WHERE id = ? AND status = ?",
-                           (status, schedule_id, STATUS_PENDING))
-    else:
-        cur = conn.execute("UPDATE scheduled_transfer SET status = ?, settled_at = ?"
-                           " WHERE id = ? AND status = ?",
-                           (status, settled_at, schedule_id, STATUS_PENDING))
-    return cur.rowcount > 0
-
-
-def _schedule_facts(row: dict) -> dict:
-    """预约的事实包：金额整数分 + `*_yuan` 展示串 + 状态/时间（回执要引用的数字都在这）。"""
-    return {"schedule_id": row["id"], "status": row["status"], "tier": row["tier"],
-            "payee_id": row["payee_id"], "execute_at": row["execute_at"],
-            **_money_facts(row["amount"], "amount")}
-
-
-def schedule_args_error(schedule: str | None, split_with: list[str] | None) -> str | None:
-    """T7 的 `schedule` / `split_with` 参数校验（**F16 补的语义**）；返回错误文案或 `None`。
-
-    **为什么放本模块而不是 `transfer.py`**：后者已 296 行（红线 300），塞不下；
-    由 `preview_transfer` **延迟 import** 调用，避免与本模块对 `transfer` 的依赖成环。
-    `split_with`（拆分转账）仍属后续卡 —— 本卡只拒不做。
-    """
-    if split_with is not None:
-        logger.warning("本卡未实现拆分转账：split_with=%r", split_with)
-        return "本卡还不支持拆分转账"
-    if schedule is None:
-        return None
-    try:
-        ok = datetime.datetime.fromisoformat(schedule) > transfer._now()
-    except ValueError:
-        ok = False
-    return None if ok else "预约时间必须是晚于当前时间的 YYYY-MM-DDTHH:MM"
-
-
-def _mark_failed(schedule_id: str, reason: str) -> None:
-    """把 `pending` 置为 `failed` 并记原因（Q6：**不重试**）。单独的写入，不受结算事务回滚影响。"""
-    conn = dao.connection()
-    with transaction(conn):
-        conn.execute("UPDATE scheduled_transfer SET status = ?, settled_at = ?, fail_reason = ?"
-                     " WHERE id = ? AND status = ?",
-                     (STATUS_FAILED, transfer._now().isoformat(timespec="seconds"), reason,
-                      schedule_id, STATUS_PENDING))
+    if status is not None and status not in SCHEDULE_STATUSES:
+        return _fail(ErrorCode.INVALID_ARGUMENT, "预约状态取值不合法")
+    user_id = current_user_id()
+    try:                                     # demo 期只有一个用户：非该身份 fail-closed
+        require_owned("该用户的预约列表", DEMO_USER_ID, user_id,
+                      tool="list_scheduled", intent="transfer_scheduled")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    sql = "SELECT * FROM scheduled_transfer WHERE user_id = ?"
+    params: tuple[object, ...] = (user_id,)
+    if status is not None:
+        sql += " AND status = ?"
+        params = (user_id, status)
+    rows = [dict(row) for row in dao.connection().execute(sql + " ORDER BY execute_at, id", params)]
+    items = []
+    for row in rows:
+        payee = dao.get_payee(row["payee_id"])
+        items.append({"schedule_id": row["id"], "payee_id": row["payee_id"],
+                      "payee_name": (payee or {}).get("name") or "",
+                      "execute_at": row["execute_at"], "status": row["status"],
+                      "tier": row["tier"], **_money_facts(row["amount"], "amount")})
+    return _ok({"items": items, "total_count": len(items)},
+               {"total_count": len(items), "items": items}, f"共 {len(items)} 条预约。")
 
 
 # ---------------- T21 schedule_transfer（落预约 · 不扣款） ----------------

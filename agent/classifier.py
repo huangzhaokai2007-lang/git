@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ---------------- 意图清单（规格 §3 逐字抄录，不得增删） ----------------
 INTENT_LABELS = (
     "balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
-    "transfer_single", "transfer_scheduled", "aa_collect",
+    "transfer_single", "transfer_scheduled", "scheduled_cancel", "aa_collect",
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
@@ -36,7 +36,7 @@ INTENT_LABELS = (
 
 IntentLabel = Literal[
     "balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
-    "transfer_single", "transfer_scheduled", "aa_collect",
+    "transfer_single", "transfer_scheduled", "scheduled_cancel", "aa_collect",
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
@@ -54,6 +54,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "bill_report": ("period", "kind"),                                     # T5 generate_bill_report
     "transfer_single": ("payee", "amount"),                                # T6/T7
     "transfer_scheduled": ("payee", "amount", "schedule"),                 # T7 schedule 参数
+    "scheduled_cancel": (),                                                # F16 Q4：取消预约（无槽位，工具侧挑唯一 pending）
     "aa_collect": ("payee_ids", "amount"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
     "subscription_cancel": ("sub_id", "merchant"),                          # T11 cancel_subscription（card-24 扩 merchant）

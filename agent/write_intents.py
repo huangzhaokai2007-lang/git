@@ -62,13 +62,18 @@ from agent._write_subscription import (
 )
 from agent._write_transfer import (
     _book_scheduled,
+    _card_cancel,
     _card_scheduled,
     _card_transfer,
+    _execute_cancel,
     _execute_transfer,
+    _plain_cancel,
     _plain_scheduled,
     _plain_transfer,
+    _prepare_cancel,
     _prepare_scheduled,
     _prepare_transfer,
+    _shape_cancel,
     _shape_scheduled,
     _shape_transfer,
 )
@@ -96,6 +101,15 @@ _SPECS: dict[str, WriteSpec] = {
         target_key="payee_id",
         what="预约转账", shape=_shape_scheduled, prepare=_prepare_scheduled,
         card=_card_scheduled, plain=_plain_scheduled, execute=_book_scheduled),
+    # F16 · Q4：取消预约 —— **恒 L1、不要 OTP**（撤回尚未发生的动作，风险低于发起、且不动钱）。
+    # `shape`/`prepare` 只读 T24 `list_scheduled`，真取消在 EXECUTE 调 T23。
+    "scheduled_cancel": WriteSpec(
+        intent="scheduled_cancel", intent_cn="取消预约", title="取消预约确认卡",
+        credential_kind="none", otp_in_tool=False,
+        missing=(), tools=("list_scheduled",), execute_tool="cancel_scheduled",
+        target_key="schedule_id",
+        what="取消预约", shape=_shape_cancel, prepare=_prepare_cancel,
+        card=_card_cancel, plain=_plain_cancel, execute=_execute_cancel),
     "subscription_cancel": WriteSpec(
         intent="subscription_cancel", intent_cn=CANCEL_CN, title="订阅取消确认卡",
         credential_kind="confirm_ref", otp_in_tool=False,
