@@ -62,3 +62,16 @@ CREATE TABLE idempotency (                        -- 卡 14b：幂等快照落�
 CREATE TABLE rate_limit (                         -- 卡 14b：写操作限流（滚动 60 秒窗口，按行计数；只读不写此表）
   id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT NOT NULL, tool TEXT, ts TEXT NOT NULL
 );
+CREATE TABLE scheduled_transfer (                 -- F16：定时转账预约（Q1–Q10 人类已批；惰性结算）
+  id TEXT PRIMARY KEY,                            -- sch_<uuid12>
+  user_id TEXT NOT NULL, payee_id TEXT NOT NULL,
+  amount INTEGER NOT NULL,                        -- 单位：分（禁止浮点）
+  execute_at TEXT NOT NULL,                       -- ISO8601，**本地时 naive**（Q2：不引入 tz-aware）
+  status TEXT NOT NULL,                           -- pending | success | failed | cancelled
+  tier TEXT NOT NULL,                             -- **预约时刻冻结**（Q5：到期只重检硬约束，不重新定档）
+  token TEXT,                                     -- 生成它的 preview_token（追溯用）
+  created_at TEXT NOT NULL,
+  settled_at TEXT,                                -- 结算时刻；pending 时为 NULL
+  txn_id TEXT,                                    -- 成功后回填
+  fail_reason TEXT                                -- 失败原因码（INSUFFICIENT_FUNDS 等）
+);

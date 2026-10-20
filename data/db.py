@@ -47,6 +47,7 @@ TABLES: tuple[str, ...] = (
     "risk_event",
     "idempotency",
     "rate_limit",
+    "scheduled_transfer",                     # F16：定时转账预约（惰性结算，见 data/schema.sql）
 )
 
 
