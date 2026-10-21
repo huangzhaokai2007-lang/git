@@ -19,9 +19,65 @@ from tools.subscription import (
     STATUS_LABELS as STATUS_CN,
 )
 
-__all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "TemplateError", "card_line",
-           "payee_line", "render_cards", "render_payees", "render_subscriptions", "render_wealth",
-           "subscription_line", "wealth_line"]
+__all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "TemplateError",
+           "anomaly_line", "card_line", "payee_line", "render_anomalies", "render_cards",
+           "render_payees", "render_subscriptions", "render_wealth", "subscription_line",
+           "wealth_line"]
+
+# ---------------- 异常检测（F03） ----------------
+#: facts 键见 `tools/query.py` T4（`scanned_count` / `anomaly_count` / `items[]`）。
+#: F03 验收第 2 条：**命中项必须显示"是哪笔交易 + 凭什么判它"** —— 只报"发现 2 笔异常"用户无从核对。
+T_ANOMALY_HEAD = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔异常交易："
+#: 空结果：自己的句子（与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径），
+#: 并且**把四条规则的口径一并说清**（阈值仍从 facts 取，不在文案里硬编码任何一个数字）。
+T_ANOMALY_EMPTY = ("已扫描 {scanned_count} 笔交易，没有发现异常交易 —— 没有单笔支出超过其近 "
+                   "{baseline_days} 天支出均值的 {amount_ratio_threshold} 倍，"
+                   "也没有凌晨时段、同商户短时高频或陌生商户的交易。")
+#: `TEMPLATES` 里的默认值（实际走 `render_anomalies` 的明细列表分支）。
+T_ANOMALY = T_ANOMALY_HEAD
+
+#: 严重程度中文：面向用户不说英文枚举；表外值原样透传（不猜、不编）。
+SEVERITY_CN = {"high": "高危", "medium": "关注", "low": "留意"}
+
+
+def anomaly_line(item: Mapping) -> str:
+    """一条异常交易一行（`- ` 开头：界面用 `st.markdown` 渲染会排成项目符号列表）。
+
+    三项内容缺一不可（F03 验收第 2 条「显示交易与依据」）：
+    **交易**（时刻 + 对手方 + 金额）→ **依据**（命中了哪几条规则）→ **严重程度**。
+    全部照抄 facts 对应项：时刻照抄 `ts` 原串、对手方照抄 `counterparty`（没有对手方的流水
+    就整截不印，不补「未知商户」这类编造值）、金额取 `amount_yuan`、依据取工具层冻结的 `reason`。
+
+    金额说「金额」而不说「支出」：T4 只扫**支出**（`amount<0`），`amount_yuan` 自带负号，
+    写成「支出 -1,546.00 元」就成了双重否定；照抄带符号的事实值 + 中性措辞最诚实
+    （此处**不做任何换算**，取绝对值就等于在渲染层改数字）。
+    """
+    line = f"- {item['ts']}"
+    if item.get("counterparty"):
+        line += f"｜{item['counterparty']}"
+    severity = SEVERITY_CN.get(str(item["severity"]), str(item["severity"]))
+    return f"{line}｜金额 {item['amount_yuan']} 元 —— {item['reason']}（{severity}）"
+
+
+def render_anomalies(facts: Mapping) -> str:
+    """`anomaly_check` 回执（F03）：汇总句 + 每条命中一行。
+
+    分支顺序：**空结果优先**（自己的句子，不套列表头 —— 与 `render_cards` / `render_subscriptions`
+    同口径，避免「检测到 0 笔：」这种残句）。空结果必须**明确告知没异常**，不能只报个 0
+    （否则用户分不清"没查到"和"查了但没问题"）。
+    """
+    if not facts["items"]:
+        try:
+            return T_ANOMALY_EMPTY.format(scanned_count=facts["scanned_count"],
+                                          baseline_days=facts["baseline_days"],
+                                          amount_ratio_threshold=facts["amount_ratio_threshold"])
+        except KeyError as exc:
+            raise TemplateError(f"'anomaly_check' 模板缺少 facts 键：{exc}") from exc
+    try:
+        head = T_ANOMALY_HEAD.format(**facts)
+    except KeyError as exc:
+        raise TemplateError(f"'anomaly_check' 模板缺少 facts 键：{exc}") from exc
+    return "\n".join([head, *(anomaly_line(item) for item in facts["items"])])
 
 # ---------------- 卡片查询（卡 23） ----------------
 #: facts 键见 `tools/card_query.py`（`total_count` + `items[]`；每项含 `card_no_mask`

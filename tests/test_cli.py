@@ -50,6 +50,24 @@ def test_offline_verdict_asks_when_nothing_matches() -> None:
     assert cli.offline_verdict("今天天气怎么样") == ("out_of_scope", {})
 
 
+def test_anomaly_outranks_bill_analysis_for_the_f03_utterance() -> None:
+    """F03 的原话「上个月有什么异常支出」同时含"异常"与"支出" → 必须落 anomaly_check。
+
+    这条是实测出来的坑（问异常、答环比 -32%）：替身规则**按顺序先匹配的那条赢**，
+    故「异常」排在账单分析**之前**（与 F10「测评」排在「理财」之前同一个道理 —— 具体意图优先）。
+    """
+    assert cli.offline_verdict("上个月有什么异常支出") == ("anomaly_check", {"period": "上个月"})
+
+
+def test_period_word_matching_prefers_the_longest_word() -> None:
+    """相对时间词按长度降序取：「上上个月」不许被子串「上个月」截走。
+
+    截走就是"问两个月前、答上个月" —— 与卡 17b 记下的"把「上个月」答成「本月 0.00 元」"
+    同族：都是取词不严谨导致的静默错答。
+    """
+    assert cli.offline_verdict("上上个月花了多少") == ("bill_analysis", {"period": "上上个月"})
+
+
 def test_every_offline_rule_is_reachable() -> None:
     """自证规则表不是摆设：每条规则至少能被自己的一个关键词命中（防表里躺着手写错的死规则）。"""
     for keywords, intent, _slots in cli.OFFLINE_RULES:

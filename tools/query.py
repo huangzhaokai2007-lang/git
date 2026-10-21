@@ -243,7 +243,11 @@ def detect_anomalies(period: str) -> ToolResult:
     """T4 异常检测（L0，纯规则，无任何 LLM 判断）。data: `items[{txn_id,reason,severity}]`。
 
     规则（常量见文件头，来源逐条注明）：金额偏离（>近 90 天支出均值 ×3，严格大于，无基准不判定）、
-    凌晨时段（23:00–06:00）、同商户短时高频（60 分钟内 ≥3 笔）。severity 由命中规则条数决定。
+    凌晨时段（23:00–06:00）、同商户短时高频（60 分钟内 ≥3 笔）、陌生商户（过去 90 天无交易）。
+    severity 由命中规则条数决定：≥2 条 high，1 条 medium。
+
+    facts 的 `items[]` 比 data 多带 `ts` / `counterparty` / `amount_yuan` / `baseline_mean_yuan`
+    —— 回执要能说清"是哪笔交易、凭什么判它异常"（F03 验收第 2 条）。`data` 仍是冻结的三个键。
     """
     if (bad := _invalid(DetectAnomaliesReq, period=period)) is not None:
         return bad
@@ -284,6 +288,8 @@ def detect_anomalies(period: str) -> ToolResult:
                 "txn_id": item["txn_id"],
                 "severity": item["severity"],
                 "reason": item["reason"],
+                "ts": item["ts"],
+                "counterparty": item["counterparty"],
                 **_money_facts(item["amount"], "amount"),
                 **_money_facts(item["baseline_mean"], "baseline_mean"),
             }
@@ -337,9 +343,9 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
         start, end = _period_bounds(clean)
         rows, series, merchants = _scan(start, end)
         prev_start, prev_end = _period_bounds(_previous_period(clean))
-        prev_total = _spend_groups(
-            _owned_txns(prev_start.isoformat(), prev_end.isoformat()), "category"
-        )[1]
+        prev_rows = _owned_txns(prev_start.isoformat(), prev_end.isoformat())
+        prev_total = _spend_groups(prev_rows, "category")[1]
+        prev_in_sum = sum(row["amount"] for row in prev_rows if row["amount"] > 0)
         subs = _owned_subscriptions()
         anomalies = _anomalies(rows, series, merchants)
     except ToolError as exc:
@@ -370,9 +376,17 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
         **_money_facts(in_sum, "in_sum"),
         **_money_facts(in_sum - out_sum, "net"),
         **_money_facts(prev_total, "prev_total"),
+        **_money_facts(prev_in_sum, "prev_in_sum"),
         "out_count": sum(1 for row in rows if row["amount"] < 0),
         "in_count": sum(1 for row in rows if row["amount"] > 0),
         "vs_prev_pct": _vs_prev_pct(out_sum, prev_total),
+        #: 「较上一账期多/少多少」的差额（整数分，带符号）+ 展示用绝对值形态。
+        #: 符号决定措辞（多/少/持平），展示取绝对值，二者都进 facts —— markdown 不许自己算。
+        **_money_facts(out_sum - prev_total, "vs_prev_out_diff"),
+        **_money_facts(abs(out_sum - prev_total), "vs_prev_out_diff_abs"),
+        **_money_facts(in_sum - prev_in_sum, "vs_prev_in_diff"),
+        **_money_facts(abs(in_sum - prev_in_sum), "vs_prev_in_diff_abs"),
+        "vs_prev_in_pct": _vs_prev_pct(in_sum, prev_in_sum),
         "anomaly_count": len(anomalies),
         "groups": groups,
         "subscriptions": [

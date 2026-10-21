@@ -30,12 +30,17 @@ from agent.orchestrator import Turn
 #: 这里**只做"从话里认意图/槽位"**（LLM 的活），不碰任何金额/权限/执行判断。
 #: 转账那条固定用**新收款人**（张小美，非白名单）：基础档 L2 + OTP —— 现场白天/夜间都一样，
 #: 用白名单收款人则会因"夜间因子"在夜里变 L2、白天变 L1，演示与断言会随时刻漂移。
+#: **两条顺序注释**（前面的赢，同类至少各栽过一次）：
+#: - 「异常」必须排在「花了多少/账单/消费/支出」**前面**：F03 的原话「上个月有什么异常支出？」
+#:   同时含"异常"与"支出"，排在后面会被账单分析截走（实测：问异常却答环比 -32%）——
+#:   与下面 F10「测评」必须排在「理财」前面同一个道理：更具体的意图优先。
+#: - 「流水/交易记录」排在「异常」后面同理（"有没有异常交易"含"交易"但缺"记录"，暂不冲突，留个记号）。
 OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
     (("余额", "多少钱"), "balance_query", {}),
+    (("异常", "可疑"), "anomaly_check", {}),
     (("花了多少", "账单", "消费", "支出"), "bill_analysis", {}),
     (("订阅",), "subscription_list", {}),
     (("流水", "交易记录"), "txn_query", {}),
-    (("异常", "可疑"), "anomaly_check", {}),
     #: F10：「测评」必须排在「理财」**前面** —— 「帮我做个理财风险测评」同时含两个关键词，
     #: 按顺序先匹配的那条赢；测评是更具体的意图（它有自己的问卷流程），理财推荐是泛的。
     (("测评", "风险评估"), "risk_assess", {}),
@@ -47,12 +52,19 @@ PERIOD_WORDS = ("上个月", "上月", "本月", "这个月", "上上个月")
 
 
 def offline_verdict(text: str) -> tuple[str, dict]:
-    """确定性替身：返回 `(意图, 槽位)`（模拟分类器输出，不涉及权限/金额判定）。"""
+    """确定性替身：返回 `(意图, 槽位)`（模拟分类器输出，不涉及权限/金额判定）。
+
+    相对时间词按**长度降序**取：否则「上上个月」会先被子串「上个月」截走 —— 问两个月前、
+    答成了上个月，正是卡 17b 记下的那类"静默回落"缺陷（替身也不许这么干）。
+    抽出来的词会不会解析成账期，仍由 `agent/period.py` 决定：认不出的相对说法 → 编排层
+    CLARIFY 追问，**不猜**（如替身会给出而 period 认不出的「上上个月」）。
+    """
     for keywords, intent, slots in OFFLINE_RULES:
         if any(word in text for word in keywords):
             filled = dict(slots)
             if intent in ("bill_analysis", "anomaly_check"):
-                filled["period"] = next((word for word in PERIOD_WORDS if word in text), "本月")
+                by_length = sorted(PERIOD_WORDS, key=len, reverse=True)
+                filled["period"] = next((word for word in by_length if word in text), "本月")
             return intent, filled
     return "out_of_scope", {}
 

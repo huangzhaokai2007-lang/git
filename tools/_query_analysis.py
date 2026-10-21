@@ -253,6 +253,9 @@ def _anomalies(rows: list[dict], series: list[tuple[datetime, int]],
 
     每笔交易的基准是它自己"近 90 天"（不含本笔）的均值 —— 规格字面口径，
     与"用哪个账期来看"无关，故同一笔交易在任何账期下判定一致。
+
+    每条命中除判定结果外还带出 `ts` / `counterparty`（F03 验收第 2 条：回执要显示"是哪笔交易"）。
+    这两项是**流水行的原值照抄**（不换算、不补全），供 facts 引用；`data` 契约仍是三个键。
     """
     velocity = _velocity_hits(rows)
     index = merchant_index or {}
@@ -272,7 +275,8 @@ def _anomalies(rows: list[dict], series: list[tuple[datetime, int]],
         if hits:
             items.append({"txn_id": row["id"], "reason": "、".join(hits),
                           "severity": "high" if len(hits) > 1 else "medium",
-                          "amount": row["amount"], "baseline_mean": baseline})
+                          "amount": row["amount"], "baseline_mean": baseline,
+                          "ts": row["ts"], "counterparty": row.get("counterparty") or ""})
     return items
 
 
@@ -340,6 +344,17 @@ def _velocity_hits(rows: list[dict]) -> set[str]:
     return hits
 
 
+def _delta_line(label: str, diff: int, abs_yuan: str, prev_yuan: str, now_yuan: str, pct: int) -> str:
+    """一行「较上一账期」：**多/少多少元** + 上期→本期 + 百分比（差值为 0 → 持平，不写金额）。
+
+    方向（`多/少/持平`）由 `diff`（整数分，带符号）决定，**展示用其绝对值形态**，
+    避免露出「少 -4,304.00 元」这种双重否定；绝对值照样来自 facts（`_abs_yuan`），不改数。
+    """
+    word = "多" if diff > 0 else ("少" if diff < 0 else "持平")
+    change = f" {abs_yuan} 元" if diff else ""
+    return f"- 较上一账期{label}：{word}{change}（上期 {prev_yuan} 元 → 本期 {now_yuan} 元，{pct}%）"
+
+
 def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict], subs: list[dict]) -> str:
     """生成 Markdown 账单报告：每个数字都从 `facts` 取（幻觉红线）。"""
     lines = [f"# {KIND_LABELS[kind]}账单报告 · {period}", "", "## 总览",
@@ -347,7 +362,11 @@ def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict], su
              f"- 本期收入合计：{facts['in_sum_yuan']} 元（{facts['in_count']} 笔）",
              f"- 净额：{facts['net_yuan']} 元"]
     if facts["vs_prev_pct"] is not None:
-        lines.append(f"- 较上一账期：{facts['vs_prev_pct']}%（上期 {facts['prev_total_yuan']} 元）")
+        lines.append(_delta_line("支出", facts["vs_prev_out_diff"], facts["vs_prev_out_diff_abs_yuan"],
+                                 facts["prev_total_yuan"], facts["out_sum_yuan"], facts["vs_prev_pct"]))
+    if facts["vs_prev_in_pct"] is not None:
+        lines.append(_delta_line("收入", facts["vs_prev_in_diff"], facts["vs_prev_in_diff_abs_yuan"],
+                                 facts["prev_in_sum_yuan"], facts["in_sum_yuan"], facts["vs_prev_in_pct"]))
     lines += ["", "## 支出明细（按占比）", "| 项目 | 金额（元） | 占比 |", "| --- | --- | --- |"]
     lines += [f"| {group['key']} | {group['amount_yuan']} | {group['pct']}% |" for group in groups]
     lines += ["", "## 订阅（进行中）"]

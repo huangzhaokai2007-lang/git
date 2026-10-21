@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 8 / trf 11 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 52 条
+# 分组：bill 9 / trf 11 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 53 条
 #: **取消预约（scheduled_cancel）不在本文件覆盖**：yaml 的用例**共享库状态**（后一条能看到前一条落的
 #: 预约），写成"先预约再取消"就会变成顺序依赖的脆用例。该链路由 `tests/test_scheduled_transfer_flow.py`
 #: 的 3 条自成闭环用例覆盖（取消不动钱 / 无 pending 时报错 / 取消后不再结算）。
@@ -46,6 +46,13 @@
   input: "按支付渠道分析这个月的消费"
   slots: {period: 本月, group_by: channel}
   expect: {intent: bill_analysis, tool_calls: [analyze_spending], tier: L0, executed: false, must_contain: ["支出"]}
+#: bill-009（F03 收口）：异常回执不许只剩一个孤零零的条数 —— 必须带上**命中交易的时刻**与依据。
+#: `2026-08` = 「上个月」由 `agent/period.py` 从锚点 2026-09 解析而来（也是明细行 ts 的前缀）。
+- id: bill-009
+  input: "上个月有没有异常交易"
+  slots: {period: 上个月}
+  expect: {intent: anomaly_check, tool_calls: [detect_anomalies], tier: L0, executed: false,
+           must_contain: ["异常交易", "2026-08"]}
 
 # ---------------- 转账 7 ----------------
 - id: trf-001
