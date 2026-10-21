@@ -249,6 +249,7 @@ def preview_trade(product_id: str, action: str, amount: int) -> ToolResult:
     except ValueError as exc:
         return _dao_reject(exc)
     facts = {"product_id": product["id"], "product_name": product["name"],
+             "target_name": product["name"],          # 确认卡顶部主对象（write_flow 优先读这个键）
              "product_risk_level": product["risk_level"], "action": action,
              "action_cn": "申购" if action == "buy" else "赎回",
              "yield": _yield_text(product["expected_yield"]),
