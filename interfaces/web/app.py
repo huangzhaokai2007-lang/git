@@ -42,7 +42,9 @@ PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = ("您好，我是**模拟银行**智能体（全部为合成数据）。试试：「上个月花了多少」「给王五转 100 元」"
             "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景。")
 
-HISTORY = None
+#: 追问续接要带多少条历史（用户话与助手回执交替）。**追问的上下文必须让分类器看到** ——
+#: 例如「列出两个李四」那一句，否则用户只回一个「1001」时会被判成 smalltalk。
+HISTORY_TURNS = 4
 # ---------------- 启动引导（只碰环境变量与 data/ 层自己的 CLI） ----------------
 
 def _ensure_db() -> bool:
@@ -94,7 +96,13 @@ def _ask(text: str, *, display: str | None = None) -> None:
     display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
     try:
-        turn = _agent_executor().submit(card_binding_flow.handle, text, history=HISTORY,
+        #: 追问续接的上下文：把最近几轮**真实对话**（用户话 + 助手回执）交给分类器。
+        #: **修的问题**：此前传的是模块常量 `HISTORY`，而它**恒为 `None`**（全项目没有第二处赋值）。
+        #: 于是「给李四转100元 → 界面列出两个李四 → 用户回 1001」这一步，分类器只看到一个光秃秃的
+        #: 数字 → 判成 `smalltalk` → 收款人永远解析不出来（实机复现，用户已报）。实测把那一句
+        #: 候选列表作为 history 传进去后，`1001` 能被正确解析成 `payee='李四（139****1001）'`。
+        history = [m["text"] for m in state["messages"][-(HISTORY_TURNS + 1):-1] if m.get("text")]
+        turn = _agent_executor().submit(card_binding_flow.handle, text, history=history or None,
                                         clarify_round=state["clarify_round"],
                                         session_id=state["session_id"]).result()
     except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
