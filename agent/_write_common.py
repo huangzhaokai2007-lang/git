@@ -28,6 +28,27 @@ from tools.schemas import ToolResult
 #: 金额文本形状：最多两位小数的十进制（禁科学计数/负号/多余位数）
 _YUAN = re.compile(r"\d+(?:\.\d{1,2})?")
 
+#: 脱敏手机号（`139****1001`）；追问文案与卡面用的就是这个形态
+_MASKED_PHONE = re.compile(r"\d{3}\*{4}\d{4}")
+
+
+def normalize_query(raw: object) -> str:
+    """把「模型回显的卡面/列表串」还原成可用于**子串匹配**的查询键。
+
+    **实机复现**（用户报「回 1001 识别不出收款人」）：追问时界面列出的是
+    `李四（139****1001）`，模型会把候选**原样回显**成这个串；而各 `_shape_*` 是拿它去
+    `resolve_payee` / `in merchant` 做**子串匹配**的 —— 整串一条都匹配不上。
+
+    这里优先抽出**脱敏手机号**（唯一且精确）；抽不到就原样返回。
+
+    ⚠️ **刻意没做的事**：不剥离一般的 `（…）`。商户名、产品名里可能合法地含括号
+    （如「腾讯视频（会员）」），剥了会误伤 —— 只在**证明过会出错**的场合（手机号）才做转换。
+    其余场合靠 `resolve_*` 的子串匹配 + 追问兜底。
+    """
+    text = str(raw or "").strip()
+    found = _MASKED_PHONE.search(text)
+    return found.group(0) if found else text
+
 
 def _code_of(result: ToolResult) -> str | None:
     """工具结果的错误码字符串（枚举与裸字符串都接受）。"""

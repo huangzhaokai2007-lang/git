@@ -32,7 +32,7 @@ if str(REPO / "scripts") not in sys.path:                   # 复用同目录 ap
 
 from app.cli import offline_llm                             # noqa: E402
 from api_smoke import call as asgi_call                     # noqa: E402
-from agent import orchestrator                              # noqa: E402
+from agent import orchestrator, session_memory                # noqa: E402
 from data import dao                                        # noqa: E402
 from data.seed import generate                              # noqa: E402
 from tools import transfer                                  # noqa: E402  （只读演示验证码；产品代码不读）
@@ -174,6 +174,10 @@ def section_write(demo: Demo) -> None:
     """⑤ 四步写路径：preview → 权限档 → 确认 + OTP → 幂等执行。"""
     print("\n=== ⑤ 写路径四步（preview → 权限档 → 确认/OTP → 幂等执行；时钟钉在白天）===")
     session = "demo-write"
+    #: **每次运行都从零开始**：编排层现在按会话记住最近几轮对话（追问续接要的上下文），
+    #: 而本段用固定会话名 —— 同一个进程里再跑一遍（例如两条 pytest 各调一次 `main()`）
+    #: 就会把上一轮的上下文带进来。这里显式清掉，等价于「开一个新会话」。
+    session_memory.reset(session)
     with offline_llm(), frozen_clock():
         first = orchestrator.handle(TRANSFER, session_id=session)
         demo.check("① preview 出确认卡（未执行）",

@@ -23,7 +23,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify
-from agent._write_common import Prepared, ShapeResult, yuan_to_cents
+from agent._write_common import Prepared, ShapeResult, normalize_query, yuan_to_cents
 from tools import _aa_split, transfer
 from tools.schemas import ToolResult
 
@@ -51,7 +51,7 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
     picked: dict[str, str] = {}                     # id → name，顺带完成去重（T9 对重复收款人直接拒）
     clarify, unresolved = "", False
     for query in _as_list(filled.get("payee_ids")):
-        found = transfer.resolve_payee(query)
+        found = transfer.resolve_payee(normalize_query(query))   # 防「回显卡面串」：见 _write_common
         candidates = (found.facts.get("candidates") or []) if found.ok else []
         if len(candidates) == 1:
             picked.setdefault(candidates[0]["id"], candidates[0]["name"])
