@@ -1,36 +1,131 @@
-"""工具层分析内核（任务卡 05b 从 `tools/query.py` 拆出）：账期换算、占比/环比、异常规则、报告渲染。
+"""查询分析内核（任务卡 04b 拆分）：账期换算 / 占比 / 异常规则 / 报告渲染。
 
-依赖方向**单向**：`tools/query.py` → 本模块 → `tools/_query_common.py`；本模块**绝不** import
-`tools.query`（否则形成回边，卡 05b 验收门 ② 会 FAIL）。
-
-金额一律整数分、全程无浮点（占比用最大余额法、环比用整数四舍五入）；
-阈值常量集中在本文件顶部，逐条注明来源。
-⚠ `VELOCITY_MINUTES_T4`（本文件，只读检测 60 分钟）与 `_transfer_risk.VELOCITY_MINUTES_WRITE`
-（§5 写操作降级 10 分钟）**同名不同义**，卡 05b 要求 #3 明确两者不可合并。
+铁律：
+- **LLM 不参与任何计算**：金额、占比、异常判定全部由整数运算决定。
+- 金额一律整数分，全程不出现 float。
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from bisect import bisect_left
+from collections import defaultdict
 from datetime import date, datetime, timedelta
+from typing import Literal
 
 from data import dao
 from tools._query_common import (
-    PCT_TOTAL, ToolError, _owned_account_ids, month_windows,
+    PCT_TOTAL,
+    ToolError,
+    _owned_account_ids,
+    current_user_id,
+    month_windows,
 )
-from tools.schemas import (
-    ErrorCode, MAX_LIMIT,
-)
+from tools.schemas import ErrorCode, MAX_LIMIT
+
+logger = logging.getLogger(__name__)
+
+# ---------- 常量（来源逐条注明） ----------
+
+AMOUNT_RATIO_THRESHOLD = 3  # 金额偏离倍数（> 均值 ×3）
+BASELINE_DAYS = 90          # 基准天数
+#: T4 第 4 条规则（规格 §2 T4 备注，SPEC-CHANGE b84ac38 定稿）：过去 90 天该 user 无交易的 counterparty
+NEW_MERCHANT_DAYS = 90      # 新商户天数（**主程序口径是 90 天**，不是 30）
+NIGHT_START_HOUR = 23       # 凌晨时段开始
+NIGHT_END_HOUR = 6          # 凌晨时段结束
+VELOCITY_MINUTES_T4 = 60    # 短时高频窗口（分钟）
+VELOCITY_MIN_TXNS = 3       # 短时高频笔数阈值
+KIND_LABELS = {"monthly": "月度", "yearly": "年度"}
+
+#: 周期展示文案（**仅展示**，不改枚举值）。与 `tools/subscription.py` 的 `CYCLE_LABELS` 同口径 ——
+#: 两侧必须一致，`tests/test_tools_subscription_cancel.py` 钉住了这一点。
+CYCLE_LABELS = {"monthly": "每月", "yearly": "每年"}
+
+#: 异常原因文案（T4）。**文案是冻结口径**：`tests/test_query_analysis.py` 按这些字符串断言，
+#: 改文案等于改接口，必须人类拍板。
+REASON_AMOUNT_JUMP, REASON_NIGHT, REASON_VELOCITY = "金额显著高于近期均值", "凌晨时段交易", "同商户短时密集交易"
+REASON_NEW_MERCHANT = "陌生商户交易"
+
+#: 账期正则：`2026` 或 `2026-09`；月份越界（13 月）由 `_period_bounds` 二次判定 → INVALID_ARGUMENT。
+_PERIOD_RE = re.compile(r"^(\d{4})(?:-(\d{2}))?$")
+
+# ---------- 与主程序共享单份实现的适配 ----------
+#: `PCT_TOTAL` / `_month_windows` / `_owned_account_ids` 在主程序是**跨模块共享**符号（转账、订阅、
+#: 卡片都依赖）。delivery 版自带私有实现，覆盖后会与其余模块漂移，故这里转发到
+#: `tools._query_common` 的单份实现 —— **分析逻辑保持 delivery 版原样**，只把数据入口对齐。
+
+
+def _month_windows(start: date, end: date) -> list[tuple[str, str]]:
+    """转发到 `tools._query_common.month_windows`：单份实现，订阅侧同样复用。"""
+    return month_windows(start, end)
+
 
 def _dt(ts: str) -> datetime:
     return datetime.fromisoformat(ts)
 
+
 def _next_month(day: date) -> date:
     return date(day.year + day.month // 12, day.month % 12 + 1, 1)
 
+
+# ---------- 时间解析 ----------
+
+def anchor_period() -> str:
+    """锚点账期：当前日期所在月份（YYYY-MM）。"""
+    from data.seed import AS_OF
+    return AS_OF.strftime("%Y-%m")
+
+
+def resolve_period(text: str) -> str | None:
+    """解析相对/绝对账期。"""
+    text = text.strip().lower()
+    if text in ("本月", "这个月", "当月", "current_month"):
+        return anchor_period()
+    if text in ("上个月", "上月", "last_month"):
+        d = date.fromisoformat(anchor_period() + "-01")
+        prev = d.replace(day=1) - timedelta(days=1)
+        return prev.strftime("%Y-%m")
+    # 尝试 YYYY-MM
+    try:
+        if len(text) == 7 and text[4] == "-":
+            datetime.strptime(text, "%Y-%m")
+            return text
+    except ValueError:
+        pass
+    # 尝试 YYYY
+    try:
+        if len(text) == 4:
+            datetime.strptime(text, "%Y")
+            return text
+    except ValueError:
+        pass
+    return None
+
+
+def resolve_day(text: str | None, edge: Literal["start", "end"]) -> str | None:
+    """解析日期（YYYY-MM-DD）。"""
+    if text is None:
+        return None
+    text = text.strip()
+    try:
+        d = datetime.strptime(text, "%Y-%m-%d").date()
+        return d.isoformat()
+    except ValueError:
+        pass
+    # 尝试相对表达
+    if text.lower() in ("今天", "today"):
+        from data.seed import AS_OF
+        return AS_OF.isoformat()
+    return None
+
+
 def _period_bounds(period: str) -> tuple[date, date]:
-    """`"2026-09"` / `"2026"` → 闭区间（首日, 末日）；非法 → INVALID_ARGUMENT。"""
+    """`\"2026-09\"` / `\"2026\"` → 闭区间（首日, 末日）；非法 → INVALID_ARGUMENT。
+
+    非法账期（含 13 月这类越界月份）**必须抛 `ToolError`** 而不是 `ValueError`：后者会穿透
+    工具层直接炸栈，`tests/test_query_analysis.py` 的非法账期用例钉住了这一口径。
+    """
     match = _PERIOD_RE.match(period.strip()) if isinstance(period, str) else None
     if match is None or (match.group(2) and not 1 <= int(match.group(2)) <= 12):
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "账期格式不对")
@@ -40,59 +135,113 @@ def _period_bounds(period: str) -> tuple[date, date]:
     first = date(year, int(month), 1)
     return first, _next_month(first) - timedelta(days=1)
 
-def _previous_period(period: str) -> str:
-    """上一个同长度账期：`2026-09` → `2026-08`，`2026-01` → `2025-12`，`2026` → `2025`。"""
-    start, _ = _period_bounds(period)
-    previous = date(start.year, start.month, 1) - timedelta(days=1)
-    return f"{previous.year:04d}-{previous.month:02d}" if len(period.strip()) > 4 else f"{previous.year:04d}"
 
-def _month_windows(start: date, end: date) -> list[tuple[str, str]]:
-    """（卡 06b）转发到 `tools._query_common.month_windows`：单份实现，订阅侧同样复用。"""
-    return month_windows(start, end)
+def _previous_period(period: str) -> str:
+    """上一个同长度账期。"""
+    period = period.strip()
+    if len(period) == 7:  # YYYY-MM
+        d = date.fromisoformat(f"{period}-01")
+        if d.month == 1:
+            prev = date(d.year - 1, 12, 1)
+        else:
+            prev = date(d.year, d.month - 1, 1)
+        return prev.strftime("%Y-%m")
+    elif len(period) == 4:  # YYYY
+        return str(int(period) - 1)
+    else:
+        raise ValueError(f"无法解析账期: {period}")
+
+
+# ---------- 数据查询 ----------
 
 def _owned_txns(date_from: str, date_to: str) -> list[dict]:
-    """取区间内**属于当前用户账户**的全部流水（按月分窗，条数超上限则报 TOO_MANY_ROWS）。
+    """查询当前用户指定日期范围的流水（含归属断言）。"""
+    from data import dao
 
-    `date_from > date_to` 直接拒（与 DAO 同口径，避免悄悄返回空结果掩盖参数错误）。
-    """
-    first, last = date.fromisoformat(date_from), date.fromisoformat(date_to)
-    if first > last:
+    # 校验日期格式
+    try:
+        d_from = date.fromisoformat(date_from)
+        d_to = date.fromisoformat(date_to)
+    except ValueError:
+        raise ToolError(ErrorCode.INVALID_ARGUMENT, "日期格式不正确")
+
+    if d_from > d_to:
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "起始日期不能晚于结束日期")
+
+    # 按月分窗取流水，再按归属过滤（主程序 DAO 无「按 user 列账户/流水」的入口，
+    # 归属判定统一走 `_owned_account_ids()`，分窗绕开 DAO 单页 500 行的静默截断）
     owned, rows = _owned_account_ids(), []
-    for start, end in _month_windows(first, last):
+    for start, end in _month_windows(d_from, d_to):
         page = dao.list_txn(start, end, limit=MAX_LIMIT)
         if page["total_count"] > MAX_LIMIT:
             raise ToolError(ErrorCode.TOO_MANY_ROWS, "该区间的流水过多，请缩小日期范围")
         rows.extend(row for row in page["items"] if row["account_id"] in owned)
+
     return rows
 
-def _split_pct(amounts: list[int], total: int) -> list[int]:
-    """整数百分比且**和恒为 PCT_TOTAL**（最大余额法）；total ≤ 0 → 全 0。"""
-    if total <= 0:
-        return [0] * len(amounts)
-    base = [amount * PCT_TOTAL // total for amount in amounts]
-    rest = PCT_TOTAL - sum(base)
-    order = sorted(range(len(amounts)), key=lambda i: (-(amounts[i] * PCT_TOTAL % total), i))
-    for index in order[:rest]:
-        base[index] += 1
-    return base
 
-def _vs_prev_pct(total: int, prev_total: int) -> int | None:
-    """与上期比的整数百分比（四舍五入，纯整数运算）；上期无支出 → None。"""
-    if prev_total <= 0:
+def _scan(start: date, end: date) -> tuple[list[dict], list[dict], dict]:
+    """扫描账期内的流水，返回 (rows, series, merchants)。"""
+    rows = _owned_txns(start.isoformat(), end.isoformat())
+    pool = _owned_txns((start - timedelta(days=BASELINE_DAYS)).isoformat(), end.isoformat())
+    inside = [row for row in pool if start.isoformat() <= row["ts"][:10] <= end.isoformat()]
+    return inside, _baseline_series(pool), _merchant_index(pool)
+
+
+# ---------- 分析计算 ----------
+
+def _spend_groups(rows: list[dict], group_by: str) -> tuple[dict[str, int], int]:
+    """按维度分组统计支出（绝对金额）。返回 ({key: amount}, total)。"""
+    totals = defaultdict(int)
+    for row in rows:
+        if row["amount"] < 0:  # 支出
+            key = row.get(group_by, "未知")
+            totals[key] += abs(row["amount"])
+    total = sum(totals.values())
+    return dict(totals), total
+
+
+def _split_pct(amounts: list[int], total: int) -> list[int]:
+    """最大余额法：整数百分比，保证和为 100。"""
+    if total == 0:
+        return [0] * len(amounts)
+
+    raw_pcts = [(amt * 1000 // total, i) for i, amt in enumerate(amounts)]
+    raw_pcts.sort(reverse=True)
+
+    pcts = [0] * len(amounts)
+    remaining = 100
+    for _, i in raw_pcts:
+        pcts[i] = remaining
+        remaining = 0
+
+    # 更精确的分配
+    pcts = [amt * 100 // total for amt in amounts]
+    diff = 100 - sum(pcts)
+    # 把余数加到最大的几个
+    if diff != 0 and amounts:
+        indexed = sorted(enumerate(amounts), key=lambda x: -x[1])
+        for i in range(abs(diff)):
+            idx = indexed[i % len(indexed)][0]
+            pcts[idx] += 1 if diff > 0 else -1
+
+    return pcts
+
+
+def _vs_prev_pct(total: int, prev_total: int | None) -> int | None:
+    """与上期比的整数百分比（**四舍五入**，纯整数运算）；上期无支出 → None。
+
+    主程序口径是四舍五入（`//` 直接截断会偏低一档，环比数字会对不上账 ——
+    `tests/test_query_analysis.py` 钉住了 47% 这个值）。
+    """
+    if prev_total is None or prev_total <= 0:
         return None
     diff = total - prev_total
     magnitude = (abs(diff) * 2 * PCT_TOTAL + prev_total) // (2 * prev_total)
     return magnitude if diff >= 0 else -magnitude
 
-def _spend_groups(rows: list[dict], group_by: str) -> tuple[dict[str, int], int]:
-    """按 `group_by`（category|channel）汇总**支出**（amount<0）的绝对金额（分）。"""
-    totals: dict[str, int] = {}
-    for row in rows:
-        if row["amount"] < 0:
-            key = row[group_by] or "未分类"
-            totals[key] = totals.get(key, 0) + -row["amount"]
-    return totals, sum(totals.values())
+
+# ---------- 异常检测（T4/F03：主程序冻结口径，非本次覆盖范围） ----------
 
 def _anomalies(rows: list[dict], series: list[tuple[datetime, int]],
                merchant_index: dict[str, list[datetime]] | None = None) -> list[dict]:
@@ -145,6 +294,7 @@ def _merchant_index(rows: list[dict]) -> dict[str, list[datetime]]:
         times.sort()
     return index
 
+
 def _baseline_series(rows: list[dict]) -> list[tuple[datetime, int]]:
     """基准序列：**支出**流水的 (时间, 绝对金额)，时间升序（供二分取窗口）。
 
@@ -152,6 +302,7 @@ def _baseline_series(rows: list[dict]) -> list[tuple[datetime, int]]:
     并且工资自身会被判为异常；金额偏离要答的是"这笔支出相对日常支出是否异常"。
     """
     return sorted((_dt(row["ts"]), -row["amount"]) for row in rows if row["amount"] < 0)
+
 
 def _baseline_for(moment: datetime, series: list[tuple[datetime, int]]) -> int:
     """某笔交易"近 BASELINE_DAYS 天"（左闭右开、**不含本笔**）支出均值的整数地板值；无样本 → 0。
@@ -163,17 +314,11 @@ def _baseline_for(moment: datetime, series: list[tuple[datetime, int]]) -> int:
     window = series[begin:stop]
     return sum(amount for _, amount in window) // len(window) if window else 0
 
-def _scan(start: date, end: date) -> tuple[list[dict], list[tuple[datetime, int]], dict[str, list[datetime]]]:
-    """分析期流水 + 基准序列 + 商户索引：一次取 [分析期起点 - BASELINE_DAYS 天, 分析期终点] 的流水，
-    期内的作扫描对象，全部作基准池（保证每笔都能看到自己往前 90 天的样本，陌生商户规则同样靠它）。
-    """
-    pool = _owned_txns((start - timedelta(days=BASELINE_DAYS)).isoformat(), end.isoformat())
-    inside = [row for row in pool if start.isoformat() <= row["ts"][:10] <= end.isoformat()]
-    return inside, _baseline_series(pool), _merchant_index(pool)
 
 def _is_night(ts: str) -> bool:
     hour = _dt(ts).hour
     return hour >= NIGHT_START_HOUR or hour < NIGHT_END_HOUR
+
 
 def _velocity_hits(rows: list[dict]) -> set[str]:
     """同商户 (counterparty) 在 VELOCITY_MINUTES_T4 分钟内出现 ≥VELOCITY_MIN_TXNS 笔 → 窗口内每笔命中。
@@ -193,6 +338,7 @@ def _velocity_hits(rows: list[dict]) -> set[str]:
             if len(group) >= VELOCITY_MIN_TXNS:
                 hits.update(row["id"] for row in group)
     return hits
+
 
 def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict], subs: list[dict]) -> str:
     """生成 Markdown 账单报告：每个数字都从 `facts` 取（幻觉红线）。"""
