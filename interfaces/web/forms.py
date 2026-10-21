@@ -88,11 +88,11 @@ def render_payee_form(state: Mapping[str, Any], executor: Any) -> bool:
     submitted = ui.payee_form()
     if submitted is None:
         return False
-    name, phone = submitted
+    name, phone, whitelist = submitted
     _ask_submit(state, "（表单提交）新增收款人")
     try:
         result = executor.submit(orchestrator.submit_payee, name, phone,
-                                 session_id=state["session_id"]).result()
+                                 session_id=state["session_id"], whitelist=whitelist).result()
     except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
         _failure(state, exc)
         return True

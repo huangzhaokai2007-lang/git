@@ -163,11 +163,15 @@ def otp_card(confirmation: Any) -> tuple[str, str] | None:
     return None
 
 
-def payee_form() -> tuple[str, str] | None:
-    """卡 20：添加收款人的表单（姓名 + 手机号两个输入，**不收卡号**）。
+def payee_form() -> tuple[str, str, bool] | None:
+    """卡 20：添加收款人的表单（姓名 + 手机号 + **是否加入白名单**）。
 
-    只**收集**输入并原样返回 `(name, phone)`；未提交 → `None`。校验 / 脱敏 / 落库 / 审计
-    一律在 `agent/` → `tools/`（界面不写业务逻辑）。用 `st.form`：两个输入随提交一起送到后端。
+    只**收集**输入并原样返回 `(name, phone, whitelist)`；未提交 → `None`。校验 / 脱敏 / 落库 /
+    审计一律在 `agent/` → `tools/`（界面不写业务逻辑）。
+
+    ⚠️ 勾「同时加入白名单」**不等于**当场授予特权：界面只把意图传下去，真正的授予要走
+    **L2 确认卡 + 短信验证码**（`agent/payee_flow.py` → `write_flow` → T25）——
+    白名单 = 转账免验证码的特权，不能靠一次表单点击就拿到。
     """
     with st.container(border=True):
         st.markdown("##### ➕ 添加收款人")
@@ -175,9 +179,11 @@ def payee_form() -> tuple[str, str] | None:
         with st.form("payee-form", clear_on_submit=True):
             name = st.text_input("姓名", key="payee-name", placeholder="例如：王小明")
             phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678")
+            whitelist = st.checkbox("同时加入白名单（之后转账免验证码，需再输一次验证码）",
+                                    key="payee-whitelist")
             submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
         if submitted:
-            return (name, phone)
+            return (name, phone, bool(whitelist))
     return None
 
 
