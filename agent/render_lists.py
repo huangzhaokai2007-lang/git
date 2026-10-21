@@ -207,7 +207,10 @@ def render_subscriptions(facts: Mapping) -> str:
 T_PAYEE_HEAD = "您共有 {total_count} 位收款人：白名单 {whitelist_count} 位、其它 {non_whitelist_count} 位。"
 T_PAYEE_EMPTY = "您还没有收款人。可以说「我要加个收款人」来添加。"
 #: 分组小标题：**纯文案，不含数字**；顺带说明两组的转账验证差别（这是用户看这张表的实际用途）。
-T_PAYEE_WHITELIST = "【白名单】（转账时只需会话内确认）"
+#: ⚠️ 白名单那句**不许写「只需会话内确认」** —— 白名单只把基础档降到 L1，§5 的风险因子
+#: （night 23:00-06:00 / velocity 10min≥3 笔 / new_payee）仍会升档。实测 23:40 时连种子里的
+#: 白名单收款人王五也要 OTP，原措辞属**过度承诺**。
+T_PAYEE_WHITELIST = "【白名单】（转账基础档位更低；深夜、短时多笔等风险因子仍可能升档要验证码）"
 T_PAYEE_OTHER = "【非白名单】（转账时需确认卡 + 短信验证码）"
 
 
