@@ -14,6 +14,7 @@ F16 的关键差异只有两处：① PRECHECK 时把 `schedule` 一起传给 T7
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify
@@ -56,6 +57,25 @@ def _shape_scheduled(slots: Mapping) -> ShapeResult:
     return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
+#: 脱敏手机号（`139****1001`）；追问文案与卡面用的就是这个形态
+_MASKED_PHONE = re.compile(r"\d{3}\*{4}\d{4}")
+
+
+def _payee_query(raw: object) -> str:
+    """把「模型回显的卡面串」还原成**可解析的查询键**。
+
+    **实机复现的两个坑**（用户报「回 1001 识别不出收款人」）：
+    ① 网页端没把追问上下文传给分类器 → 只看到光秃秃的 `1001` → 判成 smalltalk（已在 `app.py` 修）；
+    ② 即使上下文传到了，模型会把候选**原样回显**成 `李四（139****1001）` —— 那是 `payee_clarify`
+       的展示格式，而 `resolve_payee` 按**子串**匹配 name / phone / bank，整串一条都匹配不上。
+
+    这里优先抽出脱敏手机号（唯一且精确）再查；抽不到就原样用（`1001` 这种片段本来就能命中）。
+    """
+    text = str(raw or "").strip()
+    found = _MASKED_PHONE.search(text)
+    return found.group(0) if found else text
+
+
 def _shape_transfer(slots: Mapping) -> ShapeResult:
     """SLOT_FILL 对齐工具层签名：`payee`（名字/手机号）→ `payee_id`；`amount`（元）→ 整数分。
 
@@ -67,7 +87,7 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
     filled, missing = dict(slots), []
     payee_facts: Mapping = {}
     if not filled.get("payee_id"):
-        query = str(filled.get("payee") or "").strip()
+        query = _payee_query(filled.get("payee"))
         found = transfer.resolve_payee(query) if query else None
         candidates = (found.facts.get("candidates") or []) if found is not None and found.ok else []
         if len(candidates) == 1:
