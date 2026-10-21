@@ -51,6 +51,13 @@ from agent._write_gift import (
     _prepare_gift,
     _shape_gift,
 )
+from agent._write_payee import (
+    _card_whitelist,
+    _execute_whitelist,
+    _plain_whitelist,
+    _prepare_whitelist,
+    _shape_whitelist,
+)
 from agent._write_subscription import (
     CANCEL_ACTION,
     CANCEL_CN,
@@ -143,6 +150,17 @@ _SPECS: dict[str, WriteSpec] = {
 
 #: F12/F13 理财申购赎回（按意图族拆出，同 `_write_subscription` 先例）
 _SPECS.update(_wealth_specs())
+
+#: F22b（T25）：把收款人加入白名单 —— **L2 + OTP**。理由：白名单 = 转账免 OTP 的特权，
+#: 授予它必须单独验身份，否则账户被盗后可把自己加进白名单、永久绕过验证码。
+#: 与 T11（订阅取消）同为 `confirm_ref` 族，链路同构。
+_SPECS["payee_whitelist"] = WriteSpec(
+    intent="payee_whitelist", intent_cn="加入白名单", title="白名单确认卡",
+    credential_kind="confirm_ref", otp_in_tool=False,
+    missing=("payee",), tools=("list_payees",), execute_tool="set_payee_whitelist",
+    target_key="payee_id",
+    what="加入白名单", shape=_shape_whitelist, prepare=_prepare_whitelist,
+    card=_card_whitelist, plain=_plain_whitelist, execute=_execute_whitelist)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

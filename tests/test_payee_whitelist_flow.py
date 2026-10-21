@@ -15,9 +15,11 @@ from __future__ import annotations
 
 import pytest
 
-from agent import confirm_card, session_memory
+from agent import confirm_card, llm, orchestrator, session_memory
 from tests.conftest import raw
 from tools import payee
+
+SESSION = "sess-whitelist"
 
 ZHANG = "张小美"                       # data/seed.py：is_whitelist=0
 
@@ -85,9 +87,44 @@ def test_whitelist_is_idempotent_per_ref(wired) -> None:
     assert len(raw(wired, "SELECT * FROM audit_log WHERE tool = 'set_payee_whitelist'")) == 1
 
 
-# ⚠️ **本文件刻意不覆盖聊天接线**：`payee_whitelist` 意图尚未登记进 §3 ——
-# 实测发现把 `transfer`/`subscription` 那套 `confirm_ref` 描述符直接套上来时，
-# 点「确认」会**重新出卡**而不是进入验证码阶段（在途确认没被消费）。
-# 这是一个用户可见的死循环，故**没有接线**，只交付工具层（T25）+ 上面 4 条安全用例。
-# 接线属下一张卡；在它完成前，用户**无法**通过聊天加入白名单（功能不可达，但不是半坏状态）。
+# ---------------- 编排层：L2 + OTP 才写库 ----------------
+
+def _fake(monkeypatch, seen: list[str]) -> None:
+    """假 LLM：分类出 `payee_whitelist`；润色把原文原样返回（数字一个不动）。"""
+    import json
+
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            seen.append(str(user))
+            return schema.model_validate({"intent": "payee_whitelist", "confidence": 0.95,
+                                          "slots": {"payee": ZHANG}, "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+
+
+def test_orchestration_needs_otp_before_writing(wired, monkeypatch) -> None:
+    """出 **L2 卡** → 「确认」**必须进验证码阶段** → 错码不写库 → 对码才落库。
+
+    **钉的是根因**：第二轮的 `states` 里**不能出现 `CLASSIFY`** ——
+    出现就说明「在途确认没被消费」，用户点确认只会反复重出同一张卡（我第一版就踩了这个坑）。
+    """
+    seen: list[str] = []
+    _fake(monkeypatch, seen)
+    card = orchestrator.handle(f"把{ZHANG}加入白名单", session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states and card.tier == "L2"
+    assert "不再需要短信验证码" in card.reply          # 影响必须事先说清
+    assert _flag(wired, ZHANG) == 0                  # 出卡而已，没写库
+
+    otp_stage = orchestrator.handle("确认", session_id=SESSION)
+    assert "CLASSIFY" not in otp_stage.states, "在途确认没被消费（会反复重出卡）"
+    assert "验证码" in otp_stage.reply and otp_stage.executed is False
+
+    wrong = orchestrator.handle("000000", session_id=SESSION)
+    assert wrong.executed is False and _flag(wired, ZHANG) == 0
+
+    ok = orchestrator.handle("123456", session_id=SESSION)
+    assert ok.executed is True and ok.tool_calls == ["set_payee_whitelist"]
+    assert _flag(wired, ZHANG) == 1
+
 

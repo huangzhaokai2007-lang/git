@@ -31,7 +31,7 @@ INTENT_LABELS = (
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
-    "gift_plan", "payee_add", "payee_list", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -40,7 +40,7 @@ IntentLabel = Literal[
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
-    "gift_plan", "payee_add", "payee_list", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -72,6 +72,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
+    "payee_whitelist": ("payee",),                                         # T25 set_payee_whitelist（L2）
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
@@ -156,6 +157,9 @@ SYSTEM_PROMPT = (
     "payee_add（加收款人）的触发说法：「加收款人」「添加收款人」「新增收款人」「加个联系人」「加个好友」等；"
     "用户只要表达出\"想加一个人\"就判 payee_add —— 姓名/手机号没给也没关系，界面会弹表单收集，"
     "**不要**把它们塞进 missing_slots 去追问。\n"
+    "payee_whitelist（加入白名单）的判定：「把王小明加入白名单」「把他设成白名单」都判它；"
+    "`payee` 槽位填**收款人姓名或手机号**。与 payee_add 的区分：**只是新增联系人**是 payee_add，"
+    "**要授予「转账免验证码」这个特权**才是 payee_whitelist。\n"
     "transfer_scheduled（定时/预约转账）的判定：**只要句子里出现任何未来时间就判它** —— "
     "「明天」「下周一」「2026-10-21」「2026-10-21 09:00」都算；"
     "**即使同时给了收款人和金额，也仍然判 transfer_scheduled**（这一点极易判错），"
