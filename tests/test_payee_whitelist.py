@@ -4,7 +4,9 @@
 它不在 F15–F22 六项之内，是 `SPEC-CHANGE` 新增的只读能力（规格 §2 T20 + §3 `payee_list`）。
 
 覆盖点（逐条对应铁律与验收）：
-- **分组正确**：白名单 / 非白名单分开，两组的转账验证方式不同（这是用户看这张表的用途）；
+- **表格排版**：精简 Markdown 表格，**一行一位收款人**（同名两位各占一行，不合并）；
+- **分组正确**：白名单用「白名单」列（✅ / —）标出，**行序照抄 facts**（白名单优先），
+  表下一行说明两组的转账验证方式差别（这是用户看这张表的用途）；
 - **脱敏**：手机号一律 `139****1001` 形式，**完整号一个字都不出现**（铁律 8）；
 - **归属**：只读当前 user，**他人的收款人一条都不出现**；
 - **数字来自事实包**：回执里每个数字都能在 `facts` 里找到（铁律 2）；
@@ -21,8 +23,9 @@ from pathlib import Path
 
 import pytest
 
-from agent import llm, orchestrator
-from agent.render_lists import T_PAYEE_EMPTY, render_payees
+from agent import llm, orchestrator, templates
+from agent.render_lists import (T_PAYEE_EMPTY, T_PAYEE_NO, T_PAYEE_TABLE_HEAD, T_PAYEE_TABLE_SEP,
+                                T_PAYEE_YES, render_payees)
 from guard import facts_check
 
 from tests.conftest import raw
@@ -51,10 +54,18 @@ def ask(monkeypatch: pytest.MonkeyPatch, text: str = "我的白名单有哪些")
     return orchestrator.handle(text, session_id=SESSION)
 
 
-# ---------------- ① 分组 + 脱敏（走完整链路：意图 → T20 → 渲染） ----------------
+# ---------------- ① 表格排版 + 分组 + 脱敏（走完整链路：意图 → T20 → 渲染） ----------------
 
-def test_whitelist_and_other_are_grouped_with_masked_phones(seeded: Path,
-                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+def _table_rows(text: str) -> list[list[str]]:
+    """把回执里的 Markdown 表格解析成行（**跳过表头与分隔行**），用来校「一行一位、顺序照抄」。"""
+    lines = [line for line in text.splitlines() if line.startswith("|")]
+    assert lines[0] == T_PAYEE_TABLE_HEAD, lines[0]
+    assert lines[1] == T_PAYEE_TABLE_SEP, lines[1]
+    return [[cell.strip() for cell in line.strip("|").split("|")] for line in lines[2:]]
+
+
+def test_whitelist_table_has_one_row_per_payee_in_facts_order(seeded: Path,
+                                                             monkeypatch: pytest.MonkeyPatch) -> None:
     turn = ask(monkeypatch)
     assert turn.executed is False                                    # 只读，没有执行任何写
     assert turn.tool_calls == ["list_payees"]
@@ -62,12 +73,44 @@ def test_whitelist_and_other_are_grouped_with_masked_phones(seeded: Path,
     # payee/risk 分支被赋值），跑 yaml 的 runner 也是查审计行 —— 这里与它同口径。
     row = raw(seeded, "SELECT * FROM audit_log ORDER BY rowid DESC LIMIT 1")[0]
     assert row["intent"] == "payee_list" and row["permission_tier"] == "L0"
-    assert "【白名单】" in turn.reply and "【非白名单】" in turn.reply
-    assert WHITE_NAME in turn.reply and OTHER_NAME in turn.reply
-    assert WHITE_PHONE in turn.reply and OTHER_PHONE in turn.reply   # 脱敏形式照抄
-    # 分组正确：白名单那两位必须出现在「【白名单】」段里
-    white_section = turn.reply.split("【非白名单】")[0]
-    assert WHITE_NAME in white_section and OTHER_NAME not in white_section
+    rows = _table_rows(turn.reply)
+    assert len(rows) == 5                                            # 干净库 5 位 → 一行一位
+    assert [item[0] for item in rows].count("李四") == 2              # 同名两位各占一行，不合并
+    # 分组正确：靠「白名单」列表达（不再是【分组】小标题）
+    marks = {item[0]: item[3] for item in rows if item[0] in (WHITE_NAME, OTHER_NAME)}
+    assert marks[WHITE_NAME] == T_PAYEE_YES                          # 王五 是白名单
+    assert marks[OTHER_NAME] == T_PAYEE_NO                           # 张小美 不是
+    # 行序照抄 facts（工具层已按「白名单优先 + 姓名」排好）：编排层不重排
+    flags = [item[3] == T_PAYEE_YES for item in rows]
+    assert flags == sorted(flags, reverse=True), rows
+    # 脱敏形式照抄「手机号」列
+    phones = [item[1] for item in rows]
+    assert WHITE_PHONE in phones and OTHER_PHONE in phones
+
+
+def test_structural_table_reply_skips_polish(seeded: Path,
+                                             monkeypatch: pytest.MonkeyPatch) -> None:
+    """表格是**结构**不是措辞：`payee_list` 不进润色（否则润色器会把表格压平成一串文字）。
+
+    两半都测：① 本意图 `polish` **0 次**；② 别的意图（`balance_query`）**照旧润色** ——
+    后半条是防「把润色全局关掉」的守卫，只测前半条的话那种回归查不出来。
+    """
+    calls: list[str] = []
+    real_polish = templates.polish
+
+    def counting_polish(text: str, facts: dict) -> str | None:
+        calls.append(text)
+        return real_polish(text, facts)
+
+    monkeypatch.setattr(templates, "polish", counting_polish)
+    turn = ask(monkeypatch)
+    assert _table_rows(turn.reply)                                    # 表格原样交付，没被重排
+    assert calls == [], calls                                         # 表格回执一次润色都没走
+
+    fake_llm(monkeypatch, [{"intent": "balance_query", "confidence": 0.95,
+                            "slots": {"account_type": "savings"}, "missing_slots": []}])
+    orchestrator.handle("查一下余额", session_id=SESSION)
+    assert calls, "其它意图应照旧走润色（守卫：润色不能被全局关掉）"
 
 
 def test_no_full_phone_number_ever_appears(seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -20,7 +20,7 @@ from tools.subscription import (
 )
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "TemplateError", "card_line",
-           "payee_line", "render_cards", "render_payees", "render_subscriptions", "render_wealth",
+           "payee_row", "render_cards", "render_payees", "render_subscriptions", "render_wealth",
            "subscription_line", "wealth_line"]
 
 # ---------------- 卡片查询（卡 23） ----------------
@@ -206,38 +206,42 @@ def render_subscriptions(facts: Mapping) -> str:
 #: （与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径，避免「共 0 位：」这种残句）。
 T_PAYEE_HEAD = "您共有 {total_count} 位收款人：白名单 {whitelist_count} 位、其它 {non_whitelist_count} 位。"
 T_PAYEE_EMPTY = "您还没有收款人。可以说「我要加个收款人」来添加。"
-#: 分组小标题：**纯文案，不含数字**；顺带说明两组的转账验证差别（这是用户看这张表的实际用途）。
-T_PAYEE_WHITELIST = "【白名单】（转账时只需会话内确认）"
-T_PAYEE_OTHER = "【非白名单】（转账时需确认卡 + 短信验证码）"
+#: 排版改为**精简表格**（用户要求）：原先的「【分组】+ 项目符号」一行一位、看着像流水账，
+#: 表格让「姓名 / 手机号 / 银行 / 是否白名单」四列对齐。分组不再靠小标题，而是靠
+#: 「白名单」列 + 工具层既有的排序（白名单优先）表达 —— 语义不变，行序一个字没重排。
+T_PAYEE_TABLE_HEAD = "| 收款人 | 手机号 | 银行 | 白名单 |"
+T_PAYEE_TABLE_SEP = "| --- | --- | --- | --- |"
+#: 单元格文案：**都不含数字**。`T_PAYEE_NO` 同时用于「非白名单」与「银行未填」，
+#: 它只是占位符，**不是**编造的银行名（规格：`bank` 为空不补「未知银行」这类值）。
+T_PAYEE_YES, T_PAYEE_NO = "✅", "—"
+#: 表下**唯一一行**说明：两组的转账验证差别（这是用户看这张表的实际用途）；纯文案，不含数字。
+T_PAYEE_WHITELIST = "白名单：转账只需会话内确认"
+T_PAYEE_OTHER = "非白名单：转账需确认卡 + 短信验证码"
+T_PAYEE_LEGEND = f"{T_PAYEE_WHITELIST}；{T_PAYEE_OTHER}。"
 
 
-def payee_line(item: Mapping) -> str:
-    """一位收款人一行（`- ` 开头：界面用 `st.markdown` 渲染会排成项目符号列表）。
+def payee_row(item: Mapping) -> str:
+    """一位收款人一行（Markdown 表格行）。
 
     手机号**照抄 facts 的脱敏值**（`139****1001`），不拼接、不补全、**绝不还原完整号**（铁律 8）；
-    银行名照抄入库值，为空则整截不印（不补「未知银行」这类编造值）。
+    银行名照抄入库值，为空则印 `—` 占位（不补「未知银行」这类编造值）；「白名单」列只用 ✅ / —。
     """
-    line = f"- {item['name']}　{item['masked_phone']}"
-    return f"{line}（{item['bank']}）" if item.get("bank") else line
+    bank = str(item.get("bank") or "") or T_PAYEE_NO
+    mark = T_PAYEE_YES if item["is_whitelist"] else T_PAYEE_NO
+    return f"| {item['name']} | {item['masked_phone']} | {bank} | {mark} |"
 
 
 def render_payees(facts: Mapping) -> str:
-    """`payee_list` 回执（T20）：总数 + **白名单 / 非白名单分组**。
+    """`payee_list` 回执（T20）：汇总句 + **一张精简表格** + 一行分组说明。
 
-    分组是这条回执的重点 —— 用户要的就是「哪些是白名单、哪些不是」（两组的转账验证方式不同）。
-    组内顺序**照抄 facts 的 `items` 顺序**（工具层已按「白名单优先 + 姓名」稳定排序），
-    编排层不重排 —— 重排就是自己造顺序。
-    空组不印小标题（避免「【非白名单】」下面一行都没有）。
+    行序**照抄 facts 的 `items` 顺序**（工具层已按「白名单优先 + 姓名」稳定排序），编排层不重排
+    —— 重排就是自己造顺序。「白名单」列让用户一眼看出哪些是白名单（两组的转账验证方式不同）。
     """
     if int(facts["total_count"]) == 0:
         return T_PAYEE_EMPTY
     head = T_PAYEE_HEAD.format(total_count=int(facts["total_count"]),
                                whitelist_count=int(facts["whitelist_count"]),
                                non_whitelist_count=int(facts["non_whitelist_count"]))
-    lines = [head]
-    for label, wanted in ((T_PAYEE_WHITELIST, True), (T_PAYEE_OTHER, False)):
-        group = [item for item in facts["items"] if bool(item["is_whitelist"]) is wanted]
-        if group:
-            lines.append(label)
-            lines.extend(payee_line(item) for item in group)
-    return "\n".join(lines)
+    rows = [T_PAYEE_TABLE_HEAD, T_PAYEE_TABLE_SEP,
+            *(payee_row(item) for item in facts["items"])]
+    return "\n".join([head, "", *rows, "", T_PAYEE_LEGEND])

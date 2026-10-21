@@ -22,7 +22,7 @@ from agent.render_lists import (          # noqa: F401 —— 列表类回执按
     T_CARD_NO_CARD_FILTERED, T_PAYEE_EMPTY, T_PAYEE_HEAD, T_PAYEE_OTHER, T_PAYEE_WHITELIST,
     T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
     T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, T_WEALTH, T_WEALTH_CLEAN, T_WEALTH_EMPTY,
-    TemplateError, card_line, payee_line, render_cards, render_payees, render_subscriptions,
+    TemplateError, card_line, payee_row, render_cards, render_payees, render_subscriptions,
     render_wealth, subscription_line, term_cn, wealth_line,
 )
 from guard import facts_check, injection
@@ -184,6 +184,11 @@ def account_type_cn(account_type: object) -> str:
 
 # ---------------- 回执生成：模板 → LLM 润色 → 数字校验（规格 §4 的 VERIFY_NUMBERS 判据） ----------------
 POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重生成一次 → 仍不过则降级为模板」
+#: **结构型回执**（Markdown 表格）不进润色：润色器只被授权改「措辞」，但排版也是结构的一部分，
+#: 数字校验器只核数字、**拦不住表格被压平成一串文字** —— 这类意图直接把模板原文交付。
+#: 目前只有 `payee_list`（T20「查看白名单」的表格）。列表类（刷卡/订阅/理财）口径不变，
+#: 以免顺手改掉别人的回执行为；要扩大范围时在此登记并同步用例。
+NO_POLISH_INTENTS = frozenset({"payee_list"})
 def verify_numbers(text: str, facts: Mapping) -> set[str]:
     """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。
 
@@ -236,10 +241,13 @@ def compose_reply(intent: str, slots: Mapping, result: ToolResult) -> tuple[str,
     """模板 → LLM 润色 → 数字校验。返回 `(回执, 是否因幻觉降级, 润色尝试次数)`。
 
     降级条件（卡 13 口径）：润色结果出现 facts 之外的数字 → 重生成一次 → 仍不过 → 回模板原样文本。
+    `NO_POLISH_INTENTS` 里的结构型回执（表格）跳过润色，直接交付模板原文。
     """
     reply = render(intent, _template_values(intent, slots, result))
     if intent == "bill_report" and result.data.get("markdown"):
         reply = f"{reply}\n\n{result.data['markdown']}"
+    if intent in NO_POLISH_INTENTS:                            # 表格是结构，不是措辞 → 不进润色
+        return reply, False, 0
     hallucinated, attempts = False, 0
     for _ in range(POLISH_ATTEMPTS):
         attempts += 1
