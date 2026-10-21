@@ -1,5 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 9 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 47 条
+# 分组：bill 5 / trf 11 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 49 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -75,17 +75,31 @@
 - id: trf-008
   input: "明天给王五转 100 元"
   slots: {payee: 王五, amount: "100.00", schedule: 明天}
-  # F16 **止损**：说了预约时间也**绝不出确认卡**。修前会出「预计到账：实时到账」的即时转账卡，
-  # L1 档点确认即扣款 —— 违反 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
-  # F16 落地前本用例是硬判据（完整方案见 docs/superpowers/specs/2026-10-15-…-design.md）。
+  # F16 落地后：**相对日（明天）不支持**（Q10）→ 追问格式，**绝不出确认卡、绝不当即时转账**。
+  # 钉的是 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
+  # ⚠️ 本用例曾被提交 967073f 回退成 F16 落地前的止损断言（「还没接通」），已按已批准行为改回。
   expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
-           must_contain: ["还没接通"], must_not_contain: ["确认卡", "实时到账"]}
+           must_contain: ["预约时间"], must_not_contain: ["确认卡", "实时到账"]}
 - id: trf-009
   input: "下个月给王五转 100 元"
   slots: {payee: 王五, amount: "100.00"}
-  # 模型识别到定时意图却**没抽出时间** → 同样拒绝（否则等于猜用户其实想立刻转）。
+  # 识别到定时意图却没抽出时间 → 追问，绝不猜「其实你想立刻转」。
   expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
-           must_contain: ["还没接通"], must_not_contain: ["确认卡", "实时到账"]}
+           must_contain: ["预约时间"], must_not_contain: ["确认卡", "实时到账"]}
+- id: trf-010
+  input: "2026-10-21 09:00 给王五转 100 元"
+  slots: {payee: 王五, amount: "100.00", schedule: "2026-10-21T09:00"}
+  # F16 正向：合法 ISO 时间 → 出**定时转账确认卡**（多一行预约时间、不印「预计到账」），
+  # 且仍 `executed: false`（确认前只调 T7 预览，**不落预约、不扣款**）。
+  expect: {intent: transfer_scheduled, tool_calls: [preview_transfer], tier: L1, executed: false,
+           must_contain: ["预约时间"], must_not_contain: ["实时到账", "预计到账"]}
+- id: trf-011
+  input: "2026-10-21 09:00 给王五转 100 元"
+  slots: {payee: 王五, amount: "100.00", schedule: "2026-10-21T09:00"}
+  turns: ["确认"]
+  # 确认后调 **T21 schedule_transfer** 落 pending 预约（**不扣款**）。
+  expect: {intent: transfer_scheduled, tool_calls: [schedule_transfer], tier: L1, executed: true,
+           must_contain: ["预约", "不会扣款"], must_not_contain: ["已向"]}
 
 # ---------------- AA 收款 5（F15） ----------------
 - id: aa-001
