@@ -18,11 +18,13 @@ from pydantic import BaseModel, ConfigDict
 
 from agent import llm
 from agent.render_lists import (          # noqa: F401 —— 列表类回执按职责拆出后**再导出**（同一份实现）
-    CARD_STATUS_CN, CARD_TYPE_CN, CYCLE_LABELS, T_CARD_HEAD, T_CARD_HEAD_FILTERED, T_CARD_NO_CARD,
+    CARD_STATUS_CN, CARD_TYPE_CN, CYCLE_LABELS, SEVERITY_CN, T_ANOMALY, T_CARD_HEAD,
+    T_CARD_HEAD_FILTERED, T_CARD_NO_CARD,
     T_CARD_NO_CARD_FILTERED, T_PAYEE_EMPTY, T_PAYEE_HEAD, T_PAYEE_OTHER, T_PAYEE_WHITELIST,
     T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
     T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, T_WEALTH, T_WEALTH_CLEAN, T_WEALTH_EMPTY,
-    TemplateError, card_line, payee_line, render_cards, render_payees, render_subscriptions,
+    TemplateError, anomaly_line, card_line, payee_line, render_anomalies, render_cards,
+    render_payees, render_subscriptions,
     render_wealth, subscription_line, term_cn, wealth_line,
 )
 from guard import facts_check, injection
@@ -57,8 +59,10 @@ T_TXN = "共查到 {total_count} 笔交易，其中支出合计 {page_out_sum_yu
 #: 账单分析：facts 键见 T3（period / total_yuan / vs_prev_pct / groups[]）
 T_ANALYSIS = "{period} 共支出 {total_yuan} 元，环比 {vs_prev_pct}%。"
 
-#: 异常检测：facts 键见 T4（scanned_count / anomaly_count / items[]）
-T_ANOMALY = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔异常，请留意。"
+#: 异常检测：facts 键见 T4（scanned_count / anomaly_count / items[]）。
+#: 实际渲染在 `render_lists.render_anomalies`（命中项要显示"交易 + 依据"，F03 验收第 2 条）；
+#: 这里保留键位是为了"每个只读意图都有模板"这类检查不落空（与 T_CARD_HEAD 同口径）。
+#: T_ANOMALY 由 render_lists 再导出（同一份实现）。
 
 #: 账单报告：facts 键见 T5（period / out_sum_yuan / in_sum_yuan / net_yuan；markdown 由编排层附加）
 T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yuan} 元，净支出 {net_yuan} 元。"
@@ -129,6 +133,8 @@ TEMPLATES: dict[str, str] = {
 
 def render(intent: str, facts: Mapping[str, object]) -> str:
     """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
+    if intent == "anomaly_check":                            # F03：汇总 + 每条命中一行（交易 + 依据）
+        return render_anomalies(facts)
     if intent == "card_query":                               # 卡 23：列表 + 空结果分支（不走单行 format）
         return render_cards(facts)
     if intent == "subscription_list":                        # 卡 20 + F19：汇总 + 明细，按状态分支

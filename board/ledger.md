@@ -1737,3 +1737,23 @@ worker 复述通过后提了 4 条，逐条批：
 **RISK ②（耦合）**：`tools/card_query.py:22` 直取私有模块 `from data._dao_core import list_cards`（其余 14 个工具都走 `from data import dao` 门面）→ 已转给 worker，**在 card-24 给 data 层减负时顺手提到门面**。
 
 （reviewer 已 `git worktree remove` 清理；遗留空目录 `%LOCALAPPDATA%\Temp\c23wt` 可忽略。）
+
+## 决策记录（F03 异常检测 · 回执收口）
+
+**本轮只收“回执”这一层**（会话断在半途后接手）：四条规则与阈值一行没动（`main` 的冻结口径），
+落点是 T4 facts 多带 `ts` / `counterparty` → `render_anomalies` 渲染成「时刻｜对手方｜金额 —— 依据（严重程度）」的明细行。
+契约没撑大：`data` 仍是 §2 的 `txn_id/reason/severity` 三键，多出来的两项**只进 facts**。
+
+**两个实测撞出来的坑（都在离线替身，已修 + 各补一条用例）**：
+
+1. **问异常、答环比** —— F03 原话「上个月有什么异常支出」同时含“异常”与“支出”，被账单分析规则先手抢走
+   （实测回执：`2026-08 共支出 9,152.00 元，环比 -32%`）。把「异常」提到账单分析之前，理由照
+   F10「测评」排在「理财」之前：具体意图优先。
+2. **上上个月答成上个月** —— 相对时间词 `next()` 按表顺序取，子串「上个月」先命中。改成**按长度降序**取词。
+
+**证据（不是“写完就绿”）**：`bash scripts/verify.sh` → 单测 **1445 passed**、用例 **53/53**、红队 30/30、IM 7/7、API 4/4，全部通过 ✅；
+`scripts/demo.py --quick` **10/10**（已把 F03 原话加进 CLI 演示话术）。
+**变异抽查**：删掉 `templates.render` 里 `anomaly_check` 的路由 → `test_anomaly_wording.py` 立刻红 4 条（含端到端那条），说明新用例真盯得住；已还原。
+
+**未做 / 剩余限制（同步写进 `docs/features/F03-anomalies.md`）**：没截图（本机无浏览器依赖，红线是“引入新依赖先问”）→ 以可复现命令留证；
+失败路径演示直接打工具层（编排层的缺槽 CLARIFY 会把非法账期拦在前头）；规则与阈值的回归沿用既有用例，本轮未改。
