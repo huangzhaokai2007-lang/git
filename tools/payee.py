@@ -12,13 +12,17 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import re
+import threading
+import uuid
 
 from data import dao
 
 from tools._query_common import (
-    DEMO_USER_ID, ToolError, _dao_reject, _fail, _invalid, _ok, current_user_id, require_owned,
+    DEMO_USER_ID, ToolError, _dao_reject, _fail, _invalid, _ok, current_session_id,
+    current_user_id, require_owned,
 )
 from tools.schemas import AddPayeeReq, ErrorCode, ToolResult
 
@@ -83,6 +87,109 @@ def add_payee(name: str, phone: str) -> ToolResult:
     except ValueError as exc:
         return _dao_reject(exc)
     return _ok(_payload(row), _facts(row), f"已添加 {clean_name}（{masked}）")
+
+
+# ---------------- T25 set_payee_whitelist（SPEC-CHANGE 新增 · L2） ----------------
+#
+# 为什么必须是 L2 + 验证码（不是 L1）：**白名单 = 转账免 OTP 的特权**。若"加收款人"（L1、不要
+# OTP）能顺带把对方设成白名单，那么账户一旦被盗，攻击者只要把自己加成白名单，就能**永久绕过
+# OTP**。所以「授予这个特权」必须单独验证身份 —— 这也是人类批准本卡时给的档位。
+
+#: 白名单写入档位（§5 SPEC-CHANGE）：L2 + OTP（编排层校验验证码，同 T11/T15 的 confirm_ref 族）
+WHITELIST_TIER = "L2"
+#: 凭证绑定的 action 名（与工具名一致）
+WHITELIST_ACTION = "set_payee_whitelist"
+#: 凭证 TTL（同 T11/T15 口径：自包含 ref，300 秒）
+CONFIRM_TTL_SECONDS = 300
+
+_CONFIRM_REFS: dict[str, dict] = {}
+#: 幂等临界区：校验凭证 → 执行 → 写快照整体串行（同 ref 并发调用绝不重复执行）
+_CONFIRM_LOCK = threading.Lock()
+
+
+def issue_confirm_ref(action: str, target_id: str) -> str:
+    """签发确认凭证（**工具层私有约定**，不属于规格 §2 冻结的 25 个工具函数）。
+
+    编排层渲染确认卡、用户确认后调本函数，把返回的 ref 交给 `set_payee_whitelist`。
+    绑定 `action + target_id + 当前用户 + 签发时刻`，TTL `CONFIRM_TTL_SECONDS`，一次性消费。
+    """
+    if not str(action or "").strip() or not str(target_id or "").strip():
+        raise ToolError(ErrorCode.INVALID_ARGUMENT, "action 与 target_id 都不能为空")
+    ref = f"cf_{uuid.uuid4().hex}"
+    _CONFIRM_REFS[ref] = {"action": action, "target_id": target_id, "user_id": current_user_id(),
+                          "created_at": datetime.datetime.now(), "snapshot": None}
+    return ref
+
+
+def check_confirm_ref(confirm_ref: str, action: str, target_id: str) -> dict:
+    """校验并取回凭证（不消费）。**非法一律 `raise ToolError`**（同 `tools/subscription.py` 口径）。
+
+    错误码边界：不存在 / 非本人 / 绑定不符 → `FORBIDDEN`；存在但超 TTL → `TOKEN_EXPIRED`。
+    """
+    ref = _CONFIRM_REFS.get(confirm_ref)
+    if ref is None:
+        raise ToolError(ErrorCode.FORBIDDEN, "确认凭证无效：不是本会话签发的凭证")
+    if ref["user_id"] != current_user_id():
+        raise ToolError(ErrorCode.FORBIDDEN, "该确认凭证不属于当前用户")
+    if ref["action"] != action or ref["target_id"] != target_id:
+        raise ToolError(ErrorCode.FORBIDDEN, "确认凭证与本次操作不匹配")
+    if datetime.datetime.now() - ref["created_at"] > datetime.timedelta(seconds=CONFIRM_TTL_SECONDS):
+        _CONFIRM_REFS.pop(confirm_ref, None)
+        raise ToolError(ErrorCode.TOKEN_EXPIRED, "确认凭证已过期，请重新确认")
+    return ref
+
+
+def whitelist_target(payee_id: str, enable: bool) -> str:
+    """凭证绑定用的 target：**把方向也绑进去**，防止拿「加入」的凭证去执行「移出」。"""
+    return f"{payee_id}:{int(bool(enable))}"
+
+
+def _whitelist_payload(row: dict, is_whitelist: bool) -> tuple[dict, dict]:
+    data = {"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
+            "is_whitelist": is_whitelist}
+    return data, {**data}
+
+
+def set_payee_whitelist(payee_id: str, enable: bool, confirm_ref: str) -> ToolResult:
+    """T25 设置收款人白名单（L2）。`data` = `{payee_id, name, masked_phone, is_whitelist}`。
+
+    归属 fail-closed；凭证绑定方向（`payee_id:1/0`）；同一 ref 重复调用返回既有结果（幂等）。
+    写入与审计同一事务（铁律 5）；**脱敏手机号原样照抄入库值**，绝不还原完整号（铁律 8）。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id,
+                      tool=WHITELIST_ACTION, intent="payee_whitelist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    row = dict(row)
+    target = whitelist_target(payee_id, enable)
+    with _CONFIRM_LOCK:
+        try:
+            rec = check_confirm_ref(confirm_ref, WHITELIST_ACTION, target)
+        except ToolError as exc:                           # 错误码边界见 check_confirm_ref
+            return _fail(exc.code, exc.message)
+        if rec["snapshot"] is not None:                    # 幂等：同一 ref 重复调用
+            data, facts = _whitelist_payload(row, bool(rec["snapshot"]["is_whitelist"]))
+            return _ok(data, facts, "白名单状态已更新（重复提交，未重复写入）")
+        flag = 1 if enable else 0
+        from data.db import transaction                    # 局部 import：与 tools 其余模块同口径
+        conn = dao.connection()
+        with transaction(conn):
+            conn.execute("UPDATE payee SET is_whitelist = ? WHERE id = ? AND user_id = ?",
+                         (flag, payee_id, user_id))
+            dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                             intent="payee_whitelist", tool=WHITELIST_ACTION,
+                             params_json={"payee_id": payee_id, "is_whitelist": bool(flag)},
+                             risk_level=WHITELIST_TIER, permission_tier=WHITELIST_TIER,
+                             result="success", error_code=None)
+        rec["snapshot"] = {"is_whitelist": bool(flag)}
+    data, facts = _whitelist_payload(row, bool(flag))
+    word = "已加入白名单" if flag else "已移出白名单"
+    return _ok(data, facts, f"{row['name']}（{row['phone']}）{word}")
 
 
 # ---------------- T20 list_payees（查看白名单 · SPEC-CHANGE 新增，L0 只读） ----------------
