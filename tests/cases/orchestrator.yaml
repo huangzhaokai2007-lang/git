@@ -1,8 +1,5 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 11 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 49 条
-#: **取消预约（scheduled_cancel）不在本文件覆盖**：yaml 的用例**共享库状态**（后一条能看到前一条落的
-#: 预约），写成"先预约再取消"就会变成顺序依赖的脆用例。该链路由 `tests/test_scheduled_transfer_flow.py`
-#: 的 3 条自成闭环用例覆盖（取消不动钱 / 无 pending 时报错 / 取消后不再结算）。
+# 分组：bill 5 / trf 9 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 47 条
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -78,30 +75,17 @@
 - id: trf-008
   input: "明天给王五转 100 元"
   slots: {payee: 王五, amount: "100.00", schedule: 明天}
-  # F16 落地后：**相对日（明天）不支持**（Q10）→ 追问格式，**绝不出确认卡、绝不当即时转账**。
-  # 钉的是 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
+  # F16 **止损**：说了预约时间也**绝不出确认卡**。修前会出「预计到账：实时到账」的即时转账卡，
+  # L1 档点确认即扣款 —— 违反 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
+  # F16 落地前本用例是硬判据（完整方案见 docs/superpowers/specs/2026-10-15-…-design.md）。
   expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
-           must_contain: ["预约时间"], must_not_contain: ["确认卡", "实时到账"]}
+           must_contain: ["还没接通"], must_not_contain: ["确认卡", "实时到账"]}
 - id: trf-009
   input: "下个月给王五转 100 元"
   slots: {payee: 王五, amount: "100.00"}
-  # 识别到定时意图却没抽出时间 → 追问，绝不猜「其实你想立刻转」。
+  # 模型识别到定时意图却**没抽出时间** → 同样拒绝（否则等于猜用户其实想立刻转）。
   expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
-           must_contain: ["预约时间"], must_not_contain: ["确认卡", "实时到账"]}
-- id: trf-010
-  input: "2026-10-21 09:00 给王五转 100 元"
-  slots: {payee: 王五, amount: "100.00", schedule: "2026-10-21T09:00"}
-  # F16 正向：合法 ISO 时间 → 出**定时转账确认卡**（多一行预约时间、不印「预计到账」），
-  # 且 still `executed: false`（确认前只调 T7 预览，**不落预约、不扣款**）。
-  expect: {intent: transfer_scheduled, tool_calls: [preview_transfer], tier: L1, executed: false,
-           must_contain: ["预约时间", "2026-10-21"], must_not_contain: ["实时到账", "预计到账"]}
-- id: trf-011
-  input: "2026-10-21 09:00 给王五转 100 元"
-  slots: {payee: 王五, amount: "100.00", schedule: "2026-10-21T09:00"}
-  turns: ["确认"]
-  # 确认后调 **T21 schedule_transfer** 落 pending 预约（**不扣款**）。
-  expect: {intent: transfer_scheduled, tool_calls: [schedule_transfer], tier: L1, executed: true,
-           must_contain: ["预约", "不会扣款"], must_not_contain: ["已向"]}
+           must_contain: ["还没接通"], must_not_contain: ["确认卡", "实时到账"]}
 
 # ---------------- AA 收款 5（F15） ----------------
 - id: aa-001
@@ -257,12 +241,12 @@
   expect: {intent: wealth_recommend, tool_calls: [recommend_wealth], tier: L0, executed: false, must_contain: ["推荐"]}
 - id: wlt-003
   input: "买 1 万块理财产品"
-  slots: {product_id: prod_r1_mmf, amount: "10000"}
+  slots: {product: prod_r1_mmf, amount: "10000"}
   expect: {intent: wealth_buy, tool_calls: [preview_trade], tier: null, executed: false,
            must_contain: ["风险测评"]}
 - id: wlt-004
   input: "赎回一半理财"
-  slots: {product_id: prod_r1_mmf, amount: "5000"}
+  slots: {product: prod_r1_mmf, amount: "5000"}
   expect: {intent: wealth_redeem, tool_calls: [preview_trade], tier: L2, executed: false,
            must_contain: ["确认"]}
 

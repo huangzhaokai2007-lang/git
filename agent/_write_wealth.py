@@ -31,14 +31,21 @@ def _term_cn(days: object) -> str:
 
 
 def _shape_wealth(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：`amount`（元）→ 整数分；产品名原样留在 `product_id`，由预览层定位。
+    """SLOT_FILL：`amount`（元）→ 整数分；产品名落到 `product_id` 供工具层定位。
 
-    金额认不出 / 非正数 → 记 `amount` 缺槽（不猜 0 元）；产品没给 → 记 `product_id` 缺槽。
-    追问文案经 `templates.SLOT_CN` 映射成「产品」「金额」。
+    槽位键用 **`product`（产品名）而不是 `product_id`**：实测带测评历史时，LLM 面对
+    `product_id` 会误以为要填 ID 而**整项不填**（4 次里 2 次），改成 `product` 后 6/6 命中。
+    仍兼容旧键 `product_id`（历史用例与旧脚本）。
+
+    金额认不出 / 非正数 → 记 `amount` 缺槽（不猜 0 元）；产品没给 → 记 `product_id` 缺槽
+    （`templates.SLOT_CN` 已把它映射成「产品」）。
     """
     filled, missing = dict(slots), []
-    if not str(filled.get("product_id") or "").strip():
+    product = str(filled.get("product") or filled.get("product_id") or "").strip()
+    if not product:
         missing.append("product_id")
+    else:
+        filled["product_id"] = product
     if filled.get("amount_cents") is None:
         amount = filled.get("amount")
         cents = yuan_to_cents(amount) if amount is not None else None

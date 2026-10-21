@@ -67,8 +67,8 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "card_report_lost": ("card_id",),                                      # T12
     "risk_assess": ("answers",),                                           # T13 assess_risk
     "wealth_recommend": ("risk_level", "horizon_days", "amount"),          # T14 recommend_wealth
-    "wealth_buy": ("product_id", "amount"),                                # T15 trade_wealth
-    "wealth_redeem": ("product_id", "amount"),                             # T15 trade_wealth
+    "wealth_buy": ("product", "amount"),                                # T15 trade_wealth
+    "wealth_redeem": ("product", "amount"),                             # T15 trade_wealth
     "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）

@@ -80,7 +80,7 @@ def balance() -> int:
 def test_buy_runs_confirm_then_otp_then_executes(seeded, monkeypatch, sess) -> None:
     """F12 验收第 2 条：L2 确认卡 + OTP 之后才交易，三步各自的状态都说清楚。"""
     orchestrator.submit_assessment(R1, session_id=sess)
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": "稳盈货币基金", "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": "稳盈货币基金", "amount": "100"})])
 
     first = say("买 100 块稳盈货币基金", sess)
     assert not first.executed and first.tier == "L2"
@@ -97,7 +97,7 @@ def test_buy_runs_confirm_then_otp_then_executes(seeded, monkeypatch, sess) -> N
 
 def test_redeem_runs_the_same_loop(seeded, monkeypatch, sess) -> None:
     """F13 正常路径：赎回同样走确认卡 + OTP，执行后持仓扣减。"""
-    fake_llm(monkeypatch, [out("wealth_redeem", slots={"product_id": MMF, "amount": "50"})])
+    fake_llm(monkeypatch, [out("wealth_redeem", slots={"product": MMF, "amount": "50"})])
 
     first = say("赎回 50 块稳盈货币基金", sess)
     assert not first.executed and "CONFIRM_CARD" in first.states
@@ -114,7 +114,7 @@ def test_redeem_runs_the_same_loop(seeded, monkeypatch, sess) -> None:
 def test_confirm_and_otp_do_not_touch_balance_or_holding(seeded, monkeypatch, sess) -> None:
     """F13 验收第 2 条：确认卡阶段与等 OTP 阶段，余额和持仓**一个分都没动**。"""
     orchestrator.submit_assessment(R1, session_id=sess)
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": MMF, "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": MMF, "amount": "100"})])
 
     say("买 100 块稳盈货币基金", sess)
     taken = (balance(), holding_amount(MMF))
@@ -130,7 +130,7 @@ def test_confirm_and_otp_do_not_touch_balance_or_holding(seeded, monkeypatch, se
 def test_wrong_otp_is_rejected_and_nothing_executes(seeded, monkeypatch, sess) -> None:
     """OTP 错 → 拒绝且不执行；错误次数累计，错满 3 次锁会话（卡 10 第 4 条）。"""
     orchestrator.submit_assessment(R1, session_id=sess)
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": MMF, "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": MMF, "amount": "100"})])
     say("买 100 块稳盈货币基金", sess)
     say("确认", sess)
     taken = (balance(), holding_amount(MMF))
@@ -146,7 +146,7 @@ def test_wrong_otp_is_rejected_and_nothing_executes(seeded, monkeypatch, sess) -
 def test_not_confirming_voids_the_trade(seeded, monkeypatch, sess) -> None:
     """在确认卡阶段说别的 → 本笔作废（回 SLOT_FILL），**不执行**。"""
     orchestrator.submit_assessment(R1, session_id=sess)
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": MMF, "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": MMF, "amount": "100"})])
     say("买 100 块稳盈货币基金", sess)
 
     voided = say("算了，不买了", sess)
@@ -165,7 +165,7 @@ def test_missing_slots_trigger_clarify(seeded, monkeypatch, sess) -> None:
 
 def test_unknown_product_name_is_not_found(seeded, monkeypatch, sess) -> None:
     """产品名查不到 → NOT_FOUND（不猜一个相近的）。"""
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": "不存在的理财", "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": "不存在的理财", "amount": "100"})])
     turn = say("买不存在的理财 100 块", sess)
     assert turn.error_code == ErrorCode.NOT_FOUND and not turn.executed
     assert turn.tool_calls == ["preview_trade"]
@@ -173,7 +173,7 @@ def test_unknown_product_name_is_not_found(seeded, monkeypatch, sess) -> None:
 
 def test_ambiguous_product_name_is_not_guessed(seeded, monkeypatch, sess) -> None:
     """产品名命中多个 → NOT_FOUND（重名不猜，与订阅取消同口径）。"""
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": "理财", "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": "理财", "amount": "100"})])
     turn = say("买理财 100 块", sess)
     assert turn.error_code == ErrorCode.NOT_FOUND and not turn.executed
 
@@ -181,8 +181,8 @@ def test_ambiguous_product_name_is_not_guessed(seeded, monkeypatch, sess) -> Non
 # ---------------- ⑤ 工具层拒绝码原样透传 ----------------
 
 @pytest.mark.parametrize(("slots", "code"), [
-    ({"product_id": MIXED, "amount": "100"}, ErrorCode.INVALID_ARGUMENT),      # 低于起购额
-    ({"product_id": MMF, "amount": "999999"}, ErrorCode.INSUFFICIENT_FUNDS),   # 余额不足
+    ({"product": MIXED, "amount": "100"}, ErrorCode.INVALID_ARGUMENT),      # 低于起购额
+    ({"product": MMF, "amount": "999999"}, ErrorCode.INSUFFICIENT_FUNDS),   # 余额不足
 ])
 def test_tool_rejections_pass_through_unchanged(seeded, monkeypatch, sess, slots, code) -> None:
     """编排层不吞错误码：起购额/余额不足原样透传给用户。"""
@@ -194,7 +194,7 @@ def test_tool_rejections_pass_through_unchanged(seeded, monkeypatch, sess, slots
 
 def test_buy_without_assessment_is_refused_by_the_tool(seeded, monkeypatch, sess) -> None:
     """未测评 → 工具层 require_assessment 拒绝，编排层原样透传（F10 → F12 的衔接）。"""
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": MMF, "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": MMF, "amount": "100"})])
     turn = say("买 100 块稳盈货币基金", sess)
     assert turn.error_code == ErrorCode.INVALID_STATE and not turn.executed
 
@@ -204,7 +204,7 @@ def test_buy_without_assessment_is_refused_by_the_tool(seeded, monkeypatch, sess
 def test_receipt_numbers_all_come_from_facts(seeded, monkeypatch, sess) -> None:
     """回执数字全部来自工具层事实包，且未降级（铁律 2）。"""
     orchestrator.submit_assessment(R1, session_id=sess)
-    fake_llm(monkeypatch, [out("wealth_buy", slots={"product_id": MMF, "amount": "100"})])
+    fake_llm(monkeypatch, [out("wealth_buy", slots={"product": MMF, "amount": "100"})])
     say("买 100 块稳盈货币基金", sess)
     say("确认", sess)
     turn = say(OTP, sess)
