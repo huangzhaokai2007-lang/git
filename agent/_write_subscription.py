@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Mapping
 
 from agent import confirm_card
-from agent._write_common import Prepared, ShapeResult, _code_of
+from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query
 from tools import subscription
 
 #: 订阅取消（T11）：工具层的动作名必须与 `tools/subscription.CANCEL_ACTION` 同值
@@ -30,7 +30,7 @@ def _shape_subscription(slots: Mapping) -> ShapeResult:
     filled = dict(slots)
     if filled.get("sub_id"):
         return ShapeResult(filled=filled)
-    query = str(filled.get("merchant") or "").strip()
+    query = normalize_query(filled.get("merchant"))
     if not query:
         return ShapeResult(filled=filled, missing=["merchant"])
     listed = subscription.list_subscriptions()

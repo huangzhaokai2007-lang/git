@@ -14,11 +14,10 @@ F16 的关键差异只有两处：① PRECHECK 时把 `schedule` 一起传给 T7
 from __future__ import annotations
 
 import datetime
-import re
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify
-from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
+from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
@@ -58,22 +57,13 @@ def _shape_scheduled(slots: Mapping) -> ShapeResult:
 
 
 #: 脱敏手机号（`139****1001`）；追问文案与卡面用的就是这个形态
-_MASKED_PHONE = re.compile(r"\d{3}\*{4}\d{4}")
-
-
 def _payee_query(raw: object) -> str:
-    """把「模型回显的卡面串」还原成**可解析的查询键**。
+    """把「模型回显的卡面串」还原成可解析的查询键（实现见 `_write_common.normalize_query`）。
 
-    **实机复现的两个坑**（用户报「回 1001 识别不出收款人」）：
-    ① 网页端没把追问上下文传给分类器 → 只看到光秃秃的 `1001` → 判成 smalltalk（已在 `app.py` 修）；
-    ② 即使上下文传到了，模型会把候选**原样回显**成 `李四（139****1001）` —— 那是 `payee_clarify`
-       的展示格式，而 `resolve_payee` 按**子串**匹配 name / phone / bank，整串一条都匹配不上。
-
-    这里优先抽出脱敏手机号（唯一且精确）再查；抽不到就原样用（`1001` 这种片段本来就能命中）。
+    实测坑：追问时界面列 `李四（139****1001）`，模型会**原样回显**这个串，而 `resolve_payee`
+    按子串匹配 name / phone / bank —— 整串匹配不上，于是「回 1001 仍解析不出收款人」。
     """
-    text = str(raw or "").strip()
-    found = _MASKED_PHONE.search(text)
-    return found.group(0) if found else text
+    return normalize_query(raw)
 
 
 def _shape_transfer(slots: Mapping) -> ShapeResult:

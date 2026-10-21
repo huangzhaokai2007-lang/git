@@ -37,7 +37,7 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, templates, write_flow
+from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, session_memory, templates, write_flow
 from agent.period import anchor_period, resolve_day, resolve_period
 from agent.read_routes import TOOL_ROUTES
 from data import dao
@@ -210,10 +210,14 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
     结算告知拼在回执**前面** —— 用户下次交互即可看到「预约到期执行成功 / 失败」（F16 验收第 3 条）。
     结算自身出错只记日志、**绝不影响本次请求**（见 `agent/scheduled_runner.py`）。
     **无到期项时不写任何表**，故这条钩子对正常请求是零副作用的。
+
+    **追问续接的上下文在这里统一给**（`agent/session_memory.py`）：四个入口
+    （web / api / im / cli）不必各自传 `history`，也就不会再出现「新入口忘了传」这类断链。
     """
-    notices = scheduled_runner.settle_due()
-    turn = _handle(text, history=history, clarify_round=clarify_round, session_id=session_id,
-                   card_reader=card_reader, intent_resolver=intent_resolver)
+    notices, sid = scheduled_runner.settle_due(), session_id or current_session_id()
+    turn = _handle(text, history=session_memory.recent(sid, history), clarify_round=clarify_round,
+                   session_id=sid, card_reader=card_reader, intent_resolver=intent_resolver)
+    session_memory.remember(sid, text, turn.reply)     # 先记（不含结算告知），再做前缀
     if notices:
         turn.reply = "\n".join([*notices, turn.reply])
     return turn
