@@ -102,7 +102,8 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 #: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
 _CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡",
                "gift_plan": "送礼计划确认卡"}
-_CARD_TARGET = {"subscription_cancel": "商户", "gift_plan": "联系人"}
+_CARD_TARGET = {"subscription_cancel": "商户", "gift_plan": "联系人",
+                "wealth_buy": "产品", "wealth_redeem": "产品"}
 
 
 def confirm_card(confirmation: Any) -> str | None:
