@@ -34,6 +34,7 @@ import card_binding_ui as cards_ui                               # noqa: E402
 import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
+import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
 
 load_dotenv(ROOT / ".env")
 
@@ -219,7 +220,7 @@ def _sidebar() -> str:
 
 def _chat_page() -> None:
     messages = st.session_state["messages"]
-    ui.transcript(messages)
+    ui.transcript(messages, payee_card=payee_ui.render_payee_card)
     latest = ui.latest_bill(messages)
     if latest.get("categories"):
         with st.expander("📊 这份账单的图表", expanded=True):
