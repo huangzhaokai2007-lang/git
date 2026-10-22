@@ -210,6 +210,13 @@ def _rows(user_id: str) -> list[dict]:
     return [dict(row) for row in conn.execute(_PAYEE_SQL, (user_id,))]
 
 
+def _split_tags(raw: object) -> list[str]:
+    """`tags` 列（逗号分隔）→ 去空白、去空项的列表；NULL/非法 → 空列表（不猜）。"""
+    if not raw or not isinstance(raw, str):
+        return []
+    return [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
+
+
 def list_payees() -> ToolResult:
     """T20 列出当前用户的全部收款人（L0 只读）。`data` = `items[]` / `total_count` / `whitelist_count`。
 
@@ -233,7 +240,15 @@ def list_payees() -> ToolResult:
     items = [{"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
               "bank": row["bank"], "is_whitelist": bool(row["is_whitelist"])} for row in rows]
     whitelisted = [item for item in items if item["is_whitelist"]]
+    #: v2（转账域串联）：标签 / 黑名单 / 专属额度需要给**编排层**的解析关卡用。
+    #: **只放 facts，不进 data** —— `data.items` 是冻结契约（5 个键），加字段会破契约；
+    #: 而 facts 本就是「给编排层的额外事实包」，加键是既有做法（facts 不受冻结约束）。
+    profiles = {row["id"]: {"tags": _split_tags(row["tags"]),
+                            "blacklist": bool(row["blacklist"]),
+                            "blacklist_reason": row["blacklist_reason"],
+                            "whitelist_quota": row["whitelist_quota"]} for row in rows}
     facts = {"total_count": len(items), "whitelist_count": len(whitelisted),
-             "non_whitelist_count": len(items) - len(whitelisted), "items": items}
+             "non_whitelist_count": len(items) - len(whitelisted), "items": items,
+             "profiles": profiles}
     data = {"items": items, "total_count": len(items), "whitelist_count": len(whitelisted)}
     return _ok(data, facts, f"您共有 {len(items)} 位收款人，其中白名单 {len(whitelisted)} 位。")
