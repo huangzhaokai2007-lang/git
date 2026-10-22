@@ -107,27 +107,29 @@
   slots: {payee_ids: [王五, 赵六], amount: "300.00"}
   # F15 验收第 2 条：**确认前不发起请求**。T9 没有 preview_*，PRECHECK 阶段一个工具都没调，
   # 故 tool_calls 必须为空 —— 若谎报 create_aa_request，就等于自称「已经发起过」。
-  expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false, requires_otp: false,
-           must_contain: ["AA 收款确认卡", "每人", "余数"], must_not_contain: ["已发起"]}
+  # v2：含非白名单（赵六）→ L2 要码（发起人验一次）。
+  expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false, requires_otp: true,
+           must_contain: ["AA 收款确认卡", "每人", "余数", "非白名单"], must_not_contain: ["已发起"]}
 - id: aa-002
   input: "向王五和赵六 AA 收款 300 元"
   slots: {payee_ids: [王五, 赵六], amount: "300.00"}
-  turns: ["确认"]
-  # 确认后才真发起。回执行回执的原文是「已发起 AA 收款 …，2 人**各** 150.00 元，余数 … 由你承担」。
-  # 确认卡在 EXECUTE 后即被消费清空，故不断言 requires_otp（同 trf-007 口径）。
-  expect: {intent: aa_collect, tool_calls: [create_aa_request], tier: L1, executed: true,
+  turns: ["确认", "123456"]
+  # v2：确认后先进验证码，验证码通过才真发起。回执原文「已发起 AA 收款 …，2 人**各** 150.00 元，余数 … 由你承担」。
+  expect: {intent: aa_collect, tool_calls: [create_aa_request], tier: L2, executed: true,
            must_contain: ["已发起", "各"], must_not_contain: ["验证码"]}
 - id: aa-003
   input: "三个人一起，向王五、赵六、张小美 AA 收款 100 元"
   slots: {payee_ids: [王五, 赵六, 张小美], amount: "100.00"}
   # 余数边界：10000 分 ÷ 3 = 3333 分/人，余 1 分（= 0.01 元）给发起人 —— 整数分均摊，禁浮点。
-  expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
+  # v2：含非白名单（赵六/张小美）→ L2。
+  expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false,
            must_contain: ["33.33", "0.01", "3 人"]}
 - id: aa-004
   input: "向王五、王五、赵六 AA 收款 60 元"
   slots: {payee_ids: [王五, 王五, 赵六], amount: "60.00"}
   # 去重：T9 对重复收款人直接 INVALID_ARGUMENT，故编排层先按 id 去重（F15 验收第 1 条）。
-  expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
+  # v2：含非白名单（赵六）→ L2。
+  expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false,
            must_contain: ["2 人"], must_not_contain: ["重复"]}
 - id: aa-005
   input: "向查无此人 AA 收款 50 元"

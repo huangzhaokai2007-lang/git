@@ -42,6 +42,18 @@ def aa_audits(path: Path) -> int:
     return len(raw(path, "SELECT 1 FROM audit_log WHERE tool = ?", ("create_aa_request",)))
 
 
+OTP = "123456"                        # demo 固定验证码（工具层 OTP_CODE）
+
+
+def execute_aa(session_id: str):
+    """**v2 口径**：AA 含非白名单成员 → L2 要码。确认 →（验证码）→ 执行，返回最终 Turn。"""
+    stage = orchestrator.handle("确认", session_id=session_id)
+    if stage.executed:
+        return stage
+    assert "验证码" in stage.reply, stage.reply
+    return orchestrator.handle(OTP, session_id=session_id)
+
+
 def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
     """假 LLM：分类按脚本出结果；润色把原文原样返回（数字一个不动）。"""
     queue = list(script)
@@ -80,7 +92,8 @@ def test_confirm_card_issues_no_request_before_confirmation(wired, monkeypatch) 
     """出确认卡这一步**T9 一次都没被调用**：审计里没有 `create_aa_request`。"""
     card = turn(monkeypatch, f"向{WANGWU}和{ZHAOLIU} AA 收款 300 元",
                 [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    assert card.executed is False and card.tier == "L1"
+    assert card.executed is False and card.tier == "L2"       # v2：含非白名单（赵六）→ 要码
+    assert "含非白名单收款人" in card.reply
     assert "CONFIRM_CARD" in card.states and "【AA 收款确认卡】" in card.reply
     assert "每人" in card.reply and "余数" in card.reply
     assert "已发起" not in card.reply                       # 还没发起，不许这么说
@@ -107,7 +120,7 @@ def test_no_remainder_when_amount_divides_evenly(wired, monkeypatch) -> None:
 
 def test_confirm_issues_the_request_and_writes_audit(wired, monkeypatch) -> None:
     turn(monkeypatch, "AA 收款", [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    done = orchestrator.handle("确认", session_id=SESSION)
+    done = execute_aa(SESSION)                            # v2：含非白名单 → 确认 + 验证码
     assert done.executed is True and "VERIFY_NUMBERS" in done.states
     assert "已发起" in done.reply and "150.00" in done.reply
     # 执行后审计里出现 `create_aa_request`：一条来自 T9 自身，一条来自编排层记的工具调用。
@@ -119,7 +132,7 @@ def test_confirm_issues_the_request_and_writes_audit(wired, monkeypatch) -> None
 def test_second_confirm_does_not_issue_twice(wired, monkeypatch) -> None:
     """确认卡用完即清 → 第二次「确认」走不到执行（F15 验收第 3 条）。"""
     turn(monkeypatch, "AA 收款", [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    assert orchestrator.handle("确认", session_id=SESSION).executed is True
+    assert execute_aa(SESSION).executed is True
     after = aa_audits(wired)
     assert after > 0
     # 已无在途确认 → 「确认」被当成新的一轮去分类（脚本给闲聊），因此不会再发起。
@@ -161,6 +174,20 @@ def test_wording_never_claims_money_received(wired, monkeypatch) -> None:
     """T9 只写审计、不动 `balance`/`available` → 措辞严禁「已收款」「到账」。"""
     forbidden = ("已收款", "已到账", "收款成功")
     card = turn(monkeypatch, "AA 收款", [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    done = orchestrator.handle("确认", session_id=SESSION)
+    done = execute_aa(SESSION)
     assert done.executed is True
     assert not [word for word in forbidden if word in card.reply + done.reply]
+
+
+# ---------------- ⑥ v2：成员全白名单 → 免码 ----------------
+
+def test_all_whitelist_members_need_no_otp(wired, monkeypatch) -> None:
+    """**v2 口径**：AA 成员**全是白名单** → L1、不弹验证码；这是「含非白名单要码」的互补半边。"""
+    from data import payee_dao
+    from tools import payee
+    pid = payee.add_payee("白名单同事", "13800007777").data["payee_id"]
+    payee_dao.update_payee(pid, "u_zhangsan_0001", is_whitelist=1, whitelist_quota=100_000)
+    card = turn(monkeypatch, "AA 收款", [aa_intent([WANGWU, "白名单同事"], "200.00")])
+    assert card.tier == "L1"
+    assert "验证码" not in card.reply and "非白名单" not in card.reply
+    assert aa_audits(wired) == 0
