@@ -42,7 +42,7 @@ from tools._wealth_risk import (             # noqa: F401 —— assess_risk/rec
     _ASSESSMENTS, _rank, _yield_text, RISK_DESC, RISK_LABELS, assess_risk, recommend_wealth,
     require_assessment,
 )
-from tools.wealth_holdings import list_all_products, list_holdings   # noqa: F401 —— T21/T22 re-export
+from tools.wealth_holdings import list_all_products, list_holdings   # noqa: F401 —— T26/T27 re-export
 from tools.schemas import ErrorCode, ToolResult
 from tools.subscription import (
     _CONFIRM_LOCK, check_confirm_ref, confirmed_result, finish_confirm_ref,
