@@ -50,6 +50,55 @@ def test_offline_verdict_asks_when_nothing_matches() -> None:
     assert cli.offline_verdict("今天天气怎么样") == ("out_of_scope", {})
 
 
+def test_anomaly_outranks_bill_analysis_for_the_f03_utterance() -> None:
+    """F03 的原话「上个月有什么异常支出」同时含"异常"与"支出" → 必须落 anomaly_check。
+
+    这条是实测出来的坑（问异常、答环比 -32%）：替身规则**按顺序先匹配的那条赢**，
+    故「异常」排在账单分析**之前**（与 F10「测评」排在「理财」之前同一个道理 —— 具体意图优先）。
+    """
+    assert cli.offline_verdict("上个月有什么异常支出") == ("anomaly_check", {"period": "上个月"})
+
+
+@pytest.mark.parametrize("text", [
+    "帮我总结一下上个月的账单",
+    "上个月账单总结",
+    "出一份账单报告",
+    "汇总一下本月收支",
+])
+def test_bill_report_is_triggerable_by_utterance(text: str) -> None:
+    """账单**总结**（T5）得能被话说出来 —— 它不是"只能靠替身硬塞意图"的死功能。
+
+    补这份的原因：规则表里原本**只有账单分析、没有账单总结**，说「总结一下上个月的账单」
+    会被共享的「账单」关键词截走 → 答成环比，用户要的报告根本没生成。
+    """
+    assert cli.offline_verdict(text)[0] == "bill_report"
+
+
+@pytest.mark.parametrize("text", [
+    "上个月花了多少",
+    "账单怎么样",
+    "看看消费",
+    "给我出一份账单",       # 既有口径：不带"总结/汇总/报告" → 仍是分析，不抢
+])
+def test_bill_report_does_not_steal_bill_analysis(text: str) -> None:
+    """反向锁：加了总结的触发词，不许把**分析**的说法也吞掉（顺序反了就会）。"""
+    assert cli.offline_verdict(text)[0] == "bill_analysis"
+
+
+def test_bill_report_carries_the_period_slot() -> None:
+    """总结同样要账期 —— 否则 tools 层拿不到 period，只能走追问。"""
+    assert cli.offline_verdict("总结一下上个月的账单")[1] == {"period": "上个月"}
+
+
+def test_period_word_matching_prefers_the_longest_word() -> None:
+    """相对时间词按长度降序取：「上上个月」不许被子串「上个月」截走。
+
+    截走就是"问两个月前、答上个月" —— 与卡 17b 记下的"把「上个月」答成「本月 0.00 元」"
+    同族：都是取词不严谨导致的静默错答。
+    """
+    assert cli.offline_verdict("上上个月花了多少") == ("bill_analysis", {"period": "上上个月"})
+
+
 def test_every_offline_rule_is_reachable() -> None:
     """自证规则表不是摆设：每条规则至少能被自己的一个关键词命中（防表里躺着手写错的死规则）。"""
     for keywords, intent, _slots in cli.OFFLINE_RULES:

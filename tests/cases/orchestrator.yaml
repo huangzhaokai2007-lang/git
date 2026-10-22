@@ -1,5 +1,9 @@
 # 用例驱动回归集（规格 §8 格式；card-11）
-# 分组：bill 5 / trf 11 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 49 条
+# 分组：bill 9 / trf 11 / sub 5 / card 5 / wlt 4 / sec 6 / aa 5 / gft 5 / pay 3 = 53 条
+#: **取消预约（scheduled_cancel）不在本文件覆盖**：yaml 的用例**共享库状态**（后一条能看到前一条落的
+#: 预约），写成"先预约再取消"就会变成顺序依赖的脆用例。该链路由 `tests/test_scheduled_transfer_flow.py`
+#: 的 3 条自成闭环用例覆盖（取消不动钱 / 无 pending 时报错 / 取消后不再结算）。
+# bill-006..008（F23/F02/F14 集成收口）：余额查询路由、带过滤流水、按渠道分组账单分析
 #
 # 与 §8 示例相比的扩展（card-11 报备，见交付说明「待拍板」）：
 #   slots           假 LLM 给出的槽位（用例驱动 orchestrator/guard 的行为，不测 LLM 准确率）
@@ -9,7 +13,7 @@
 #   expect 里除 §8 的 intent/tool_calls/tier/must_contain/must_not_contain 外，
 #   另支持 executed / requires_otp / to_human / error_code / detail_contains（均可选，声明即断言）
 
-# ---------------- 账单 5 ----------------
+# ---------------- 账单 9 ----------------
 - id: bill-001
   input: "帮我看看上个月花了多少"
   slots: {period: 上个月}
@@ -30,6 +34,25 @@
   input: "查一下这个月的流水"
   slots: {date_from: "2026-09-01", date_to: "2026-09-12"}
   expect: {intent: txn_query, tool_calls: [list_txn], tier: L0, executed: false, must_contain: ["笔交易"]}
+- id: bill-006
+  input: "查一下我的储蓄卡余额"
+  slots: {account_type: savings}
+  expect: {intent: balance_query, tool_calls: [get_balance], tier: L0, executed: false, must_contain: ["余额"]}
+- id: bill-007
+  input: "看看这个月餐饮类的支出流水"
+  slots: {date_from: "2026-09-01", date_to: "2026-09-12", category: 餐饮}
+  expect: {intent: txn_query, tool_calls: [list_txn], tier: L0, executed: false, must_contain: ["笔交易"]}
+- id: bill-008
+  input: "按支付渠道分析这个月的消费"
+  slots: {period: 本月, group_by: channel}
+  expect: {intent: bill_analysis, tool_calls: [analyze_spending], tier: L0, executed: false, must_contain: ["支出"]}
+#: bill-009（F03 收口）：异常回执不许只剩一个孤零零的条数 —— 必须带上**命中交易的时刻**与依据。
+#: `2026-08` = 「上个月」由 `agent/period.py` 从锚点 2026-09 解析而来（也是明细行 ts 的前缀）。
+- id: bill-009
+  input: "上个月有没有异常交易"
+  slots: {period: 上个月}
+  expect: {intent: anomaly_check, tool_calls: [detect_anomalies], tier: L0, executed: false,
+           must_contain: ["异常交易", "2026-08"]}
 
 # ---------------- 转账 7 ----------------
 - id: trf-001
@@ -183,9 +206,11 @@
 - id: pay-002
   input: "看看我的收款人"
   slots: {}
-  # 分组是重点：两组都要出现（转账验证方式不同）。
+  # 排版是重点：精简表格（一行一位）+「白名单」列；表下一行说明两组的转账验证差别。
+  # ⚠️ 白名单那句断言的是「基础档位更低」，**不是**「只需会话内确认」—— 后者是过度承诺
+  # （§5 的 night/velocity/new_payee 仍会升档；实测 23:40 连种子的白名单王五也要 OTP）。
   expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
-           must_contain: ["【白名单】", "【非白名单】"]}
+           must_contain: ["| 收款人 | 手机号 | 银行 | 白名单 |", "基础档位更低"]}
 - id: pay-003
   input: "我有多少收款人"
   slots: {}

@@ -99,3 +99,31 @@ def test_spec_section3_intent_list_matches_the_classifier() -> None:
         f"  只在规格里：{only_spec or '无'}\n"
         f"  只在代码里：{only_code or '无'}\n"
         f"  仅顺序不同：{not only_spec and not only_code}")
+
+
+#: 代码注释里引用的工具编号：`T26 `list_holdings`` / `T26 list_holdings`
+_CODE_TOOL_REF = re.compile(r"\bT(\d+)\s+`?([a-z_]{4,})`?")
+
+
+def test_tool_numbers_quoted_in_code_match_the_spec_table() -> None:
+    """代码注释里引用的 `Tn <tool_name>` 必须与 §2 表该行的函数名一致。
+
+    **为什么加这条**：PR #39 把两个新工具写成 T21/T22，而 T21–T25 已被 F16 定时转账与
+    F15 白名单占用。原有守卫只看「标题数 == 行数 == 序号连续」—— 撞车**一条都抓不到**。
+    本用例把「注释里的编号」与「表里的编号→函数名」对齐，撞车或写错号都会变红。
+    """
+    body = _section_two(_spec_text())
+    table = {int(num): name for num, name in
+             re.findall(r"^\|\s*T(\d+)\s*\|\s*`([a-z_]+)\(", body, re.MULTILINE)}
+    assert table, "§2 表里一个工具名都没解析出来"
+
+    known = set(table.values())                       # 只在「确实是工具名」时才比对，躲开 stays / preview_trade 这类词
+    root = SPEC_PATH.parents[1]
+    bad = []
+    for folder in ("tools", "agent"):
+        for path in sorted((root / folder).glob("*.py")):
+            for num, name in _CODE_TOOL_REF.findall(path.read_text(encoding="utf-8")):
+                n = int(num)
+                if n in table and table[n] != name and name in known:
+                    bad.append(f"{folder}/{path.name}: 注释写 T{n} {name}，但 §2 表里 T{n} 是 {table[n]}")
+    assert not bad, "工具编号与 §2 表不一致：\n" + "\n".join(bad)

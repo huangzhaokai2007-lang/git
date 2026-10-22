@@ -31,8 +31,10 @@ from tests.conftest import assert_covered
 OTP = "123456"                                  # 规格 §5：demo 固定验证码
 MMF = "prod_r1_mmf"                             # 稳盈货币基金：R1、活期、起购 1 元、有持仓 200 元
 MIXED = "prod_r3_mixed365"                      # 混合优选 365 天：R3、365 天、起购 10000 元
-R1 = {"age": 22, "experience": 0, "income": 0, "drawdown": 0, "horizon": 0}     # → 5 分 → R1
-R3 = {"age": 35, "experience": 2, "income": 2, "drawdown": 2, "horizon": 2}     # → 14 分 → R3
+R1 = {"age": 22, "experience": 0, "income": 0, "income_level": 0, "asset_ratio": 0,
+      "drawdown": 0, "horizon": 0, "goal": 0, "reaction": 0}                    # → 9 分 → R1
+R3 = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
+      "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2}                    # → 26 分 → R3
 
 
 @pytest.fixture()
