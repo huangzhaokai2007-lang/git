@@ -52,10 +52,20 @@ from agent._write_gift import (
     _shape_gift,
 )
 from agent._write_payee import (
+    _card_blacklist,
+    _card_unblacklist,
     _card_whitelist,
+    _execute_blacklist,
+    _execute_unblacklist,
     _execute_whitelist,
+    _plain_blacklist,
+    _plain_unblacklist,
     _plain_whitelist,
+    _prepare_blacklist,
+    _prepare_unblacklist,
     _prepare_whitelist,
+    _shape_blacklist,
+    _shape_unblacklist,
     _shape_whitelist,
 )
 from agent._write_subscription import (
@@ -161,6 +171,26 @@ _SPECS["payee_whitelist"] = WriteSpec(
     target_key="payee_id",
     what="加入白名单", shape=_shape_whitelist, prepare=_prepare_whitelist,
     card=_card_whitelist, plain=_plain_whitelist, execute=_execute_whitelist)
+
+#: F22c（T28）：把收款人加入黑名单 —— **L1、无 OTP**。加黑是「阻断」不是「授权」，
+#: 风险低于加白；人类需求只要求「解除黑名单」要验证码（后续卡做）。
+_SPECS["payee_blacklist"] = WriteSpec(
+    intent="payee_blacklist", intent_cn="加入黑名单", title="黑名单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_payees",), execute_tool="set_payee_blacklist",
+    target_key="payee_id",
+    what="加入黑名单", shape=_shape_blacklist, prepare=_prepare_blacklist,
+    card=_card_blacklist, plain=_plain_blacklist, execute=_execute_blacklist)
+
+#: F22d（T29）：解除黑名单 —— **L2 + OTP**（人类需求原文「解除黑名单必须通过验证码确认」）。
+#: 与加黑（L1）不对称是刻意的：加黑是阻断、解除是恢复，恢复需要更严的验证。
+_SPECS["payee_unblacklist"] = WriteSpec(
+    intent="payee_unblacklist", intent_cn="解除黑名单", title="解除黑名单确认卡",
+    credential_kind="confirm_ref", otp_in_tool=False,
+    missing=("payee",), tools=("list_payees",), execute_tool="unset_payee_blacklist",
+    target_key="payee_id",
+    what="解除黑名单", shape=_shape_unblacklist, prepare=_prepare_unblacklist,
+    card=_card_unblacklist, plain=_plain_unblacklist, execute=_execute_unblacklist)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

@@ -33,6 +33,7 @@ import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
 import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
+import payee_card_ui                                             # noqa: E402  （S6：收款人卡）
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
 
@@ -73,6 +74,7 @@ def _init_state() -> None:
     state.setdefault("balance", [])
     state.setdefault("pending_id", None)
     state.setdefault("clarify_round", 0)
+    state.setdefault("bound-payee-query", False)
 
 @st.cache_resource
 def _agent_executor() -> ThreadPoolExecutor:
@@ -124,6 +126,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
     state["bound-card-query"] = turn.intent == "card_query" and turn.error_code is None
+    state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [item for item in state["balance"] if item["text"] != turn.reply][-1:]
         state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})
@@ -235,6 +238,8 @@ def _chat_page() -> None:
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
+    if st.session_state.get("bound-payee-query"):                 # S6：收款人卡 + 行内按钮
+        payee_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()

@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from agent import confirm_card, period
+from agent import confirm_card, payee_resolve, period
 from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
 from tools import cross_scene
 from tools.schemas import ToolResult
@@ -70,6 +70,10 @@ def _prepare_gift(filled: dict) -> Prepared:
     T16 一调就锁款并生成 `plan_id`/`lock_id` —— 「确认与 OTP 前不锁定资金、不生成模拟预订」
     由此在编排层被结构性保证（而不是靠自觉）。
     """
+    #: v2：送礼黑名单（与转账同一套口径）—— 收货人在黑名单 → 直接拒，不出确认卡。
+    _, code, rfacts = payee_resolve.resolve_or_explain(str(filled.get("contact") or ""))
+    if code:
+        return Prepared(ok=False, error_code=code, message=str(rfacts.get("message") or ""))
     preview = cross_scene.preview_gift(str(filled["contact"]), str(filled["date"]),
                                        int(filled["amount_cents"]))
     if not preview.ok:

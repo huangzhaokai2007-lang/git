@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify
+from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
 from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
@@ -69,24 +69,27 @@ def _payee_query(raw: object) -> str:
 def _shape_transfer(slots: Mapping) -> ShapeResult:
     """SLOT_FILL 对齐工具层签名：`payee`（名字/手机号）→ `payee_id`；`amount`（元）→ 整数分。
 
-    没找到或同名多个 → 记缺槽（**绝不擅自选一个**）；金额认不出 → 记缺槽。
-
-    缺收款人时把 `resolve_payee` 的**事实包**交给 `payee_clarify.ask_for` 生成追问（F17）：
-    候选的姓名与脱敏手机号由它透出给用户 —— 编排层不自己拼手机号、不自己数候选（铁律 2）。
+    收款人解析走 v2 的**统一关卡**（`agent/payee_resolve.py`）—— 标签、同音、黑名单一套口径，
+    转账与定时转账共用这里（`_shape_scheduled` 复用本函数）。追问仍由 `payee_clarify.ask_for`
+    生成，且要**先收齐所有缺槽再一次性问**（「缺人 + 缺金额」两件事不互相盖掉）。
     """
-    filled, missing = dict(slots), []
-    payee_facts: Mapping = {}
+    filled, missing, payee_facts = dict(slots), [], {}
     if not filled.get("payee_id"):
         query = _payee_query(filled.get("payee"))
-        found = transfer.resolve_payee(query) if query else None
-        candidates = (found.facts.get("candidates") or []) if found is not None and found.ok else []
-        if len(candidates) == 1:
-            filled["payee_id"] = candidates[0]["id"]
-            filled["payee_name"] = candidates[0]["name"]
-            filled["masked_phone"] = candidates[0]["phone"]
+        if query:                                        # 有查询词才走关卡；空 → 留在 missing 用通用追问
+            person, code, facts = payee_resolve.resolve_or_explain(query)
+            if code:                                     # 黑名单：直接拒，不出确认卡
+                return ShapeResult(filled=filled, error_code=code,
+                                   message=str(facts.get("message") or ""))
+            if person is None:
+                missing.append("payee")
+                payee_facts = facts
+            else:
+                filled["payee_id"] = person["payee_id"]
+                filled["payee_name"] = person["name"]
+                filled["masked_phone"] = person["masked_phone"]
         else:
             missing.append("payee")
-            payee_facts = found.facts if found is not None and found.ok else {}
     if filled.get("amount_cents") is None:
         cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
         if cents is None:
@@ -110,7 +113,13 @@ def _prepare_transfer(filled: dict) -> Prepared:
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    return Prepared(ok=True, facts={**preview.facts, "payee_phone": masked},
+    #: v2 专属额度层：黑名单已在 `_shape_transfer` 拦下，这里只覆盖白名单额度——
+    #: 额度内维持既有档位（L1 免码），超额度/未设额度至少升到 L2 要码。
+    person = payee_resolve.profile_of(filled["payee_id"])
+    tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
+                                              str(preview.facts.get("tier") or "L2"))
+    return Prepared(ok=True, facts={**preview.facts, "tier": tier, "payee_phone": masked,
+                                    "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
 
 
@@ -118,13 +127,16 @@ def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
                    requires_otp: bool) -> confirm_card.CardInput:
     """转账确认卡：金额、档位、风险因子**全部来自 facts**（卡面行与 card-10 逐字一致）。"""
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    note = confirm_card.risk_note(list(facts.get("factors") or []))
+    if facts.get("quota_note"):
+        note = "；".join(x for x in (note, str(facts["quota_note"])) if x)
     return confirm_card.CardInput(
         title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
         rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
               ("金额", f"{facts['amount_yuan']} 元"),
               ("预计到账", confirm_card.expected_arrival(tier))],
         tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
+        risk_note=note)
 
 
 def _plain_transfer(filled: dict, facts: Mapping, tier: str) -> str:
@@ -153,9 +165,13 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    #: v2 专属额度层（与即时转账同一份口径）：超额度/未设额度 → 至少 L2 要码。
+    person = payee_resolve.profile_of(filled["payee_id"])
+    tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
+                                              str(preview.facts.get("tier") or "L2"))
     return Prepared(ok=True,
-                    facts={**preview.facts, "payee_phone": masked,
-                           "schedule": str(filled["schedule"])},
+                    facts={**preview.facts, "tier": tier, "payee_phone": masked,
+                           "schedule": str(filled["schedule"]), "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
 
 

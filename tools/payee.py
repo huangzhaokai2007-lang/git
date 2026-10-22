@@ -210,6 +210,13 @@ def _rows(user_id: str) -> list[dict]:
     return [dict(row) for row in conn.execute(_PAYEE_SQL, (user_id,))]
 
 
+def _split_tags(raw: object) -> list[str]:
+    """`tags` 列（逗号分隔）→ 去空白、去空项的列表；NULL/非法 → 空列表（不猜）。"""
+    if not raw or not isinstance(raw, str):
+        return []
+    return [t.strip() for t in raw.replace("，", ",").split(",") if t.strip()]
+
+
 def list_payees() -> ToolResult:
     """T20 列出当前用户的全部收款人（L0 只读）。`data` = `items[]` / `total_count` / `whitelist_count`。
 
@@ -233,7 +240,110 @@ def list_payees() -> ToolResult:
     items = [{"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
               "bank": row["bank"], "is_whitelist": bool(row["is_whitelist"])} for row in rows]
     whitelisted = [item for item in items if item["is_whitelist"]]
+    #: v2（转账域串联）：标签 / 黑名单 / 专属额度需要给**编排层**的解析关卡用。
+    #: **只放 facts，不进 data** —— `data.items` 是冻结契约（5 个键），加字段会破契约；
+    #: 而 facts 本就是「给编排层的额外事实包」，加键是既有做法（facts 不受冻结约束）。
+    profiles = {row["id"]: {"tags": _split_tags(row["tags"]),
+                            "blacklist": bool(row["blacklist"]),
+                            "blacklist_reason": row["blacklist_reason"],
+                            "whitelist_quota": row["whitelist_quota"]} for row in rows}
     facts = {"total_count": len(items), "whitelist_count": len(whitelisted),
-             "non_whitelist_count": len(items) - len(whitelisted), "items": items}
+             "non_whitelist_count": len(items) - len(whitelisted), "items": items,
+             "profiles": profiles}
     data = {"items": items, "total_count": len(items), "whitelist_count": len(whitelisted)}
     return _ok(data, facts, f"您共有 {len(items)} 位收款人，其中白名单 {len(whitelisted)} 位。")
+
+
+# ---------------- T28 set_payee_blacklist（SPEC-CHANGE 新增 · L1） ----------------
+#
+# 档位口径：加黑是「阻断」（不许转账/送礼），不是「授权」，风险低于加白；且人类需求只要求
+# 「解除黑名单」要验证码、没要求「加黑」要验证码 → 故 L1、不发 OTP（与 payee_add 同档）。
+
+def set_payee_blacklist(payee_id: str, reason: str = "") -> ToolResult:
+    """T28 加入黑名单（L1：只改状态、不动钱）。`data` = `{payee_id, name, masked_phone, blacklist}`。
+
+    归属 fail-closed；与白名单**互斥**（置 blacklist=1 时清 is_whitelist）；
+    已在黑名单 → 幂等返回（不重复写审计）。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id,
+                      tool="set_payee_blacklist", intent="payee_blacklist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    conn = dao.connection()
+    row = conn.execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    row = dict(row)
+    data = {"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
+            "blacklist": True}
+    if row["blacklist"]:
+        return _ok(data, {"name": row["name"], "masked_phone": row["phone"]},
+                   f"{row['name']}（{row['phone']}）已经在黑名单里了")
+    from data.db import transaction                    # 局部 import：与 T25 同口径
+    with transaction(conn):
+        conn.execute("UPDATE payee SET blacklist = 1, blacklist_reason = ?, is_whitelist = 0"
+                     " WHERE id = ? AND user_id = ?", ((reason or "").strip(), payee_id, user_id))
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_blacklist", tool="set_payee_blacklist",
+                         params_json={"payee_id": payee_id, "reason": (reason or "").strip()},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    return _ok(data, {"name": row["name"], "masked_phone": row["phone"]},
+               f"{row['name']}（{row['phone']}）已加入黑名单")
+
+
+# ---------------- T29 unset_payee_blacklist（SPEC-CHANGE 新增 · L2） ----------------
+#
+# 档位口径：人类需求原文「解除黑名单必须通过验证码确认」→ **L2 + OTP**（confirm_ref 族，
+# 与 T25 同构）。加黑是 L1（阻断）、解除是 L2（恢复特权），不对称是刻意的。
+
+#: 解除黑名单的档位与凭证 action（与 T25 同族口径）
+UNBLACKLIST_TIER = "L2"
+UNBLACKLIST_ACTION = "unset_payee_blacklist"
+
+
+def unset_payee_blacklist(payee_id: str, confirm_ref: str) -> ToolResult:
+    """T29 解除黑名单（L2：凭证必须来自确认卡 + OTP）。`data` = `{payee_id, name, masked_phone, blacklist}`。
+
+    不在黑名单 → `INVALID_STATE`（幂等不是静默成功）；凭证绑定 `payee_id:unblacklist`；
+    同一 ref 重复调用幂等返回。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id,
+                      tool=UNBLACKLIST_ACTION, intent="payee_unblacklist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    conn = dao.connection()
+    row = conn.execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    row = dict(row)
+    if not row["blacklist"]:
+        return _fail(ErrorCode.INVALID_STATE, "该收款人不在黑名单里")
+    target = f"{payee_id}:unblacklist"
+    with _CONFIRM_LOCK:
+        try:
+            rec = check_confirm_ref(confirm_ref, UNBLACKLIST_ACTION, target)
+        except ToolError as exc:
+            return _fail(exc.code, exc.message)
+        if rec["snapshot"] is not None:                    # 幂等：同一 ref 重复调用
+            return _ok({"payee_id": row["id"], "name": row["name"],
+                        "masked_phone": row["phone"], "blacklist": False},
+                       {"name": row["name"], "masked_phone": row["phone"]},
+                       "已解除黑名单（重复提交，未重复写入）")
+        from data.db import transaction                    # 局部 import：与 T25/T28 同口径
+        with transaction(conn):
+            conn.execute("UPDATE payee SET blacklist = 0, blacklist_reason = NULL"
+                         " WHERE id = ? AND user_id = ?", (payee_id, user_id))
+            dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                             intent="payee_unblacklist", tool=UNBLACKLIST_ACTION,
+                             params_json={"payee_id": payee_id},
+                             risk_level=UNBLACKLIST_TIER, permission_tier=UNBLACKLIST_TIER,
+                             result="success", error_code=None)
+        rec["snapshot"] = {"blacklist": False}
+    return _ok({"payee_id": row["id"], "name": row["name"],
+                "masked_phone": row["phone"], "blacklist": False},
+               {"name": row["name"], "masked_phone": row["phone"]},
+               f"{row['name']}（{row['phone']}）已解除黑名单")

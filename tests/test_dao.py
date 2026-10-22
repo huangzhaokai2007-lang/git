@@ -132,7 +132,7 @@ def test_list_and_get_products(seeded: Path) -> None:
 def test_insert_txn_persists_and_is_visible_to_list_txn(seeded: Path) -> None:
     row = dao.insert_txn(ACCOUNT, STAMP, -12_345, "out", 100, counterparty="悦食快餐", category="餐饮",
                          channel="二维码", memo="午饭", id="txn_test_0001")
-    assert row == raw(seeded, "SELECT * FROM txn WHERE id = 'txn_test_0001'")[0] and len(row) == 10
+    assert row == raw(seeded, "SELECT * FROM txn WHERE id = 'txn_test_0001'")[0] and len(row) == 11
     assert (row["amount"], row["direction"], row["balance_after"], row["memo"]) == (-12_345, "out", 100, "午饭")
     assert dao.list_txn("2026-08-31", "2026-08-31", limit=500)["items"][0]["id"] == "txn_test_0001"
     assert dao.insert_txn(ACCOUNT, STAMP, 500, "in", 600)["direction"] == "in"
