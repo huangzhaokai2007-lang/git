@@ -291,3 +291,59 @@ def set_payee_blacklist(payee_id: str, reason: str = "") -> ToolResult:
                          risk_level="L1", permission_tier="L1", result="success", error_code=None)
     return _ok(data, {"name": row["name"], "masked_phone": row["phone"]},
                f"{row['name']}（{row['phone']}）已加入黑名单")
+
+
+# ---------------- T29 unset_payee_blacklist（SPEC-CHANGE 新增 · L2） ----------------
+#
+# 档位口径：人类需求原文「解除黑名单必须通过验证码确认」→ **L2 + OTP**（confirm_ref 族，
+# 与 T25 同构）。加黑是 L1（阻断）、解除是 L2（恢复特权），不对称是刻意的。
+
+#: 解除黑名单的档位与凭证 action（与 T25 同族口径）
+UNBLACKLIST_TIER = "L2"
+UNBLACKLIST_ACTION = "unset_payee_blacklist"
+
+
+def unset_payee_blacklist(payee_id: str, confirm_ref: str) -> ToolResult:
+    """T29 解除黑名单（L2：凭证必须来自确认卡 + OTP）。`data` = `{payee_id, name, masked_phone, blacklist}`。
+
+    不在黑名单 → `INVALID_STATE`（幂等不是静默成功）；凭证绑定 `payee_id:unblacklist`；
+    同一 ref 重复调用幂等返回。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id,
+                      tool=UNBLACKLIST_ACTION, intent="payee_unblacklist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    conn = dao.connection()
+    row = conn.execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    row = dict(row)
+    if not row["blacklist"]:
+        return _fail(ErrorCode.INVALID_STATE, "该收款人不在黑名单里")
+    target = f"{payee_id}:unblacklist"
+    with _CONFIRM_LOCK:
+        try:
+            rec = check_confirm_ref(confirm_ref, UNBLACKLIST_ACTION, target)
+        except ToolError as exc:
+            return _fail(exc.code, exc.message)
+        if rec["snapshot"] is not None:                    # 幂等：同一 ref 重复调用
+            return _ok({"payee_id": row["id"], "name": row["name"],
+                        "masked_phone": row["phone"], "blacklist": False},
+                       {"name": row["name"], "masked_phone": row["phone"]},
+                       "已解除黑名单（重复提交，未重复写入）")
+        from data.db import transaction                    # 局部 import：与 T25/T28 同口径
+        with transaction(conn):
+            conn.execute("UPDATE payee SET blacklist = 0, blacklist_reason = NULL"
+                         " WHERE id = ? AND user_id = ?", (payee_id, user_id))
+            dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                             intent="payee_unblacklist", tool=UNBLACKLIST_ACTION,
+                             params_json={"payee_id": payee_id},
+                             risk_level=UNBLACKLIST_TIER, permission_tier=UNBLACKLIST_TIER,
+                             result="success", error_code=None)
+        rec["snapshot"] = {"blacklist": False}
+    return _ok({"payee_id": row["id"], "name": row["name"],
+                "masked_phone": row["phone"], "blacklist": False},
+               {"name": row["name"], "masked_phone": row["phone"]},
+               f"{row['name']}（{row['phone']}）已解除黑名单")

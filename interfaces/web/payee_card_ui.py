@@ -190,3 +190,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                 _dispatch(executor, session_id, f"（按钮）把{person['name']}加入黑名单",
                           f"把{person['name']}加入黑名单")
                 st.rerun()
+        else:
+            if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}",
+                                    help=f"把 {person['name']} 移出黑名单（需验证码）"):
+                _dispatch(executor, session_id, f"（按钮）把{person['name']}移出黑名单",
+                          f"把{person['name']}移出黑名单")
+                st.rerun()

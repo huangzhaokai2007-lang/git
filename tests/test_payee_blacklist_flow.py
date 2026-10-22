@@ -94,3 +94,62 @@ def test_transfer_to_blacklisted_is_rejected(wired, monkeypatch) -> None:
     got = payee_risk.assess(person, 10_000, month=MONTH)
     assert got.decision == payee_risk.DECISION_REJECT
     assert "黑名单" in got.message and "诈骗" in got.message
+
+
+# ---------------- 解除黑名单（T29 · L2 + OTP） ----------------
+
+def test_unblacklist_requires_a_confirm_ref(wired) -> None:
+    """伪造凭证 → 拒，且不改库。"""
+    pid = raw(wired, "SELECT id FROM payee WHERE name = ?", (ZHANG,))[0]["id"]
+    payee.set_payee_blacklist(pid, "诈骗")
+    bad = payee.unset_payee_blacklist(pid, "cf_forged")
+    assert bad.ok is False and str(bad.error_code).endswith("FORBIDDEN")
+    assert _flag(wired, ZHANG) == 1                      # 仍在黑名单
+
+
+def test_unblacklist_clears_the_flag_with_a_valid_ref(wired) -> None:
+    pid = raw(wired, "SELECT id FROM payee WHERE name = ?", (ZHANG,))[0]["id"]
+    payee.set_payee_blacklist(pid, "诈骗")
+    ref = payee.issue_confirm_ref(payee.UNBLACKLIST_ACTION, f"{pid}:unblacklist")
+    result = payee.unset_payee_blacklist(pid, ref)
+    assert result.ok is True and result.data["blacklist"] is False
+    assert _flag(wired, ZHANG) == 0
+
+
+def test_unblacklist_of_a_non_blacklisted_payee_is_invalid(wired) -> None:
+    pid = raw(wired, "SELECT id FROM payee WHERE name = ?", (ZHANG,))[0]["id"]
+    ref = payee.issue_confirm_ref(payee.UNBLACKLIST_ACTION, f"{pid}:unblacklist")
+    bad = payee.unset_payee_blacklist(pid, ref)
+    assert bad.ok is False and str(bad.error_code).endswith("INVALID_STATE")
+
+
+def _fake_unbl(monkeypatch) -> None:
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": "payee_unblacklist", "confidence": 0.95,
+                                          "slots": {"payee": ZHANG}, "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+
+
+def test_orchestration_unblacklists_with_otp(wired, monkeypatch) -> None:
+    """**L2 + OTP**：确认 → 验证码 → 才执行。解除黑名单必须验证码（人类需求原文）。"""
+    pid = raw(wired, "SELECT id FROM payee WHERE name = ?", (ZHANG,))[0]["id"]
+    payee.set_payee_blacklist(pid, "诈骗")
+    _fake_unbl(monkeypatch)
+    card = orchestrator.handle(f"把{ZHANG}移出黑名单", session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states and card.tier == "L2"
+    assert _flag(wired, ZHANG) == 1                      # 出卡而已，没写库
+
+    otp_stage = orchestrator.handle("确认", session_id=SESSION)
+    assert "CLASSIFY" not in otp_stage.states            # 钉根因：在途确认被消费
+    assert "验证码" in otp_stage.reply and otp_stage.executed is False
+    assert _flag(wired, ZHANG) == 1                      # 验证码没给，仍没写库
+
+    wrong = orchestrator.handle("000000", session_id=SESSION)
+    assert wrong.executed is False and _flag(wired, ZHANG) == 1
+
+    ok = orchestrator.handle("123456", session_id=SESSION)
+    assert ok.executed is True and ok.tool_calls == ["unset_payee_blacklist"]
+    assert _flag(wired, ZHANG) == 0                      # 解除生效

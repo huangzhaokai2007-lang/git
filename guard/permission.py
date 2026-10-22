@@ -45,7 +45,8 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "payee_add": "L1",                # §5 SPEC-CHANGE（F22 补记）：加收款人只加联系人、不动钱
     "scheduled_cancel": "L1",         # F16 Q4 SPEC-CHANGE：取消预约是「撤回尚未发生的动作」、且不动钱
     "payee_whitelist": "L2",          # F22b SPEC-CHANGE：白名单 = 转账免 OTP 的特权，授予它必须验身份
-    "payee_blacklist": "L1",          # F22c SPEC-CHANGE：加黑是「阻断」不是「授权」，无 OTP（解除黑名单另算）
+    "payee_blacklist": "L1",          # F22c SPEC-CHANGE：加黑是「阻断」不是「授权」，无 OTP
+    "payee_unblacklist": "L2",      # F22d SPEC-CHANGE：解除黑名单必须验证码确认（人类需求原文）
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）

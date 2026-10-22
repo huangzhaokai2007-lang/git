@@ -128,3 +128,51 @@ def _execute_blacklist(confirmation: confirm_card.Confirmation, otp: str | None)
     """EXECUTE：调 **T28** 落库（`blacklist=1` 且清 `is_whitelist`，互斥在工具层强制）。"""
     del otp
     return payee.set_payee_blacklist(str(confirmation.target_id), "")
+
+
+# ---------------- 解除黑名单（T29 · L2 + OTP） ----------------
+
+#: 与加白/加黑同一套解析（T6 按姓名/手机号子串匹配；**黑名单的人同样能被解析出来**，
+#: 这正是解除黑名单需要的 —— 转账那条路径里黑名单是 FORBIDDEN，这里不是）。
+_shape_unblacklist = _shape_whitelist
+
+
+def _prepare_unblacklist(filled: dict) -> Prepared:
+    """只读 T20 取那一笔（**不写库**）；**不在黑名单 → `INVALID_STATE`**；签发 `confirm_ref`。"""
+    listed = payee.list_payees()
+    if not listed.ok:
+        return Prepared(ok=False, error_code=_code_of(listed), message=listed.message)
+    row = next((i for i in (listed.facts.get("items") or [])
+                if i.get("payee_id") == filled.get("payee_id")), None)
+    if row is None:
+        return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该收款人")
+    profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
+    if not profile.get("blacklist"):
+        return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人不在黑名单里")
+    ref = payee.issue_confirm_ref(payee.UNBLACKLIST_ACTION, f"{row['payee_id']}:unblacklist")
+    return Prepared(ok=True, facts={**row, "tier": payee.UNBLACKLIST_TIER}, credential=ref)
+
+
+def _card_unblacklist(intent: str, filled: dict, facts: Mapping, tier: str,
+                      requires_otp: bool) -> confirm_card.CardInput:
+    """解除黑名单确认卡：谁 + 变更 + **影响**（解除后按普通收款人处理）。"""
+    return confirm_card.CardInput(
+        title="解除黑名单确认卡", intent_cn="解除黑名单",
+        rows=[("收款人", str(facts["name"])),
+              ("手机号", str(facts["masked_phone"])),
+              ("变更", "解除黑名单"),
+              ("影响", "解除后恢复为普通收款人，转账/送礼按普通风控处理")],
+        tier=tier, requires_otp=requires_otp,
+        risk_note=confirm_card.risk_note([], "解除黑名单"))
+
+
+def _plain_unblacklist(filled: dict, facts: Mapping, tier: str) -> str:
+    """纯事实版确认文本（降级回执）。"""
+    return (f"请确认：把 {facts.get('name')}（{facts.get('masked_phone')}）移出黑名单，"
+            f"权限档 {tier}。解除后按普通收款人处理。")
+
+
+def _execute_unblacklist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
+    """EXECUTE：调 **T29**（OTP 已由 `write_flow` 校验；工具层只认 `confirm_ref`）。"""
+    del otp
+    return payee.unset_payee_blacklist(str(confirmation.target_id), confirmation.credential)
