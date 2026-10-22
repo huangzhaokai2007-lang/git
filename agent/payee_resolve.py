@@ -164,6 +164,15 @@ def resolve_or_explain(text: str, *, session_id: str = "") -> tuple[dict | None,
                                         "phone": p["masked_phone"]} for p in got.payees]}
 
 
+def profile_of(payee_id: str) -> dict | None:
+    """按 id 取一个人的完整画像（tags / blacklist / whitelist_quota）—— 供风控关卡用。
+
+    `_shape_*` 只把 `payee_id` 塞进 `filled`，`_prepare_*` 要判「白名单额度够不够」时，
+    用本函数拿回画像；读的是 T20 的 `facts.profiles`，不直查库。
+    """
+    return next((p for p in _people() if p["payee_id"] == payee_id), None)
+
+
 def _decide(hits: list[dict], how: str, query: str) -> ResolveResult:
     """按命中结果给结论：黑名单优先于一切（命中黑名单不当候选，直接拒）。"""
     if not hits:

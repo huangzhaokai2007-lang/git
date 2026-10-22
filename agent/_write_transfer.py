@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify, payee_resolve
+from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
 from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
@@ -113,7 +113,13 @@ def _prepare_transfer(filled: dict) -> Prepared:
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    return Prepared(ok=True, facts={**preview.facts, "payee_phone": masked},
+    #: v2 专属额度层：黑名单已在 `_shape_transfer` 拦下，这里只覆盖白名单额度——
+    #: 额度内维持既有档位（L1 免码），超额度/未设额度至少升到 L2 要码。
+    person = payee_resolve.profile_of(filled["payee_id"])
+    tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
+                                              str(preview.facts.get("tier") or "L2"))
+    return Prepared(ok=True, facts={**preview.facts, "tier": tier, "payee_phone": masked,
+                                    "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
 
 
@@ -121,13 +127,16 @@ def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
                    requires_otp: bool) -> confirm_card.CardInput:
     """转账确认卡：金额、档位、风险因子**全部来自 facts**（卡面行与 card-10 逐字一致）。"""
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    note = confirm_card.risk_note(list(facts.get("factors") or []))
+    if facts.get("quota_note"):
+        note = "；".join(x for x in (note, str(facts["quota_note"])) if x)
     return confirm_card.CardInput(
         title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
         rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
               ("金额", f"{facts['amount_yuan']} 元"),
               ("预计到账", confirm_card.expected_arrival(tier))],
         tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
+        risk_note=note)
 
 
 def _plain_transfer(filled: dict, facts: Mapping, tier: str) -> str:
