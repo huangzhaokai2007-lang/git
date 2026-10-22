@@ -1,4 +1,4 @@
-"""任务卡 08 单测：`agent/llm.py`（JSON 客户端：超时/重试/降级）+ `agent/classifier.py`（意图 + 槽位 + 兜底）。
+﻿"""任务卡 08 单测：`agent/llm.py`（JSON 客户端：超时/重试/降级）+ `agent/classifier.py`（意图 + 槽位 + 兜底）。
 
 全部用**假 LLM**（monkeypatch 客户端与 chat_json），不依赖真实网络、不读真实 `.env` 的值。
 卡 08 第 4 条要求的四类场景：正常 / JSON 非法 / 超时 / 字段缺失，各自都有独立用例。
@@ -26,7 +26,7 @@ SPEC_INTENTS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "smalltalk", "out_of_scope", "unsafe_request",
 )
 _TIMEOUT_REQUEST = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
 
@@ -181,7 +181,7 @@ def test_import_does_not_build_a_client_or_read_secrets() -> None:
 # ---------------- classifier.py：契约 ----------------
 
 def test_intent_labels_match_the_spec_verbatim() -> None:
-    assert classifier.INTENT_LABELS == SPEC_INTENTS and len(SPEC_INTENTS) == 31
+    assert classifier.INTENT_LABELS == SPEC_INTENTS and len(SPEC_INTENTS) == 32
 
 
 def test_slot_schema_covers_every_intent_exactly() -> None:

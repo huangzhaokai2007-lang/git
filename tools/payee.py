@@ -252,3 +252,42 @@ def list_payees() -> ToolResult:
              "profiles": profiles}
     data = {"items": items, "total_count": len(items), "whitelist_count": len(whitelisted)}
     return _ok(data, facts, f"您共有 {len(items)} 位收款人，其中白名单 {len(whitelisted)} 位。")
+
+
+# ---------------- T26 set_payee_blacklist（SPEC-CHANGE 新增 · L1） ----------------
+#
+# 档位口径：加黑是「阻断」（不许转账/送礼），不是「授权」，风险低于加白；且人类需求只要求
+# 「解除黑名单」要验证码、没要求「加黑」要验证码 → 故 L1、不发 OTP（与 payee_add 同档）。
+
+def set_payee_blacklist(payee_id: str, reason: str = "") -> ToolResult:
+    """T26 加入黑名单（L1：只改状态、不动钱）。`data` = `{payee_id, name, masked_phone, blacklist}`。
+
+    归属 fail-closed；与白名单**互斥**（置 blacklist=1 时清 is_whitelist）；
+    已在黑名单 → 幂等返回（不重复写审计）。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id,
+                      tool="set_payee_blacklist", intent="payee_blacklist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    conn = dao.connection()
+    row = conn.execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    row = dict(row)
+    data = {"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
+            "blacklist": True}
+    if row["blacklist"]:
+        return _ok(data, {"name": row["name"], "masked_phone": row["phone"]},
+                   f"{row['name']}（{row['phone']}）已经在黑名单里了")
+    from data.db import transaction                    # 局部 import：与 T25 同口径
+    with transaction(conn):
+        conn.execute("UPDATE payee SET blacklist = 1, blacklist_reason = ?, is_whitelist = 0"
+                     " WHERE id = ? AND user_id = ?", ((reason or "").strip(), payee_id, user_id))
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_blacklist", tool="set_payee_blacklist",
+                         params_json={"payee_id": payee_id, "reason": (reason or "").strip()},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    return _ok(data, {"name": row["name"], "masked_phone": row["phone"]},
+               f"{row['name']}（{row['phone']}）已加入黑名单")
