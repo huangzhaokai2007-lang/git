@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify
+from agent import confirm_card, payee_clarify, payee_resolve
 from agent._write_common import Prepared, ShapeResult, normalize_query, yuan_to_cents
 from tools import _aa_split, transfer
 from tools.schemas import ToolResult
@@ -51,13 +51,15 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
     picked: dict[str, str] = {}                     # id → name，顺带完成去重（T9 对重复收款人直接拒）
     clarify, unresolved = "", False
     for query in _as_list(filled.get("payee_ids")):
-        found = transfer.resolve_payee(normalize_query(query))   # 防「回显卡面串」：见 _write_common
-        candidates = (found.facts.get("candidates") or []) if found.ok else []
-        if len(candidates) == 1:
-            picked.setdefault(candidates[0]["id"], candidates[0]["name"])
-        else:
+        # **与转账共用同一个解析关卡**（v2）：标签 / 同音 / 黑名单 / 同名追问一套口径。
+        person, code, facts = payee_resolve.resolve_or_explain(normalize_query(query))
+        if code:                                        # 黑名单：整笔 AA 直接拒（不当候选）
+            return ShapeResult(filled=filled, error_code=code, message=str(facts.get("message") or ""))
+        if person is None:
             unresolved = True
-            clarify = clarify or (payee_clarify.ask_for(found.facts) if found.ok else "")
+            clarify = clarify or payee_clarify.ask_for(facts)
+        else:
+            picked.setdefault(person["payee_id"], person["name"])
     if unresolved or not picked:
         missing.append("payee_ids")
     else:

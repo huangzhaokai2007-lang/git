@@ -140,6 +140,30 @@ def resolve(text: str, *, session_id: str = "") -> ResolveResult:
     return _decide(hits, how, query)
 
 
+def resolve_or_explain(text: str, *, session_id: str = "") -> tuple[dict | None, str | None, dict]:
+    """**四个出口共用的返回形状**：`(唯一命中的人, 错误码, 候选事实包)`。
+
+    - 唯一 → `(person, None, {})`，并把这次命中记进会话记忆；
+    - 黑名单 → `(None, "FORBIDDEN", {"message": 说明})` —— 调用方**直接出错误回执**，不出确认卡；
+    - 多个/零个 → `(None, None, {"candidates": [...]})` —— 调用方把它交给
+      `payee_clarify.ask_for(facts, missing)`，**连同自己缺的其它槽位一起追问**。
+
+    ⚠️ **为什么返回 facts 而不是一句文案**（S4 第一版就栽在这）：追问要**合起来问** ——
+    「找到 2 个李四，请确认是哪一个；另外金额还没说」。若关卡自己生成文案，
+    调用方「缺金额」那半句就丢了（实测退化成只问人）。候选由本模块给、措辞由
+    `payee_clarify` 统一生成，两边都不越界。
+    """
+    got = resolve(text, session_id=session_id)
+    if got.kind == KIND_UNIQUE:
+        person = dict(got.payees[0])
+        remember(session_id, str(person["payee_id"]))
+        return person, None, {}
+    if got.kind == KIND_BLACKLISTED:
+        return None, "FORBIDDEN", {"message": got.clarify}
+    return None, None, {"candidates": [{"id": p["payee_id"], "name": p["name"],
+                                        "phone": p["masked_phone"]} for p in got.payees]}
+
+
 def _decide(hits: list[dict], how: str, query: str) -> ResolveResult:
     """按命中结果给结论：黑名单优先于一切（命中黑名单不当候选，直接拒）。"""
     if not hits:
