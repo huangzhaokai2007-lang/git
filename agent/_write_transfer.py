@@ -16,7 +16,7 @@ from __future__ import annotations
 import datetime
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify
+from agent import confirm_card, payee_clarify, payee_resolve
 from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
@@ -69,24 +69,27 @@ def _payee_query(raw: object) -> str:
 def _shape_transfer(slots: Mapping) -> ShapeResult:
     """SLOT_FILL 对齐工具层签名：`payee`（名字/手机号）→ `payee_id`；`amount`（元）→ 整数分。
 
-    没找到或同名多个 → 记缺槽（**绝不擅自选一个**）；金额认不出 → 记缺槽。
-
-    缺收款人时把 `resolve_payee` 的**事实包**交给 `payee_clarify.ask_for` 生成追问（F17）：
-    候选的姓名与脱敏手机号由它透出给用户 —— 编排层不自己拼手机号、不自己数候选（铁律 2）。
+    收款人解析走 v2 的**统一关卡**（`agent/payee_resolve.py`）—— 标签、同音、黑名单一套口径，
+    转账与定时转账共用这里（`_shape_scheduled` 复用本函数）。追问仍由 `payee_clarify.ask_for`
+    生成，且要**先收齐所有缺槽再一次性问**（「缺人 + 缺金额」两件事不互相盖掉）。
     """
-    filled, missing = dict(slots), []
-    payee_facts: Mapping = {}
+    filled, missing, payee_facts = dict(slots), [], {}
     if not filled.get("payee_id"):
         query = _payee_query(filled.get("payee"))
-        found = transfer.resolve_payee(query) if query else None
-        candidates = (found.facts.get("candidates") or []) if found is not None and found.ok else []
-        if len(candidates) == 1:
-            filled["payee_id"] = candidates[0]["id"]
-            filled["payee_name"] = candidates[0]["name"]
-            filled["masked_phone"] = candidates[0]["phone"]
+        if query:                                        # 有查询词才走关卡；空 → 留在 missing 用通用追问
+            person, code, facts = payee_resolve.resolve_or_explain(query)
+            if code:                                     # 黑名单：直接拒，不出确认卡
+                return ShapeResult(filled=filled, error_code=code,
+                                   message=str(facts.get("message") or ""))
+            if person is None:
+                missing.append("payee")
+                payee_facts = facts
+            else:
+                filled["payee_id"] = person["payee_id"]
+                filled["payee_name"] = person["name"]
+                filled["masked_phone"] = person["masked_phone"]
         else:
             missing.append("payee")
-            payee_facts = found.facts if found is not None and found.ok else {}
     if filled.get("amount_cents") is None:
         cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
         if cents is None:
