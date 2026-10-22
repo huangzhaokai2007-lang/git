@@ -96,9 +96,14 @@ def used_whitelist_cents(payee_id: str, month_prefix: str, *, name: str = "") ->
 
 
 def remaining_quota_cents(payee: dict, month_prefix: str) -> int | None:
-    """白名单专属额度**剩余**（分）；未设额度 → `None`（= 走普通风控，要验证码）。"""
+    """白名单专属额度**剩余**（分）；未设额度 → `None`（= 走普通风控，要验证码）。
+
+    收款人字典两种键都接：DAO 自己用 `id`，而编排层（`agent/payee_resolve.py`）从 T20 拿到的
+    是 `payee_id` —— 两边叫法不同，这里统一容错，避免调用方各自 `{**person, "id": ...}` 复制。
+    """
     quota = payee.get("whitelist_quota")
     if not quota:
         return None
-    used = used_whitelist_cents(str(payee["id"]), month_prefix, name=str(payee.get("name") or ""))
+    payee_id = str(payee.get("id") or payee.get("payee_id") or "")
+    used = used_whitelist_cents(payee_id, month_prefix, name=str(payee.get("name") or ""))
     return max(0, int(quota) - used)
