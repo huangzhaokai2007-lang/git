@@ -30,7 +30,8 @@ from tools.schemas import ErrorCode
 from tests.conftest import assert_covered
 
 SESSION = "sess-f11"
-BALANCED = {"age": 35, "experience": 2, "income": 2, "drawdown": 2, "horizon": 2}      # → R3
+BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
+            "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2}      # → 26 分 → R3
 
 
 def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
@@ -70,7 +71,7 @@ def test_before_assessment_the_recommendation_is_refused(
     fake_llm(monkeypatch, [out("wealth_recommend")])
     turn = orchestrator.handle("推荐点理财产品")
     assert turn.error_code == ErrorCode.INVALID_STATE
-    assert turn.tool_calls == ["recommend_wealth"] and "没能查到" in turn.reply
+    assert turn.tool_calls == ["recommend_wealth"] and "要不要现在做" in turn.reply
 
 
 # ---------------- ② 无匹配：不放宽风险等级 ----------------
@@ -105,7 +106,8 @@ def test_receipt_lists_every_product_with_all_four_fields(
     for item in items:
         assert item["name"] in turn.reply, f"明细漏了产品：{item['name']}"
         assert item["yield"] in turn.reply, f"明细漏了年化：{item['yield']}"
-        assert item["risk_level"] in turn.reply
+        assert render_lists.RISK_LABELS[item["risk_level"]] in turn.reply, \
+            f"明细漏了风险等级：{item['risk_level']}"
     assert turn.reply.count("\n- ") == len(items), "明细行数与产品数不符"
 
 
@@ -180,7 +182,7 @@ def test_wealth_line_copies_numbers_verbatim() -> None:
     """明细行只照抄 facts，不做任何换算（年化直接取工具层给的百分数字符串）。"""
     line = render_lists.wealth_line({"name": "混合优选 365 天", "risk_level": "R3",
                                      "yield": "4.50%", "term": 365})
-    assert line == "- 混合优选 365 天：R3 级，预期年化 4.50%，期限 1 年"
+    assert line == "- 混合优选 365 天：中风险，预期年化 4.50%，期限 1 年"
 
 
 def test_render_wealth_raises_on_missing_facts_key() -> None:

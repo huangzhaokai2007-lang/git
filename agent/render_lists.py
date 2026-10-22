@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
+from tools._wealth_risk import RISK_LABELS
 from tools.subscription import (
     CYCLE_LABELS,                        # 周期文案的唯一来源：本模块 import、templates 再导出
     STATUS_LABELS as STATUS_CN,
@@ -88,7 +89,8 @@ def wealth_line(item: Mapping) -> str:
     数字全部照抄 facts 对应项：预期年化取工具层格式化好的 `yield` 字符串（**不在这里做浮点运算**，
     项目红线「金额一律整数分、禁浮点」），期限取 `term` 整数经 `term_cn` 换成文案。
     """
-    return (f"- {item['name']}：{item['risk_level']} 级，预期年化 {item['yield']}，"
+    level = str(item["risk_level"])
+    return (f"- {item['name']}：{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
             f"期限 {term_cn(item['term'])}")
 
 
@@ -245,3 +247,45 @@ def render_payees(facts: Mapping) -> str:
     rows = [T_PAYEE_TABLE_HEAD, T_PAYEE_TABLE_SEP,
             *(payee_row(item) for item in facts["items"])]
     return "\n".join([head, "", *rows, "", T_PAYEE_LEGEND])
+
+
+# ---------------- 理财持仓（T21）+ 全部产品（T22） ----------------
+
+T_HOLDINGS_EMPTY = "您目前没有持有中的理财产品。"
+T_HOLDINGS_HEAD = "您目前持有 {total_count} 只理财产品，合计 {total_amount_yuan} 元："
+
+
+def holdings_line(item: Mapping) -> str:
+    """一行持仓：产品名、金额、风险等级（中文）、年化、买入日。数字全部照抄 facts。"""
+    level = str(item["risk_level"])
+    return (f"- {item['name']}：{item['amount_yuan']} 元，"
+            f"{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
+            f"买入于 {item['purchase_date']}")
+
+
+def render_holdings(facts: Mapping) -> str:
+    """`wealth_holdings` 回执（T21）：空结果优先（不套列表头），再汇总句 + 明细。"""
+    if not facts["items"]:
+        return T_HOLDINGS_EMPTY
+    try:
+        head = T_HOLDINGS_HEAD.format(**facts)
+    except KeyError as exc:
+        raise TemplateError(f"'wealth_holdings' 模板缺少 facts 键：{exc}") from exc
+    return "\n".join([head, *(holdings_line(item) for item in facts["items"])])
+
+
+def render_all_products(facts: Mapping) -> str:
+    """T22：全部产品，按「适合您」/「超出等级」分组；后者明确标注**不建议购买**。
+
+    与 `render_wealth`（T14 推荐）的区别：推荐只列等级内的、按收益降序；
+    这里列全部、按等级从低到高，**不做收益排序**（避免变成变相推荐）。
+    """
+    fit = [item for item in facts["items"] if item["recommended"]]
+    over = [item for item in facts["items"] if not item["recommended"]]
+    lines = [f"共 {facts['total_count']} 只产品，其中 {facts['fit_count']} 只在您的风险等级"
+             f"（{facts['user_risk_label']}）内。", "", "**适合您的**"]
+    lines += [wealth_line(item) for item in fit] or ["- 暂无"]
+    if over:
+        lines += ["", "**超出您的风险等级（仅供参考，不建议购买）**"]
+        lines += [wealth_line(item) for item in over]
+    return "\n".join(lines)
