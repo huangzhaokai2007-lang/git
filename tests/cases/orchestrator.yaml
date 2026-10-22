@@ -206,9 +206,9 @@
 - id: pay-002
   input: "看看我的收款人"
   slots: {}
-  # 分组是重点：两组都要出现（转账验证方式不同）。
+  # 排版是重点：精简表格（一行一位）+「白名单」列；表下一行说明两组的转账验证差别。
   expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
-           must_contain: ["【白名单】", "【非白名单】"]}
+           must_contain: ["| 收款人 | 手机号 | 银行 | 白名单 |", "转账只需会话内确认"]}
 - id: pay-003
   input: "我有多少收款人"
   slots: {}

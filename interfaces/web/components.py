@@ -12,22 +12,14 @@ from __future__ import annotations
 
 import html
 import re
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
+from interfaces.web.scenes import SCENES    # 场景文案拆出（本文件已贴 300 行红线）
+
 #: 顶部合规标注（卡 16 第 5 条）
 SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银行，无真实用户 / 账户 / 资金 / 卡号。"
-
-#: 快捷场景（卡 16 第 1 条）：按钮文案 → 送进编排层的原话。界面只负责「把这句话交给 agent/」。
-SCENES: tuple[tuple[str, str], ...] = (
-    ("🧾 看账单", "出一份上个月的账单报告"),
-    ("💸 转账", "给王五转 100 元"),
-    ("🔁 管订阅", "我有哪些订阅"),
-    ("💳 管卡", "卡片查询"),
-    ("💹 调整额度", "调整额度"),
-    ("🔒 锁卡", "锁卡"),
-)
 
 #: 侧边栏账户余额：同样只是把话交给编排层（界面不读库、不 import data/）。
 #: 口径：只说「查一下余额」—— 编排层会取默认账户（储蓄）；一旦提到「储蓄卡/信用卡」，
@@ -68,12 +60,24 @@ def sim_banner() -> None:
     st.markdown(f'<div class="sim-banner">{SIM_NOTICE}</div>', unsafe_allow_html=True)
 
 
-def transcript(messages: Sequence[Mapping[str, Any]]) -> None:
-    """聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。"""
+def transcript(messages: Sequence[Mapping[str, Any]],
+               *, payee_card: Callable[[str], bool] | None = None) -> None:
+    """聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。
+
+    `payee_card` 由 `app.py` 注入（`payee_card_ui.render_payee_card`）：「查看白名单」（T20）的
+    回执优先画成卡片。**画不出来（返回 False）就回退纯文本** —— 美化不许把回执吞掉。
+    用注入、而不是本模块顶层 import 同目录模块：本模块会被 `tests/test_web_layering.py`
+    **按文件路径**加载，那时 `sys.path` 里没有 `interfaces/web`，顶层 import 会直接炸。
+    """
     for message in messages:
         with st.chat_message(message["role"]):
-            st.markdown(message["text"])
-            if (turn := message.get("turn")) is not None:
+            turn = message.get("turn")
+            drawn = (payee_card is not None and message["role"] == "assistant"
+                     and (turn or {}).get("intent") == "payee_list"
+                     and payee_card(message["text"]))
+            if not drawn:
+                st.markdown(message["text"])
+            if turn is not None:
                 st.caption(f"trace_id `{turn['trace_id']}` · 意图 `{turn['intent']}` · "
                            f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
 

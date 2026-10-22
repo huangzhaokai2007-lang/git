@@ -1,0 +1,116 @@
+"""查看白名单（T20）网页端**卡片**渲染测试 —— 真实 `AppTest` 跑 `interfaces/web/app.py`。
+
+两条守卫：
+1. **卡片真的画出来了**：回执被解析成卡片结构（`class="payee-card"`、姓名 / 脱敏手机号 / 徽章都在），
+   且**裸 Markdown 表格不再上屏**（否则等于没画）；
+2. **美化不许吞回执**：回执不是那张表（例如零收款人的独立句子）时，`render_payee_card` 必须返回
+   `False`，调用方据此回退纯文本 —— 免得以后改列名/改格式时页面直接空白。
+
+为什么卡片在**网页层**解析回执而不是拿结构化数据：`interfaces/` 只能调 `agent/`，`Turn` 不携带
+facts；仓内先例是 `components.parse_bill`（回执文本 → 绘图坐标）。卡片里的每个字都照抄回执，
+不重算、不补数（铁律 2）。
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from pathlib import Path
+
+import pytest
+from streamlit.testing.v1 import AppTest
+
+from agent import classifier, llm
+from agent.render_lists import render_payees
+
+REPO = Path(__file__).resolve().parents[1]
+if str(REPO / "scripts") not in sys.path:
+    sys.path.insert(0, str(REPO / "scripts"))
+
+import demo                                                       # noqa: E402
+
+
+def _load_ui_module(name: str):
+    """按文件路径加载界面模块（`interfaces/` 没有 `__init__.py`，与 test_web_layering 同法）。
+
+    先登记进 `sys.modules`：不登记的话模块内的 `dataclass` 之类会找不到自己的模块名。
+    """
+    path = REPO / "interfaces" / "web" / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(f"ui_{name}", path)
+    assert spec is not None and spec.loader is not None, f"加载不到界面模块：{path}"
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+payee_ui = _load_ui_module("payee_card_ui")
+
+#: 直接喂渲染层的事实包（形状照抄 `tools/payee.py:list_payees` 的 facts）
+FACTS = {"total_count": 2, "whitelist_count": 1, "non_whitelist_count": 1,
+         "items": [{"payee_id": "payee_0003", "name": "王五", "masked_phone": "137****2003",
+                    "bank": "建设银行", "is_whitelist": True},
+                   {"payee_id": "payee_0004", "name": "张小美", "masked_phone": "136****3004",
+                    "bank": "中国银行", "is_whitelist": False}]}
+
+
+# ---------------- ① 解析：只认那张表 ----------------
+
+def test_parse_picks_up_every_row_of_the_real_renderer() -> None:
+    """真渲染函数的输出 → 卡片；**一行不少、一格不错位**（含 ✅ 与非白名单的区分）。"""
+    card = payee_ui.parse_payee_reply(render_payees(FACTS))
+    assert card is not None
+    assert card.rows == (("王五", "137****2003", "建设银行", "✅"),
+                         ("张小美", "136****3004", "中国银行", "—"))
+    assert card.head.startswith("您共有 2 位收款人")
+    assert card.foot                                    # 表下那行说明要带进卡片页脚
+
+
+def test_parse_returns_none_for_anything_that_is_not_the_table() -> None:
+    """零收款人的独立句子 / 空串 / 列名不符 / 缺分隔行 → `None`（调用方回退纯文本）。"""
+    assert payee_ui.parse_payee_reply("您还没有收款人。可以说「我要加个收款人」来添加。") is None
+    assert payee_ui.parse_payee_reply("") is None
+    assert payee_ui.parse_payee_reply("| 谁 | 号码 |\n| --- | --- |\n| 李四 | 1 |") is None
+    assert payee_ui.parse_payee_reply("| 收款人 | 手机号 | 银行 | 白名单 |\n| 李四 | 139****1001 |") is None
+
+
+def test_render_reports_false_when_it_cannot_draw() -> None:
+    """降级契约：画不出来必须如实返回 `False`（这一句会被调用方当纯文本渲染）。"""
+    assert payee_ui.render_payee_card("您还没有收款人。") is False
+
+
+# ---------------- ② 端到端：AppTest 真跑 app.py ----------------
+
+def _app(monkeypatch: pytest.MonkeyPatch, verdict: dict) -> AppTest:
+    """临时合成库 + 假分类器（`payee_list` 无槽位，不需要时钟）。"""
+    path = demo.build_temp_db()
+    monkeypatch.setenv("DB_PATH", str(path))
+
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate(verdict)
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    at = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=240)
+    at.run()
+    return at
+
+
+def _markdown(at: AppTest) -> str:
+    return "\n".join(str(element.value) for element in at.markdown)
+
+
+def test_whitelist_reply_is_drawn_as_a_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户实测的那条路径：问白名单 → 卡片；姓名、脱敏号、徽章都在，裸表格不上屏。"""
+    at = _app(monkeypatch, {"intent": "payee_list", "confidence": 0.95,
+                            "slots": {}, "missing_slots": []})
+    at.chat_input[0].set_value("我的白名单有哪些").run()
+    assert not at.exception, at.exception
+    page = _markdown(at)
+    assert 'class="payee-card"' in page                        # 卡片本体（CSS 里只有 `.payee-card{`）
+    assert "李四" in page and "139****1001" in page            # 干净库种子里白名单第一位
+    assert 'class="payee-badge on"' in page                     # 白名单徽章
+    assert 'class="payee-badge off"' in page                    # 非白名单徽章
+    assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page     # 裸 Markdown 表格没有跟着上屏
+    assert "trace_id" in "\n".join(str(e.value) for e in at.caption)   # 回执元信息照旧

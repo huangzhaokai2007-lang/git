@@ -16,10 +16,13 @@ from tools.schemas import ErrorCode
 
 from tests.conftest import assert_covered, assert_no_money_floats, count, raw
 
-#: 三档答卷（年龄, 经验, 收入, 回撤, 期限）：合计 6 / 14 / 23 分 → R1 / R3 / R5
-CONSERVATIVE = {"age": 22, "experience": 0, "income": 1, "drawdown": 0, "horizon": 0}
-BALANCED = {"age": 35, "experience": 2, "income": 2, "drawdown": 2, "horizon": 2}
-AGGRESSIVE = {"age": 50, "experience": 4, "income": 4, "drawdown": 4, "horizon": 4}
+#: 三档答卷（9 题）：合计 10 / 26 / 43 分 → R1 / R3 / R5
+CONSERVATIVE = {"age": 22, "experience": 0, "income": 1, "income_level": 0, "asset_ratio": 0,
+                "drawdown": 0, "horizon": 0, "goal": 0, "reaction": 0}
+BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
+            "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2}
+AGGRESSIVE = {"age": 50, "experience": 4, "income": 4, "income_level": 4, "asset_ratio": 4,
+              "drawdown": 4, "horizon": 4, "goal": 4, "reaction": 4}
 #: seed 的 6 个理财产品（id, 等级, 预期年化）
 PRODUCTS = (("prod_r1_mmf", "R1", 2.10), ("prod_r2_bond90", "R2", 3.20), ("prod_r2_bond180", "R2", 3.60),
             ("prod_r3_mixed365", "R3", 4.50), ("prod_r4_quant720", "R4", 6.20), ("prod_r5_growth", "R5", 8.50))
@@ -34,11 +37,11 @@ def test_t13_data_fields_are_frozen_to_the_spec(seeded: Path) -> None:
 
 
 @pytest.mark.parametrize(("answers", "level", "score"), [
-    (CONSERVATIVE, "R1", 6), (BALANCED, "R3", 14), (AGGRESSIVE, "R5", 23),
+    (CONSERVATIVE, "R1", 10), (BALANCED, "R3", 26), (AGGRESSIVE, "R5", 43),
 ])
 def test_t13_score_table_maps_answers_to_levels(seeded: Path, answers: dict, level: str,
                                                 score: int) -> None:
-    """规则表（卡 07 第 1 条）：4 题按选项下标计 1..5 分 + 年龄分段，合计 5–25 → R1..R5。"""
+    """规则表（卡 07 第 1 条）：8 题按选项下标计 1..5 分 + 年龄分段，合计 9–45 → R1..R5。"""
     result = wealth.assess_risk(answers)
     assert result.data["risk_level"] == level and result.facts["total_score"] == score
 
@@ -48,20 +51,20 @@ def _answers_for(total: int) -> dict:
     questions = list(_wealth_risk.QUESTION_SCORE_RULE)
     slots = questions + ["age"]
     scores = {key: 1 for key in slots}
-    extra = total - 5
+    extra = total - 9
     for key in slots:
         add = min(4, extra)
         scores[key] += add
         extra -= add
-    assert extra == 0, "分数超出 5..25 范围"
+    assert extra == 0, "分数超出 9..45 范围"
     answers = {key: scores[key] - 1 for key in questions}          # 选项下标 = 分数 - 1
     answers["age"] = {1: 22, 2: 35, 3: 50, 4: 60, 5: 80}[scores["age"]]
     return answers
 
 
 @pytest.mark.parametrize(("total", "level"), [
-    (5, "R1"), (9, "R1"), (10, "R2"), (13, "R2"), (14, "R3"), (17, "R3"),
-    (18, "R4"), (21, "R4"), (22, "R5"), (25, "R5"),
+    (9, "R1"), (16, "R1"), (17, "R2"), (24, "R2"), (25, "R3"),
+    (32, "R3"), (33, "R4"), (40, "R4"), (41, "R5"), (45, "R5"),
 ])
 def test_t13_level_bands_boundaries_are_pinned(seeded: Path, total: int, level: str) -> None:
     """分段边界逐点钉住（区间左闭右开）：改 `LEVEL_BANDS` 任何一端都必须让本用例变红。"""
@@ -74,17 +77,18 @@ def test_t13_level_bands_boundaries_are_pinned(seeded: Path, total: int, level: 
     (18, 1), (25, 1), (26, 2), (40, 2), (41, 3), (55, 3), (56, 4), (65, 4), (66, 5),
 ])
 def test_t13_age_bands_contribute_their_score(seeded: Path, age: int, age_score: int) -> None:
-    """年龄题按 `AGE_BANDS` 分段计分：其余四题恒为最低分（每题 1 分），总分 = 4 + 年龄分。"""
-    base = {"experience": 0, "income": 0, "drawdown": 0, "horizon": 0}
+    """年龄题按 `AGE_BANDS` 分段计分：其余八题恒为最低分（每题 1 分），总分 = 8 + 年龄分。"""
+    base = {"experience": 0, "income": 0, "income_level": 0, "asset_ratio": 0,
+            "drawdown": 0, "horizon": 0, "goal": 0, "reaction": 0}
     result = wealth.assess_risk({**base, "age": age})
-    assert result.ok and result.facts["total_score"] == 4 + age_score
+    assert result.ok and result.facts["total_score"] == 8 + age_score
 
 
 def test_t13_valid_until_is_one_year_after_the_data_anchor(seeded: Path) -> None:
     """有效期 = 数据集"今天" + 365 天（跨天可复现，不用 datetime.now()）。"""
     result = wealth.assess_risk(BALANCED)
     assert result.data["valid_until"] == "2027-09-12"
-    assert result.facts["valid_days"] == 365 and result.facts["max_score"] == 25
+    assert result.facts["valid_days"] == 365 and result.facts["max_score"] == 45
 
 
 def test_t13_minor_is_forbidden_and_logged(seeded: Path) -> None:

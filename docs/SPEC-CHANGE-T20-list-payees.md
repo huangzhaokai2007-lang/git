@@ -17,7 +17,7 @@
 | `agent/classifier.py` | `INTENT_LABELS` + `IntentLabel` + `SLOT_SCHEMA` 三处同步（另有 assert 自动校验） |
 | `agent/read_routes.py` | `TOOL_ROUTES` 加 `payee_list` 路由 |
 | `agent/orchestrator.py` | `READ_INTENTS` 加 `payee_list` |
-| `agent/render_lists.py` | `payee_line` / `render_payees`（分组渲染） |
+| `agent/render_lists.py` | `payee_row` / `render_payees`（**精简表格**渲染） |
 | `agent/templates.py` | `render()` 分发加分支 + 再导出 |
 
 T20 契约：
@@ -100,10 +100,20 @@ bash scripts/verify.sh
 
 ```bash
 uv run python -m app.cli "我的白名单有哪些"
-# → 您名下共有 N 位收款人，其中白名单 2 位、其它 M 位。
-#    【白名单】（转账时只需在会话内确认）
-#    - 李四　139****1001（招商银行）
-#    - 王五　137****2003（建设银行）
-#    【非白名单】（转账时需确认卡 + 短信验证码）
-#    ...
+# → 您共有 5 位收款人：白名单 2 位、其它 3 位。
+#
+#    | 收款人 | 手机号 | 银行 | 白名单 |
+#    | --- | --- | --- | --- |
+#    | 李四 | 139****1001 | 招商银行 | ✅ |
+#    | 王五 | 137****2003 | 建设银行 | ✅ |
+#    | 张小美 | 136****3004 | 中国银行 | — |
+#    | 李四 | 139****1002 | 工商银行 | — |
+#    | 赵六 | 135****4005 | 农业银行 | — |
+#
+#    白名单：转账只需会话内确认；非白名单：转账需确认卡 + 短信验证码。
 ```
+
+**排版口径（用户后续要求）**：回执从「【分组】+ 项目符号」改为**精简 Markdown 表格**
+（`收款人 / 手机号 / 银行 / 白名单` 四列，一行一位收款人），分组语义由「白名单」列
+（`✅` / `—`）+ 工具层既有排序（`is_whitelist DESC, name, id`）表达，**行序一个字没重排**；
+表下只留**一行**说明两组的转账验证差别。`bank` 为空时该格印 `—` 占位（**不是**编造的银行名）。

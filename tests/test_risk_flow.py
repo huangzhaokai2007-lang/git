@@ -33,10 +33,13 @@ from tools.schemas import ErrorCode
 from tests.conftest import assert_covered
 
 SESSION = "sess-f10"
-#: 三档答卷：合计 6 / 14 / 23 分 → R1 / R3 / R5（与工具层单测同一批事实，便于交叉核对）
-CONSERVATIVE = {"age": 22, "experience": 0, "income": 1, "drawdown": 0, "horizon": 0}
-BALANCED = {"age": 35, "experience": 2, "income": 2, "drawdown": 2, "horizon": 2}
-AGGRESSIVE = {"age": 50, "experience": 4, "income": 4, "drawdown": 4, "horizon": 4}
+#: 三档答卷：合计 10 / 26 / 43 分 → R1 / R3 / R5（与工具层单测同一批事实，便于交叉核对）
+CONSERVATIVE = {"age": 22, "experience": 0, "income": 1, "income_level": 0, "asset_ratio": 0,
+                "drawdown": 0, "horizon": 0, "goal": 0, "reaction": 0}
+BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
+            "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2}
+AGGRESSIVE = {"age": 50, "experience": 4, "income": 4, "income_level": 4, "asset_ratio": 4,
+              "drawdown": 4, "horizon": 4, "goal": 4, "reaction": 4}
 
 
 def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
@@ -56,13 +59,14 @@ def out(intent: str, *, slots: dict | None = None, confidence: float = 0.9) -> d
 
 
 def one_sentence(answers: dict) -> str:
-    """把一份答卷渲染成一句话（供解析器用例用）。"""
-    age = answers["age"]
-    exp = risk_flow.QUESTIONS["experience"][1][answers["experience"]]
-    inc = risk_flow.QUESTIONS["income"][1][answers["income"]]
-    cur = risk_flow.QUESTIONS["drawdown"][1][answers["drawdown"]]
-    hor = risk_flow.QUESTIONS["horizon"][1][answers["horizon"]]
-    return f"年龄{age}，经验{exp}，收入{inc}，回撤{cur}，期限{hor}"
+    """把一份答卷渲染成一句话（供解析器用例用）—— 9 题全覆盖。"""
+    parts = [f"年龄{answers['age']}"]
+    for key, word in (("experience", "经验"), ("income", "收入"),
+                      ("income_level", "年收入"), ("asset_ratio", "资金占比"),
+                      ("drawdown", "回撤"), ("horizon", "期限"),
+                      ("goal", "目标"), ("reaction", "下跌时")):
+        parts.append(f"{word}{risk_flow.QUESTIONS[key][1][answers[key]]}")
+    return "，".join(parts)
 
 
 # ---------------- ① 聊天触发：回引导语，不调工具 ----------------
@@ -85,7 +89,7 @@ def test_the_prompt_is_the_template_constant_not_a_second_copy() -> None:
 # ---------------- ② 一句话说全 5 题 → 直接算 ----------------
 
 @pytest.mark.parametrize(("answers", "level", "score"), [
-    (CONSERVATIVE, "R1", 6), (BALANCED, "R3", 14), (AGGRESSIVE, "R5", 23),
+    (CONSERVATIVE, "R1", 10), (BALANCED, "R3", 26), (AGGRESSIVE, "R5", 43),
 ])
 def test_a_complete_sentence_is_scored_in_one_shot(seeded: Path, monkeypatch: pytest.MonkeyPatch,
                                                    answers: dict, level: str, score: int) -> None:
@@ -102,8 +106,13 @@ def test_a_complete_sentence_is_scored_in_one_shot(seeded: Path, monkeypatch: py
     "35岁，投资经验1-3年，收入稳定，能承受10%以内回撤，投资期限1年",
 ])
 def test_parser_accepts_both_word_orders_and_spacing(sentence: str) -> None:
-    """「年龄35」与「35岁」两种语序、有无空格，都要解析成同一份答卷。"""
-    assert risk_flow.parse_answers(sentence) == BALANCED
+    """「年龄35」与「35岁」两种语序、有无空格，都要解析成同一份答卷。
+
+    句子只覆盖 5 题（老用例），故只比对这 5 题 —— 另外 4 题缺省不参与。
+    """
+    got = risk_flow.parse_answers(sentence)
+    assert (got["age"], got["experience"], got["income"], got["drawdown"], got["horizon"]) \
+        == (35, 2, 2, 2, 2)
 
 
 def test_parser_never_mistakes_the_experience_range_for_an_age() -> None:
@@ -211,5 +220,5 @@ def test_parser_returns_empty_on_garbage_instead_of_guessing(garbage: str) -> No
 def test_missing_questions_helper_matches_the_tool_contract() -> None:
     """`missing_questions` 与工具层 `_score()` 的五题契约对齐（多一题少一题都拒）。"""
     assert risk_flow.missing_questions(BALANCED) == []
-    assert len(risk_flow.missing_questions({"age": 35})) == 4
+    assert len(risk_flow.missing_questions({"age": 35})) == 8
     assert risk_flow.count_covers_every_question({**BALANCED, "extra": 1}) is False
