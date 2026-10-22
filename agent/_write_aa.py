@@ -86,6 +86,16 @@ def _prepare_aa(filled: dict) -> Prepared:
         return Prepared(ok=False, error_code="INVALID_ARGUMENT", message="收款人名单不完整，请重新提供")
     payees = [{"id": pid, "name": name} for pid, name in zip(ids, names)]
     facts = _aa_split.aa_facts(payees, int(filled["amount_cents"]))
+    #: v2 风控：AA **含非白名单人员 → 要验证码**（发起人验一次，不是每人一次）。
+    #: 黑名单已在 `_shape_aa` 拦下；这里只判白名单与否。
+    non_whitelist = []
+    for pid in ids:
+        person = payee_resolve.profile_of(pid)
+        if person and not person.get("is_whitelist"):
+            non_whitelist.append(str(person["name"]))
+    if non_whitelist:
+        facts["tier"] = "L2"
+        facts["aa_note"] = f"含非白名单收款人（{'、'.join(non_whitelist)}），需要验证码"
     facts["target_name"] = filled["aa_target"]
     return Prepared(ok=True, facts=facts, credential="")
 
@@ -93,6 +103,9 @@ def _prepare_aa(filled: dict) -> Prepared:
 def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
              requires_otp: bool) -> confirm_card.CardInput:
     """AA 确认卡：人数 / 总额 / 每人 / 余数**全部来自 facts**（与执行回执同一份口径）。"""
+    note = confirm_card.risk_note([], AA_CN)
+    if facts.get("aa_note"):
+        note = "；".join(x for x in (note, str(facts["aa_note"])) if x)
     return confirm_card.CardInput(
         title="AA 收款确认卡", intent_cn=AA_CN,
         rows=[("收款人", f"{facts['target_name']}（{facts['payee_count']} 人）"),
@@ -100,7 +113,7 @@ def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
               ("每人", f"{facts['per_person_amount_yuan']} 元"),
               ("余数（由你承担）", f"{facts['initiator_share_yuan']} 元")],
         tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], AA_CN))
+        risk_note=note)
 
 
 def _plain_aa(filled: dict, facts: Mapping, tier: str) -> str:
