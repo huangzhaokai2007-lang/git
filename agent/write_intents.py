@@ -167,7 +167,7 @@ _SPECS["payee_whitelist"] = WriteSpec(
     what="加入白名单", shape=_shape_whitelist, prepare=_prepare_whitelist,
     card=_card_whitelist, plain=_plain_whitelist, execute=_execute_whitelist)
 
-#: F22c（T26）：把收款人加入黑名单 —— **L1、无 OTP**。加黑是「阻断」不是「授权」，
+#: F22c（T28）：把收款人加入黑名单 —— **L1、无 OTP**。加黑是「阻断」不是「授权」，
 #: 风险低于加白；人类需求只要求「解除黑名单」要验证码（后续卡做）。
 _SPECS["payee_blacklist"] = WriteSpec(
     intent="payee_blacklist", intent_cn="加入黑名单", title="黑名单确认卡",

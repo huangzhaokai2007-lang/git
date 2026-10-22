@@ -254,13 +254,13 @@ def list_payees() -> ToolResult:
     return _ok(data, facts, f"您共有 {len(items)} 位收款人，其中白名单 {len(whitelisted)} 位。")
 
 
-# ---------------- T26 set_payee_blacklist（SPEC-CHANGE 新增 · L1） ----------------
+# ---------------- T28 set_payee_blacklist（SPEC-CHANGE 新增 · L1） ----------------
 #
 # 档位口径：加黑是「阻断」（不许转账/送礼），不是「授权」，风险低于加白；且人类需求只要求
 # 「解除黑名单」要验证码、没要求「加黑」要验证码 → 故 L1、不发 OTP（与 payee_add 同档）。
 
 def set_payee_blacklist(payee_id: str, reason: str = "") -> ToolResult:
-    """T26 加入黑名单（L1：只改状态、不动钱）。`data` = `{payee_id, name, masked_phone, blacklist}`。
+    """T28 加入黑名单（L1：只改状态、不动钱）。`data` = `{payee_id, name, masked_phone, blacklist}`。
 
     归属 fail-closed；与白名单**互斥**（置 blacklist=1 时清 is_whitelist）；
     已在黑名单 → 幂等返回（不重复写审计）。

@@ -80,7 +80,7 @@ def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None)
     return payee.set_payee_whitelist(str(confirmation.target_id), True, confirmation.credential)
 
 
-# ---------------- 加入黑名单（T26 · L1 确认卡、无 OTP） ----------------
+# ---------------- 加入黑名单（T28 · L1 确认卡、无 OTP） ----------------
 
 #: 档位：加黑是「阻断」不是「授权」（禁止转账/送礼），风险低于加白；人类需求只要求
 #: 「解除黑名单」要验证码（后续卡做），没要求「加黑」要验证码 → L1、不发 OTP。
@@ -125,6 +125,6 @@ def _plain_blacklist(filled: dict, facts: Mapping, tier: str) -> str:
 
 
 def _execute_blacklist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
-    """EXECUTE：调 **T26** 落库（`blacklist=1` 且清 `is_whitelist`，互斥在工具层强制）。"""
+    """EXECUTE：调 **T28** 落库（`blacklist=1` 且清 `is_whitelist`，互斥在工具层强制）。"""
     del otp
     return payee.set_payee_blacklist(str(confirmation.target_id), "")

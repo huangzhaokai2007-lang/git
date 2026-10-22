@@ -77,7 +77,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
     "payee_whitelist": ("payee",),                                         # T25 set_payee_whitelist（L2）
-    "payee_blacklist": ("payee",),                                         # T26 set_payee_blacklist（L1）
+    "payee_blacklist": ("payee",),                                         # T28 set_payee_blacklist（L1）
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
