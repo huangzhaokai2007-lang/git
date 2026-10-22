@@ -117,7 +117,8 @@ def _prepare_transfer(filled: dict) -> Prepared:
     #: 额度内维持既有档位（L1 免码），超额度/未设额度至少升到 L2 要码。
     person = payee_resolve.profile_of(filled["payee_id"])
     tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
-                                              str(preview.facts.get("tier") or "L2"))
+                                              str(preview.facts.get("tier") or "L2"),
+                                              factors=preview.facts.get("factors") or [])
     return Prepared(ok=True, facts={**preview.facts, "tier": tier, "payee_phone": masked,
                                     "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
@@ -168,7 +169,8 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     #: v2 专属额度层（与即时转账同一份口径）：超额度/未设额度 → 至少 L2 要码。
     person = payee_resolve.profile_of(filled["payee_id"])
     tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
-                                              str(preview.facts.get("tier") or "L2"))
+                                              str(preview.facts.get("tier") or "L2"),
+                                              factors=preview.facts.get("factors") or [])
     return Prepared(ok=True,
                     facts={**preview.facts, "tier": tier, "payee_phone": masked,
                            "schedule": str(filled["schedule"]), "quota_note": quota_note},

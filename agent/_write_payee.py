@@ -12,31 +12,40 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify
+from agent import confirm_card, payee_clarify, payee_resolve
 from agent._write_common import Prepared, ShapeResult, _code_of
 from agent._write_transfer import _payee_query                     # 同一份「回显串归一化」
-from tools import payee, transfer
+from tools import payee
+
+
+def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeResult:
+    """SLOT_FILL：收款人（姓名/手机号/**标签/同音**）→ `payee_id`。
+
+    v2：与转账**同一份解析关卡**（`payee_resolve.resolve_or_explain`）—— 标签、同音、
+    黑名单一套口径（原先只走 T6 子串，「把房东加入白名单」会解析失败，实测缺陷）。
+    `allow_blacklisted` 供「加黑/解除黑名单」这类**管理状态**的意图用：黑名单的人也要
+    能被解析出来（转账路径里黑名单是 FORBIDDEN，这里不是）。
+    """
+    filled, missing, clarify = dict(slots), [], ""
+    if not filled.get("payee_id"):
+        query = _payee_query(filled.get("payee"))
+        person, code, facts = payee_resolve.resolve_or_explain(
+            query, allow_blacklisted=allow_blacklisted)
+        if code:
+            return ShapeResult(filled=filled, error_code=code,
+                               message=str(facts.get("message") or ""))
+        if person is None:
+            missing.append("payee")
+            clarify = payee_clarify.ask_for(facts, ["payee"])
+        else:
+            filled["payee_id"] = person["payee_id"]
+            filled["masked_phone"] = person["masked_phone"]
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
 def _shape_whitelist(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：收款人（姓名/手机号）→ `payee_id`；同名多个 → 追问，零命中 → 记缺槽。
-
-    与 `transfer_single` **同一份解析口径**（`resolve_payee` + `normalize_query`），不复制实现。
-    """
-    filled, missing = dict(slots), []
-    clarify = ""
-    if not filled.get("payee_id"):
-        query = _payee_query(filled.get("payee"))
-        found = transfer.resolve_payee(query) if query else None
-        cands = (found.facts.get("candidates") or []) if found is not None and found.ok else []
-        if len(cands) == 1:
-            filled["payee_id"] = cands[0]["id"]
-            filled["masked_phone"] = cands[0]["phone"]
-        else:
-            missing.append("payee")
-            clarify = payee_clarify.ask_for(
-                found.facts if found is not None and found.ok else {}, ["payee"])
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    """加白：统一解析关卡。**已黑名单的人 → FORBIDDEN**（黑白互斥，先解除再谈加白）。"""
+    return _resolve_shape(slots)
 
 
 def _prepare_whitelist(filled: dict) -> Prepared:
@@ -57,22 +66,21 @@ def _prepare_whitelist(filled: dict) -> Prepared:
 
 def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
                     requires_otp: bool) -> confirm_card.CardInput:
-    """白名单确认卡：谁 + 什么变化 + **影响**（之后转账不再要验证码，这句必须说清）。"""
+    """白名单确认卡：谁 + 什么变化 + **影响**（专属额度内免码 —— v2 口径，必须说清额度边界）。"""
     return confirm_card.CardInput(
         title="白名单确认卡", intent_cn="加入白名单",
         rows=[("收款人", str(facts["name"])),
               ("手机号", str(facts["masked_phone"])),
               ("变更", "加入白名单"),
-              ("影响", "之后转账的基础档位降为 L1；但深夜(23:00-06:00)、短时多笔等风险因子"
-                       "仍会升档，命中时仍需要短信验证码")],
+              ("影响", "专属额度内转账免验证码（含深夜）；超额度仍需验证码")],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], "加入白名单"))
 
 
 def _plain_whitelist(filled: dict, facts: Mapping, tier: str) -> str:
-    """纯事实版确认文本（降级回执）。措辞与卡面一致：**不承诺"免验证码"**。"""
+    """纯事实版确认文本（降级回执）。措辞与卡面一致：额度内免码、超额度要码。"""
     return (f"请确认：把 {facts.get('name')}（{facts.get('masked_phone')}）加入白名单，"
-            f"权限档 {tier}。加入后转账的基础档位降为 L1，但风险因子仍可能升档。")
+            f"权限档 {tier}。加入后在专属额度内给该收款人转账免验证码（超额度仍需验证码）。")
 
 
 def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
@@ -88,7 +96,8 @@ def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None)
 BLACKLIST_TIER = "L1"
 
 #: 与加白**同一套解析口径**（标签/同音/黑名单），不复制实现
-_shape_blacklist = _shape_whitelist
+#: 与加白同一套解析关卡，但**允许解析已黑名单的人**（重复拉黑由 prepare 报「已经在黑名单里」）
+_shape_blacklist = lambda slots: _resolve_shape(slots, allow_blacklisted=True)
 
 
 def _prepare_blacklist(filled: dict) -> Prepared:
@@ -135,7 +144,8 @@ def _execute_blacklist(confirmation: confirm_card.Confirmation, otp: str | None)
 
 #: 与加白/加黑同一套解析（T6 按姓名/手机号子串匹配；**黑名单的人同样能被解析出来**，
 #: 这正是解除黑名单需要的 —— 转账那条路径里黑名单是 FORBIDDEN，这里不是）。
-_shape_unblacklist = _shape_whitelist
+#: 同一套解析关卡，**必须**允许解析已黑名单的人（否则「解除黑名单」永远解不到人）
+_shape_unblacklist = lambda slots: _resolve_shape(slots, allow_blacklisted=True)
 
 
 def _prepare_unblacklist(filled: dict) -> Prepared:

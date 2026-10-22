@@ -140,11 +140,14 @@ def resolve(text: str, *, session_id: str = "") -> ResolveResult:
     return _decide(hits, how, query)
 
 
-def resolve_or_explain(text: str, *, session_id: str = "") -> tuple[dict | None, str | None, dict]:
+def resolve_or_explain(text: str, *, session_id: str = "",
+                       allow_blacklisted: bool = False) -> tuple[dict | None, str | None, dict]:
     """**四个出口共用的返回形状**：`(唯一命中的人, 错误码, 候选事实包)`。
 
     - 唯一 → `(person, None, {})`，并把这次命中记进会话记忆；
     - 黑名单 → `(None, "FORBIDDEN", {"message": 说明})` —— 调用方**直接出错误回执**，不出确认卡；
+      `allow_blacklisted=True` 时（加黑/解除黑名单这类**管理收款人状态**的意图）例外：
+      黑名单的人也能被解析出来，由调用方的 prepare 决定允许与否；
     - 多个/零个 → `(None, None, {"candidates": [...]})` —— 调用方把它交给
       `payee_clarify.ask_for(facts, missing)`，**连同自己缺的其它槽位一起追问**。
 
@@ -159,6 +162,10 @@ def resolve_or_explain(text: str, *, session_id: str = "") -> tuple[dict | None,
         remember(session_id, str(person["payee_id"]))
         return person, None, {}
     if got.kind == KIND_BLACKLISTED:
+        if allow_blacklisted:
+            person = dict(got.payees[0])
+            remember(session_id, str(person["payee_id"]))
+            return person, None, {}
         return None, "FORBIDDEN", {"message": got.clarify}
     return None, None, {"candidates": [{"id": p["payee_id"], "name": p["name"],
                                         "phone": p["masked_phone"]} for p in got.payees]}
