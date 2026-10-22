@@ -38,6 +38,11 @@ from agent.orchestrator import Turn
 OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
     (("余额", "多少钱"), "balance_query", {}),
     (("异常", "可疑"), "anomaly_check", {}),
+    #: F03：账单**总结**（T5 generate_bill_report）必须排在账单**分析**（T3 analyze_spending）**前面** ——
+    #: 两者共享「账单」这个词，顺序反了就被分析截走（问"总结账单"却答环比，与上面「异常」被
+    #: 「支出」截走是同一类缺陷）。触发词取「总结/汇总/报告」这类**明确要一份报告**的说法：
+    #: 说「上个月花了多少」「账单怎么样」仍走分析，各归各位。
+    (("账单总结", "账单报告", "总结", "汇总", "报告"), "bill_report", {}),
     (("花了多少", "账单", "消费", "支出"), "bill_analysis", {}),
     (("订阅",), "subscription_list", {}),
     (("流水", "交易记录"), "txn_query", {}),
@@ -62,7 +67,7 @@ def offline_verdict(text: str) -> tuple[str, dict]:
     for keywords, intent, slots in OFFLINE_RULES:
         if any(word in text for word in keywords):
             filled = dict(slots)
-            if intent in ("bill_analysis", "anomaly_check"):
+            if intent in ("bill_analysis", "anomaly_check", "bill_report"):
                 by_length = sorted(PERIOD_WORDS, key=len, reverse=True)
                 filled["period"] = next((word for word in by_length if word in text), "本月")
             return intent, filled

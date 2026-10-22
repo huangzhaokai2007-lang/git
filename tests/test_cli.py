@@ -59,6 +59,37 @@ def test_anomaly_outranks_bill_analysis_for_the_f03_utterance() -> None:
     assert cli.offline_verdict("上个月有什么异常支出") == ("anomaly_check", {"period": "上个月"})
 
 
+@pytest.mark.parametrize("text", [
+    "帮我总结一下上个月的账单",
+    "上个月账单总结",
+    "出一份账单报告",
+    "汇总一下本月收支",
+])
+def test_bill_report_is_triggerable_by_utterance(text: str) -> None:
+    """账单**总结**（T5）得能被话说出来 —— 它不是"只能靠替身硬塞意图"的死功能。
+
+    补这份的原因：规则表里原本**只有账单分析、没有账单总结**，说「总结一下上个月的账单」
+    会被共享的「账单」关键词截走 → 答成环比，用户要的报告根本没生成。
+    """
+    assert cli.offline_verdict(text)[0] == "bill_report"
+
+
+@pytest.mark.parametrize("text", [
+    "上个月花了多少",
+    "账单怎么样",
+    "看看消费",
+    "给我出一份账单",       # 既有口径：不带"总结/汇总/报告" → 仍是分析，不抢
+])
+def test_bill_report_does_not_steal_bill_analysis(text: str) -> None:
+    """反向锁：加了总结的触发词，不许把**分析**的说法也吞掉（顺序反了就会）。"""
+    assert cli.offline_verdict(text)[0] == "bill_analysis"
+
+
+def test_bill_report_carries_the_period_slot() -> None:
+    """总结同样要账期 —— 否则 tools 层拿不到 period，只能走追问。"""
+    assert cli.offline_verdict("总结一下上个月的账单")[1] == {"period": "上个月"}
+
+
 def test_period_word_matching_prefers_the_longest_word() -> None:
     """相对时间词按长度降序取：「上上个月」不许被子串「上个月」截走。
 
