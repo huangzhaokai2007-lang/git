@@ -113,3 +113,35 @@ def test_remaining_quota_shrinks_with_usage(wired) -> None:
     assert over.decision == payee_risk.DECISION_NEED_OTP
     assert over.reason == payee_risk.REASON_QUOTA_EXCEEDED
     assert over.facts["quota_remaining"] == 20_000
+
+
+# ---------------- apply_quota（接入 _prepare_transfer 的那一层） ----------------
+
+def test_apply_quota_leaves_base_tier_when_within_quota(wired) -> None:
+    """额度内 → 不覆盖既有档位（白名单 → L1 保持 L1）。"""
+    person = _person("房东")                       # 种子：白名单 1000 元额度
+    tier, note = payee_risk.apply_quota(person, 10_000, "L1", month=MONTH)
+    assert tier == "L1" and note == ""
+
+
+def test_apply_quota_raises_to_l2_when_over_quota(wired) -> None:
+    """超额度 → 至少 L2 要码，并给出提示（这是接进确认卡后用户会看到的那句）。"""
+    person = _person("房东")
+    payee_dao.update_payee(person["payee_id"], UID, whitelist_quota=5_000)     # 50 元
+    person = _person("房东")
+    tier, note = payee_risk.apply_quota(person, 10_000, "L1", month=MONTH)
+    assert tier == "L2" and "超出" in note
+
+
+def test_apply_quota_never_downgrades(wired) -> None:
+    """**绝不放松**：即使额度内，night 已经给的 L2 不能被降回 L1。"""
+    person = _person("房东")
+    tier, _ = payee_risk.apply_quota(person, 10_000, "L2", month=MONTH)
+    assert tier == "L2"
+
+
+def test_apply_quota_ignores_non_whitelist(wired) -> None:
+    """普通收款人不受额度影响（他没有额度这个维度）。"""
+    person = _person("妈妈")                       # 张小美，非白名单
+    tier, note = payee_risk.apply_quota(person, 10_000, "L2", month=MONTH)
+    assert tier == "L2" and note == ""

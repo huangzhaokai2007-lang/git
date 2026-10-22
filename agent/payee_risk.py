@@ -68,6 +68,36 @@ class RiskDecision:
         return self.decision == DECISION_REJECT
 
 
+_TIER_ORDER = {TIER_L1: 0, TIER_L2: 1, TIER_L3: 2}
+
+
+def _higher_tier(a: str, b: str) -> str:
+    """取更严格（更高）的档位。"""
+    return a if _TIER_ORDER.get(a, 0) >= _TIER_ORDER.get(b, 0) else b
+
+
+def apply_quota(payee: Mapping, amount_cents: int, base_tier: str, *,
+                month: str | None = None) -> tuple[str, str]:
+    """**只做白名单「专属额度」这一层的档位覆盖**（不调 `preview_transfer`，调用方已调过）。
+
+    返回 `(最终档位, 追加提示)`。
+    - 非白名单 / 额度内 → 维持 `base_tier`（普通收款人由既有档位决定）；
+    - 超额度 / 未设额度 → 至少升到 L2（要验证码），并给出提示。
+
+    ⚠️ 只加"更严格"、不"放松"：night / velocity 等在 `base_tier` 里已经体现，
+    本函数用 `_higher_tier` 保证绝不会把 L2 降回 L1。
+    """
+    if not payee or not payee.get("is_whitelist"):
+        return base_tier, ""
+    quota = payee.get("whitelist_quota")
+    if quota is None:
+        return _higher_tier(base_tier, TIER_L2), "该白名单收款人未设专属额度，转账需要验证码"
+    remaining = payee_dao.remaining_quota_cents(dict(payee), month or month_prefix())
+    if remaining is None or int(amount_cents) <= remaining:
+        return base_tier, ""
+    return _higher_tier(base_tier, TIER_L2), "已超出白名单专属额度，需要验证码"
+
+
 def assess(payee: Mapping, amount_cents: int, *, month: str | None = None) -> RiskDecision:
     """对「给这个人转这么多钱」做风控：黑名单 → 额度 → 既有档位。
 
