@@ -63,15 +63,16 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
         rows=[("收款人", str(facts["name"])),
               ("手机号", str(facts["masked_phone"])),
               ("变更", "加入白名单"),
-              ("影响", "之后给该收款人转账，只需会话内确认，不再需要短信验证码")],
+              ("影响", "之后转账的基础档位降为 L1；但深夜(23:00-06:00)、短时多笔等风险因子"
+                       "仍会升档，命中时仍需要短信验证码")],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], "加入白名单"))
 
 
 def _plain_whitelist(filled: dict, facts: Mapping, tier: str) -> str:
-    """纯事实版确认文本（降级回执）。"""
+    """纯事实版确认文本（降级回执）。措辞与卡面一致：**不承诺"免验证码"**。"""
     return (f"请确认：把 {facts.get('name')}（{facts.get('masked_phone')}）加入白名单，"
-            f"权限档 {tier}。加入后给该收款人转账不再需要短信验证码。")
+            f"权限档 {tier}。加入后转账的基础档位降为 L1，但风险因子仍可能升档。")
 
 
 def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:

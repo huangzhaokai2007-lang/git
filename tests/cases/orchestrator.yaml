@@ -207,8 +207,10 @@
   input: "看看我的收款人"
   slots: {}
   # 排版是重点：精简表格（一行一位）+「白名单」列；表下一行说明两组的转账验证差别。
+  # ⚠️ 白名单那句断言的是「基础档位更低」，**不是**「只需会话内确认」—— 后者是过度承诺
+  # （§5 的 night/velocity/new_payee 仍会升档；实测 23:40 连种子的白名单王五也要 OTP）。
   expect: {intent: payee_list, tool_calls: [list_payees], tier: L0, executed: false,
-           must_contain: ["| 收款人 | 手机号 | 银行 | 白名单 |", "转账只需会话内确认"]}
+           must_contain: ["| 收款人 | 手机号 | 银行 | 白名单 |", "基础档位更低"]}
 - id: pay-003
   input: "我有多少收款人"
   slots: {}
