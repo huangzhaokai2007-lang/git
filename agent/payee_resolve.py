@@ -173,6 +173,15 @@ def profile_of(payee_id: str) -> dict | None:
     return next((p for p in _people() if p["payee_id"] == payee_id), None)
 
 
+def list_people() -> list[dict]:
+    """当前用户的收款人 + 画像（tags / blacklist / whitelist_quota）。
+
+    供网页端渲染收款人卡（S6）用；是 `_people()` 的公开入口 —— 界面只调 agent 层，
+    这里再下探 tools/，分层不破。
+    """
+    return _people()
+
+
 def _decide(hits: list[dict], how: str, query: str) -> ResolveResult:
     """按命中结果给结论：黑名单优先于一切（命中黑名单不当候选，直接拒）。"""
     if not hits:
