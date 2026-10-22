@@ -21,12 +21,12 @@ SPEC_PATH = REPO_ROOT / "docs" / "01-接口规格.md"
 EXPECTED_COLUMN_COUNTS: dict[str, int] = {
     "user": 4,
     "account": 6,
-    "txn": 10,
+    "txn": 11,          # v2：+payee_id（按收款人算白名单额度，不按名字）
     "card": 9,
     "subscription": 8,
     "wealth_product": 6,
     "holding": 6,
-    "payee": 7,
+    "payee": 11,        # v2：+tags / whitelist_quota / blacklist / blacklist_reason
     "audit_log": 12,
     "risk_event": 7,
 }
