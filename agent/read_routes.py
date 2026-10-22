@@ -43,4 +43,8 @@ TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
     #: SPEC-CHANGE 新增（用户需求「查看白名单」）：T20 `list_payees`，**L0 只读**、**无槽位**
     #: （不传参数 = 列全部）。返回白名单标记，分组文案由 `render_lists.render_payees` 渲染。
     "payee_list": ("list_payees", lambda s: payee.list_payees()),
+    #: 用户需求「一键得知自己有什么理财还在持有中」：T21 `list_holdings`，L0 只读、无槽位。
+    "wealth_holdings": ("list_holdings", lambda s: wealth.list_holdings()),
+    #: 用户需求「看到其他风险等级之外的产品，但不做推荐」：T22 `list_all_products`，L0 只读。
+    "wealth_all_products": ("list_all_products", lambda s: wealth.list_all_products()),
 }

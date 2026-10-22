@@ -31,6 +31,7 @@ INTENT_LABELS = (
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
+    "wealth_holdings", "wealth_all_products",
     "gift_plan", "payee_add", "payee_list", "payee_whitelist", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
@@ -40,6 +41,7 @@ IntentLabel = Literal[
     "subscription_list", "subscription_cancel", "subscription_remind",
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
+    "wealth_holdings", "wealth_all_products",
     "gift_plan", "payee_add", "payee_list", "payee_whitelist", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
@@ -68,7 +70,9 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "risk_assess": ("answers",),                                           # T13 assess_risk
     "wealth_recommend": ("risk_level", "horizon_days", "amount"),          # T14 recommend_wealth
     "wealth_buy": ("product", "amount"),                                # T15 trade_wealth
-    "wealth_redeem": ("product", "amount"),                             # T15 trade_wealth
+    "wealth_redeem": ("product", "amount"),
+    "wealth_holdings": (),          # T21 list_holdings（无入参）
+    "wealth_all_products": (),      # T22 list_all_products（无入参）                             # T15 trade_wealth
     "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）

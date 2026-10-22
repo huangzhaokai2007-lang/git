@@ -35,6 +35,13 @@ from typing import Mapping
 from data import dao
 
 from agent import templates
+from agent._risk_questions import (      # noqa: F401 —— 再导出，保住 `risk_flow.<name>` 历史调用点
+    ANSWER_ALIASES as _ANSWER_ALIASES,
+    QUESTION_KEYS_CN,
+    QUESTION_WORDS as _QUESTION_WORDS,
+    QUESTIONS,
+    missing_questions,
+)
 from tools import wealth as wealth_tool
 from tools._wealth_risk import QUESTION_SCORE_RULE
 from tools.schemas import ToolResult
@@ -49,38 +56,6 @@ TOOL = "assess_risk"
 #: 聊天触发时回的引导语：**唯一来源是 `templates.T_RISK_PROMPT`**（文案统一在模板层，
 #: 与 `payee_flow.PROMPT` 各写一份不同 —— 这里不再抄第二份，避免两处漂移）。
 PROMPT = templates.T_RISK_PROMPT
-
-#: 5 题的展示题干与选项文案（**纯文案**，分值不在这里 —— 分值唯一来源是工具层的 `QUESTION_SCORE_RULE`）。
-#: 选项顺序必须与 `QUESTION_SCORE_RULE` 的元组下标 0..4 一一对应（第 i 项 → i+1 分）。
-QUESTIONS: dict[str, tuple[str, tuple[str, ...]]] = {
-    "experience": ("您的投资经验有多久？", ("没有", "不到 1 年", "1-3 年", "3-5 年", "5 年以上")),
-    "income": ("您的收入稳定程度？", ("很不稳定", "一般", "稳定", "很稳定", "极其稳定")),
-    "drawdown": ("您能承受的最大亏损（回撤）是？", ("不接受任何亏损", "5% 以内", "10% 以内",
-                                                "20% 以内", "20% 以上")),
-    "horizon": ("您计划的投资期限是？", ("3 个月以内", "半年", "1 年", "3 年", "5 年以上")),
-    "age": ("您的年龄？（请填写周岁，须年满 18 岁）", ()),
-}
-
-#: 一句话解析用的同义词表：key = 题号，value = (归一化后的文案, 分值下标)。
-#: 只认这些写法 —— 认不出就整题算缺，交给调用方走 CLARIFY 追问（**不猜**）。
-_ANSWER_ALIASES: dict[str, dict[str, int]] = {
-    "experience": {"没有": 0, "无": 0, "不到1年": 1, "1年以内": 1, "1-3年": 2, "1到3年": 2,
-                   "3-5年": 3, "3到5年": 3, "5年以上": 4, "超过5年": 4},
-    "income": {"很不稳定": 0, "一般": 1, "稳定": 2, "很稳定": 3, "极其稳定": 4, "非常稳定": 4},
-    "drawdown": {"不接受任何亏损": 0, "不接受亏损": 0, "5%以内": 1, "10%以内": 2,
-                 "20%以内": 3, "20%以上": 4},
-    "horizon": {"3个月以内": 0, "3个月": 0, "半年": 1, "1年": 2, "一年": 2, "3年": 3, "三年": 3,
-                "5年以上": 4, "超过5年": 4},
-}
-
-#: 各题在自然语言里的称呼（一句话解析时用来定位"这句话说的是哪一题"）
-_QUESTION_WORDS: dict[str, tuple[str, ...]] = {
-    "experience": ("经验", "投资经验"),
-    "income": ("收入", "收入稳定"),
-    "drawdown": ("回撤", "亏损", "承受"),
-    "horizon": ("期限", "投资期限", "投资时长"),
-    "age": ("年龄", "岁"),
-}
 
 #: 年龄题的**锚点词**：只有段里出现它，才把段里的数字当年龄（防止「经验1-3年」的 1 被当岁数）
 _AGE_ANCHORS = ("年龄", "岁", "周岁")
@@ -101,22 +76,6 @@ def _audit(trace_id: str, session_id: str, result: str, error_code: str | None,
                          permission_tier=TIER, result=result, error_code=error_code)
     except Exception:                                    # noqa: BLE001 —— 审计隔离于回执（同 orchestrator）
         logger.exception("写审计失败（回执照常返回，但必须排查）：trace=%s", trace_id)
-
-
-#: 各题的**短名**（追问时用；`agent/templates.SLOT_CN` 认得它们，会翻成人话）。
-QUESTION_KEYS_CN: dict[str, str] = {
-    "experience": "投资经验", "income": "收入稳定性", "drawdown": "可承受亏损",
-    "horizon": "投资期限", "age": "年龄",
-}
-
-
-def missing_questions(answers: Mapping[str, object]) -> list[str]:
-    """还缺哪几题（返回**短名**，按 `QUESTIONS` 的登记顺序）。齐全 → `[]`。
-
-    追问时经 `templates.clarify_missing` 渲染 —— 短名在 `SLOT_CN` 里有中文对照，
-    不会露出 `experience` 这种内部键名。
-    """
-    return [QUESTION_KEYS_CN[key] for key in QUESTIONS if key not in answers]
 
 
 def parse_answers(text: str) -> dict[str, int]:

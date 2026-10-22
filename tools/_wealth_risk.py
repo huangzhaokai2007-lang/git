@@ -37,22 +37,42 @@ logger = logging.getLogger(__name__)
 
 # ---------------- 阈值常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
 RISK_LEVELS = ("R1", "R2", "R3", "R4", "R5")     # 来源：DDL `wealth_product.risk_level` + 规格 T13/T14
+#: 等级的**中文标签**：对外展示一律用它，别把「R3」直接甩给用户（用户看不懂 R 几代表什么）。
+#: 措辞对齐券商开户问卷的通俗分档（低/中低/中/中高/高），不照抄任何一家的原文。
+RISK_LABELS = {"R1": "低风险", "R2": "中低风险", "R3": "中风险",
+               "R4": "中高风险", "R5": "高风险"}
+#: 等级的**风险说明**（确认卡上给用户看的一句话）。数字是「该等级的典型波动区间」，
+#: 不是对某只产品的收益承诺 —— 它随 facts 一起下发，卡面数字才过得了校验器（铁律 2）。
+RISK_DESC = {
+    "R1": "本金风险很低，收益小幅波动，通常不亏本金",
+    "R2": "本金风险较低，短期可能出现 5% 以内的波动",
+    "R3": "本金有一定风险，可能出现 5%-10% 的波动",
+    "R4": "本金风险较高，可能出现 10%-20% 的波动",
+    "R5": "本金风险高，可能出现 20% 以上的波动，可能损失大部分本金",
+}
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
 
-#: 【计分规则表】来源：卡 07 第 1 条（5 题问卷 → 代码计分得 R1–R5，LLM 不参与）。
-#: 4 道选择题按**选项下标 0..4** 计 1..5 分；年龄题（`age`，直接填岁数）按 `AGE_BANDS` 分段计 1..5 分。
+#: 【计分规则表】来源：卡 07 第 1 条（问卷 → 代码计分得 R1–R5，LLM 不参与）。
+#: 8 道选择题按**选项下标 0..4** 计 1..5 分；年龄题（`age`，直接填岁数）按 `AGE_BANDS` 分段计 1..5 分。
+#: 问卷维度参考券商开户（经验/收入/年收入/资金占比/亏损承受/期限/目标/亏损反应），题面在
+#: `agent/_risk_questions.py`，两处**必须同序**（下标 i → i+1 分）。
 QUESTION_SCORE_RULE = {
     "experience": (1, 2, 3, 4, 5),      # 投资经验：无 / <1年 / 1-3年 / 3-5年 / >5年
-    "income": (1, 2, 3, 4, 5),          # 收入稳定性：很不稳定 / 一般 / 稳定 / 很稳定 / 极稳定
-    "drawdown": (1, 2, 3, 4, 5),        # 可承受最大回撤：不接受 / ≤5% / ≤10% / ≤20% / >20%
-    "horizon": (1, 2, 3, 4, 5),         # 投资期限：≤3个月 / 半年 / 1年 / 3年 / >5年
+    "income": (1, 2, 3, 4, 5),          # 收入稳定性：很不稳定 / 不太稳定 / 一般 / 比较稳定 / 非常稳定
+    "income_level": (1, 2, 3, 4, 5),    # 家庭年收入：10万以下 / 10-30万 / 30-50万 / 50-100万 / 100万以上
+    "asset_ratio": (1, 2, 3, 4, 5),     # 投资资金占可投资资产：10%以下 / 10-30% / 30-50% / 50-80% / 80%以上
+    "drawdown": (1, 2, 3, 4, 5),        # 可承受最大回撤：不接受 / ≤5% / 5-10% / 10-20% / >20%
+    "horizon": (1, 2, 3, 4, 5),         # 投资期限：≤3月 / 3-12月 / 1-3年 / 3-5年 / >5年
+    "goal": (1, 2, 3, 4, 5),            # 投资目标：保本 / 稳健增值 / 平衡 / 较高收益 / 高收益
+    "reaction": (1, 2, 3, 4, 5),        # 亏损反应：全部卖出 / 卖一部分 / 持有观望 / 补仓 / 大幅加仓
 }
 #: 年龄分段得分（下限闭、上限开）：18-25 → 1，26-40 → 2，41-55 → 3，56-65 → 4，>65 → 5
 AGE_BANDS = ((18, 26, 1), (26, 41, 2), (41, 56, 3), (56, 66, 4), (66, 200, 5))
-#: 总分（5–25）→ 风险等级分段
-LEVEL_BANDS = ((5, 10, "R1"), (10, 14, "R2"), (14, 18, "R3"), (18, 22, "R4"), (22, 26, "R5"))
-MAX_SCORE = 5 * (len(QUESTION_SCORE_RULE) + 1)    # 5 题 × 每题最高 5 分 = 25（供 facts 展示）
+#: 总分（9–45）→ 风险等级分段（每档 8 分，末档到 45）
+LEVEL_BANDS = ((9, 17, "R1"), (17, 25, "R2"), (25, 33, "R3"), (33, 41, "R4"), (41, 46, "R5"))
+MAX_SCORE = 5 * (len(QUESTION_SCORE_RULE) + 1)    # 9 题 × 每题最高 5 分 = 45（供 facts 展示）
+MIN_SCORE = 1 * (len(QUESTION_SCORE_RULE) + 1)    # 全选最低档 = 9 分（供 facts 展示「分数区间」）
 
 STRICT = ConfigDict(strict=True, extra="forbid")
 #: 进程内私有存储：user_id → 测评结果（见文件头「用户风险等级存哪」）
@@ -111,11 +131,17 @@ def _yield_text(value: float) -> str:
     return f"{value:.2f}%"
 
 
+def risk_label(level: str) -> str:
+    """风险等级的中文标签（「R3」→「中风险」）；未知等级原样回显，不猜。"""
+    return RISK_LABELS.get(str(level), str(level))
+
+
 def _score(answers: dict[str, int]) -> int:
     """按 `QUESTION_SCORE_RULE` / `AGE_BANDS` 计分；缺题、越界、非整数一律拒。"""
     if set(answers) != set(QUESTION_SCORE_RULE) | {"age"}:
         raise ToolError(ErrorCode.INVALID_ARGUMENT,
-                        f"问卷必须恰好包含 {'、'.join(sorted(set(QUESTION_SCORE_RULE) | {'age'}))} 五题")
+                        f"问卷必须恰好包含 {'、'.join(sorted(set(QUESTION_SCORE_RULE) | {'age'}))} "
+                        f"{len(QUESTION_SCORE_RULE) + 1} 题")
     total = 0
     for key, rule in QUESTION_SCORE_RULE.items():
         value = answers[key]
@@ -163,7 +189,8 @@ def assess_risk(answers: dict) -> ToolResult:
     data = AssessRiskData(risk_level=level, valid_until=valid_until)
     facts = {"risk_level": level, "valid_until": valid_until, "total_score": total,
              "max_score": MAX_SCORE, "valid_days": RISK_VALID_DAYS, "answers": dict(answers)}
-    message = f"根据问卷计分（{total} 分），您的风险承受等级为 {level}，有效期至 {valid_until}。"
+    message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」"
+               f"（{level}），有效期至 {valid_until}。")
     return _ok(data.model_dump(), facts, message)
 
 

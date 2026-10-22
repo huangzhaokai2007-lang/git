@@ -17,12 +17,13 @@ from typing import Mapping
 from pydantic import BaseModel, ConfigDict
 
 from agent import llm
+from agent._risk_questions import QUESTIONS as _RISK_QUESTIONS
 from agent.render_lists import (          # noqa: F401 —— 列表类回执按职责拆出后**再导出**（同一份实现）
     CARD_STATUS_CN, CARD_TYPE_CN, CYCLE_LABELS, T_CARD_HEAD, T_CARD_HEAD_FILTERED, T_CARD_NO_CARD,
     T_CARD_NO_CARD_FILTERED, T_PAYEE_EMPTY, T_PAYEE_HEAD, T_PAYEE_OTHER, T_PAYEE_WHITELIST,
     T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
     T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, T_WEALTH, T_WEALTH_CLEAN, T_WEALTH_EMPTY,
-    TemplateError, card_line, payee_row, render_cards, render_payees, render_subscriptions,
+    TemplateError, card_line, payee_row, render_holdings, render_all_products, render_cards, render_payees, render_subscriptions,
     render_wealth, subscription_line, term_cn, wealth_line,
 )
 from guard import facts_check, injection
@@ -71,7 +72,8 @@ T_RISK_RESULT = ("根据问卷计分（{total_score}/{max_score} 分），您的
 #: 数字校验未通过时的降级措辞（不含任何数字；口径同 `T_DEGRADED_NOTE`）。
 T_RISK_RESULT_FALLBACK = "您的风险测评已完成，具体等级与有效期请看测评结果。（测评结果仅保存在本次会话中）"
 #: 问卷引导语（聊天触发时回，**不计分**；界面见到 `intent=risk_assess` 就弹问卷）。
-T_RISK_PROMPT = "好的，风险测评一共 5 题，请在下面的问卷里作答，提交后我立刻按您的回答算出风险等级。"
+T_RISK_PROMPT = (f"好的，风险测评一共 {len(_RISK_QUESTIONS)} 题，请在下面的问卷里作答，"
+                 "提交后我立刻按您的回答算出风险等级。")
 
 #: 反问（缺槽/低置信度）：只列缺失项的中文名，不含任何业务数字
 T_CLARIFY_SLOT = "我需要再确认一下：请补充{slots_cn}。"
@@ -137,6 +139,10 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_wealth(facts)
     if intent == "payee_list":                               # SPEC-CHANGE：白名单 / 非白名单分组
         return render_payees(facts)
+    if intent == "wealth_holdings":                          # T21：持仓明细
+        return render_holdings(facts)
+    if intent == "wealth_all_products":                      # T22：全部产品，按等级分组
+        return render_all_products(facts)
     if intent == "risk_assess":                              # F10：总分/满分/等级/有效期（不走单行 format）
         try:
             return T_RISK_RESULT.format(**facts)
@@ -173,7 +179,15 @@ def unsupported(intent: str) -> str:
     return T_UNSUPPORTED.format(intent_cn=INTENT_CN.get(intent, intent))
 
 
+#: 未测评时的引导（用户需求：直接问「要不要现在做」）。只对这一种 INVALID_STATE 生效。
+T_NEED_RISK = ("您还没有完成风险测评，暂时不能买理财。\n\n"
+               "**要不要现在做一下？** 一共 9 道题、大约 1 分钟，做完就能直接买。\n"
+               "回复「**帮我做风险测评**」，我马上把问卷发您。")
+
+
 def tool_error(error_code: str | None, detail: str) -> str:
+    if error_code == "INVALID_STATE" and ("风险测评" in detail or "风险评估" in detail):
+        return T_NEED_RISK
     return T_TOOL_ERROR.format(error_code=error_code or "ERROR", detail=detail)
 
 

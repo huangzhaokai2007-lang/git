@@ -39,8 +39,10 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_user_id,
 )
 from tools._wealth_risk import (             # noqa: F401 —— assess_risk/recommend_wealth/_ASSESSMENTS 为 re-export
-    _ASSESSMENTS, _rank, _yield_text, assess_risk, recommend_wealth, require_assessment,
+    _ASSESSMENTS, _rank, _yield_text, RISK_DESC, RISK_LABELS, assess_risk, recommend_wealth,
+    require_assessment,
 )
+from tools.wealth_holdings import list_all_products, list_holdings   # noqa: F401 —— T21/T22 re-export
 from tools.schemas import ErrorCode, ToolResult
 from tools.subscription import (
     _CONFIRM_LOCK, check_confirm_ref, confirmed_result, finish_confirm_ref,
@@ -219,12 +221,27 @@ class PreviewTradeReq(BaseModel):
 
 
 def _resolve_product(query: str) -> dict | None:
-    """产品定位：先按 id 精确；未命中则按**名称包含**匹配，**唯一命中**才认（重名不猜）。"""
+    """产品定位：id 精确 → 名称包含 → **滑窗子串**兜底；每一层都要求**唯一命中**（重名不猜）。
+
+    滑窗兜底解决的是实测缺陷：用户打错字时 LLM 会把错字一起塞进产品名 ——
+    「买100**快**添利定开」（块→快）抽成 `快添利定开`，整串不包含于任何产品名 →
+    NOT_FOUND。按子串从长到短试，「添利定开」能唯一命中「添利定开 180 天」。
+    最短试到 3 字，避免「稳健」「稳盈」这类两字片段误配。
+    """
     product = dao.get_product(query)
     if product is not None:
         return product
-    hits = [row for row in dao.list_products() if query and query in str(row["name"])]
-    return hits[0] if len(hits) == 1 else None
+    products = dao.list_products()
+    hits = [row for row in products if query and query in str(row["name"])]
+    if hits:
+        return hits[0] if len(hits) == 1 else None
+    for size in range(len(query) - 1, 2, -1):                 # 从长到短，最短 3 字
+        for start in range(len(query) - size + 1):
+            piece = query[start:start + size]
+            hits = [row for row in products if piece in str(row["name"])]
+            if len(hits) == 1:
+                return hits[0]
+    return None
 
 
 def preview_trade(product_id: str, action: str, amount: int) -> ToolResult:
@@ -251,13 +268,16 @@ def preview_trade(product_id: str, action: str, amount: int) -> ToolResult:
     facts = {"product_id": product["id"], "product_name": product["name"],
              "target_name": product["name"],          # 确认卡顶部主对象（write_flow 优先读这个键）
              "product_risk_level": product["risk_level"], "action": action,
+             "product_risk_label": RISK_LABELS.get(product["risk_level"], product["risk_level"]),
              "action_cn": "申购" if action == "buy" else "赎回",
              "yield": _yield_text(product["expected_yield"]),
+             "risk_desc": RISK_DESC.get(product["risk_level"], ""),
              "term_days": product["term_days"], "tier": TRADE_TIER, "requires_otp": True,
              **_money_facts(amount, "amount"),
              **_money_facts(product["min_amount"], "min_amount")}
     if action == "buy":
         facts["user_risk_level"] = plan["user_risk_level"]
+        facts["user_risk_label"] = RISK_LABELS.get(plan["user_risk_level"], plan["user_risk_level"])
         facts.update(_money_facts(dao.get_balance("savings")["balance"], "balance"))
     else:
         facts.update(_money_facts(plan["holding"]["amount"], "holding_amount"))
