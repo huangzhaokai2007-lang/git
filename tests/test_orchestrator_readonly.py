@@ -138,7 +138,7 @@ def test_tool_failure_uses_the_error_template(seeded: Path, monkeypatch: pytest.
     fake_llm(monkeypatch, [out("wealth_recommend")])
     result = orchestrator.handle("推荐点理财产品")
     assert result.error_code == "INVALID_STATE" and result.tool_calls == ["recommend_wealth"]
-    assert "没能查到" in result.reply
+    assert "风险测评" in result.reply and "要不要现在做" in result.reply      # 引导立即测评
 
 
 # ---------------- 红线：数字只能来自 facts ----------------
@@ -219,7 +219,8 @@ def test_read_intents_are_exactly_the_contracted_set(seeded: Path,
     """
     assert orchestrator.READ_INTENTS == ("balance_query", "txn_query", "bill_analysis", "anomaly_check",
                                          "bill_report", "subscription_list", "card_query",
-                                         "wealth_recommend", "risk_assess", "payee_list")
+                                         "wealth_recommend", "risk_assess", "payee_list",
+                                         "wealth_holdings", "wealth_all_products")
     assert all(intent in classifier.INTENT_LABELS for intent in orchestrator.READ_INTENTS)
     assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS)   # 卡 23 起 card_query 也有路由
 
