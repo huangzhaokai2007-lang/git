@@ -165,9 +165,13 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    #: v2 专属额度层（与即时转账同一份口径）：超额度/未设额度 → 至少 L2 要码。
+    person = payee_resolve.profile_of(filled["payee_id"])
+    tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
+                                              str(preview.facts.get("tier") or "L2"))
     return Prepared(ok=True,
-                    facts={**preview.facts, "payee_phone": masked,
-                           "schedule": str(filled["schedule"])},
+                    facts={**preview.facts, "tier": tier, "payee_phone": masked,
+                           "schedule": str(filled["schedule"]), "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
 
 
