@@ -67,11 +67,12 @@ def test_whitelist_with_expire_lands_on_row(wired, monkeypatch) -> None:
     _fake(monkeypatch, {"payee": ZHANG, "expire": "2027-01-31"})
     card = orchestrator.handle(f"把{ZHANG}加入白名单，有效期到 2027-01-31", session_id=SESSION)
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"
-    assert "有效期" in card.reply and "仅展示" in card.reply
+    assert "有效期至" in card.reply and "2027-01-31" in card.reply
+    # 2026-10-24 口径变更：有效期不再是「仅展示」，到期会降级为普通收款人
     otp_stage = orchestrator.handle("确认", session_id=SESSION)
     assert "验证码" in otp_stage.reply
     done = orchestrator.handle("123456", session_id=SESSION)
-    assert done.executed is True and "白名单有效期到" in done.reply
+    assert done.executed is True and "有效期至 2027-01-31" in done.reply
     row = raw(wired, "SELECT is_whitelist, whitelist_expire FROM payee WHERE name = ?", (ZHANG,))[0]
     assert row["is_whitelist"] == 1 and row["whitelist_expire"] == "2027-01-31"
 

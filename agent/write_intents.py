@@ -51,6 +51,23 @@ from agent._write_gift import (
     _prepare_gift,
     _shape_gift,
 )
+from agent._write_payee_ops import (
+    _card_edit as _card_payee_edit,
+    _card_note as _card_payee_note,
+    _card_remove as _card_payee_remove,
+    _execute_edit as _execute_payee_edit,
+    _execute_note as _execute_payee_note,
+    _execute_remove as _execute_payee_remove,
+    _plain_edit as _plain_payee_edit,
+    _plain_note as _plain_payee_note,
+    _plain_remove as _plain_payee_remove,
+    _prepare_edit as _prepare_payee_edit,
+    _prepare_note as _prepare_payee_note,
+    _prepare_remove as _prepare_payee_remove,
+    _shape_edit as _shape_payee_edit,
+    _shape_note as _shape_payee_note,
+    _shape_remove as _shape_payee_remove,
+)
 from agent._write_aa_ops import (
     _card as _card_aa_op,
     _execute_cancel as _execute_aa_cancel,
@@ -291,6 +308,33 @@ _SPECS["aa_cancel"] = WriteSpec(
     target_key="request_id",
     what="撤销 AA", shape=_shape_aa_cancel, prepare=_prepare_aa_cancel,
     card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_cancel)
+
+#: 2026-10-24（人类原文「修改白名单信息需要验证码」→ L2）。
+_SPECS["payee_whitelist_edit"] = WriteSpec(
+    intent="payee_whitelist_edit", intent_cn="修改白名单信息", title="修改白名单信息确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "quota"), tools=("list_payees",), execute_tool="set_whitelist_quota",
+    target_key="payee_id",
+    what="修改白名单信息", shape=_shape_payee_edit, prepare=_prepare_payee_edit,
+    card=_card_payee_edit, plain=_plain_payee_edit, execute=_execute_payee_edit)
+
+#: 2026-10-24（人类原文「移除白名单需要确认」→ L1 确认卡，无需验证码）。
+_SPECS["payee_whitelist_remove"] = WriteSpec(
+    intent="payee_whitelist_remove", intent_cn="移出白名单", title="移出白名单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_payees",), execute_tool="set_payee_whitelist",
+    target_key="payee_id",
+    what="移出白名单", shape=_shape_payee_remove, prepare=_prepare_payee_remove,
+    card=_card_payee_remove, plain=_plain_payee_remove, execute=_execute_payee_remove)
+
+#: 2026-10-24（人类原文「添加收款人与查看收款人时允许添加或修改备注」→ L1）。
+_SPECS["payee_note"] = WriteSpec(
+    intent="payee_note", intent_cn="修改备注", title="修改备注确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "note"), tools=("list_payees",), execute_tool="set_payee_note",
+    target_key="payee_id",
+    what="修改备注", shape=_shape_payee_note, prepare=_prepare_payee_note,
+    card=_card_payee_note, plain=_plain_payee_note, execute=_execute_payee_note)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

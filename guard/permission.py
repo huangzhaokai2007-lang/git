@@ -54,6 +54,9 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "gift_order_pay": "L2",         # F20 追加：支付订单真扣款 → 要验证码
     "aa_mark_paid": "L1",           # F22 追加：登记某人已付，不动钱
     "aa_cancel": "L1",              # F22 追加：撤销 AA，不动钱
+    "payee_whitelist_edit": "L2",   # 2026-10-24：修改白名单信息必须验证码（人类原文）
+    "payee_whitelist_remove": "L1", # 2026-10-24：移出白名单要确认、不要码
+    "payee_note": "L1",             # 2026-10-24：备注是纯说明文字
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）

@@ -26,7 +26,7 @@ EXPECTED_COLUMN_COUNTS: dict[str, int] = {
     "subscription": 8,
     "wealth_product": 6,
     "holding": 6,
-    "payee": 12,        # v2：+tags / whitelist_quota / whitelist_expire / blacklist / blacklist_reason
+    "payee": 13,        # v2：+tags / whitelist_quota / whitelist_expire / note / blacklist / blacklist_reason
     "audit_log": 12,
     "risk_event": 7,
 }

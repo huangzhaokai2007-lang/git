@@ -14,7 +14,7 @@ import datetime
 import threading
 import uuid
 
-from data import dao
+from data import dao, payee_dao
 
 from tools._query_common import (
     DEMO_USER_ID, ToolError, _fail, _ok, current_session_id, current_user_id, require_owned,
@@ -258,3 +258,67 @@ def unset_payee_blacklist(payee_id: str, confirm_ref: str) -> ToolResult:
                 "masked_phone": row["phone"], "blacklist": False},
                {"name": row["name"], "masked_phone": row["phone"]},
                f"{row['name']}（{row['phone']}）已解除黑名单")
+
+# ---------------- T45 备注 / T46 专属额度（2026-10-24 追加） ----------------
+
+NOTE_TOOL, QUOTA_TOOL = "set_payee_note", "set_whitelist_quota"
+
+
+def _owned_payee(payee_id: str, *, tool: str) -> dict:
+    """取本人收款人（越权 fail-closed）；找不到 → NOT_FOUND。"""
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id, tool=tool, intent="payee_list")
+    except ToolError:
+        raise
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        raise ToolError(ErrorCode.NOT_FOUND, "找不到该收款人")
+    return dict(row)
+
+
+def set_payee_note(payee_id: str, note: str) -> ToolResult:
+    """T45 设置/修改收款人**备注**（L1：纯说明文字，不参与任何风控判定）。
+
+    空串 = 清除备注。`data` = `{payee_id, note}`。
+    """
+    text = str(note or "").strip()[:60]                      # 备注只做提示，长文本无意义
+    try:
+        row = _owned_payee(payee_id, tool=NOTE_TOOL)
+        payee_dao.update_payee(payee_id, current_user_id(), note=text or None)
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_note", tool=NOTE_TOOL, params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = f"备注已设为「{text}」" if text else "备注已清除"
+    return _ok({"payee_id": payee_id, "note": text or ""},
+               {"name": row["name"], "note": text}, f"{row['name']}：{label}")
+
+
+def set_whitelist_quota(payee_id: str, quota_cents: int) -> ToolResult:
+    """T46 设白名单**专属额度**（单位分；`0` = 清除，等同未设 → 一律要验证码）。
+
+    L1 工具（真正的「修改白名单信息」在编排层按 **L2 + 验证码** 走，见 `payee_whitelist_edit`）。
+    要求该人**在白名单里**（否则 `INVALID_STATE`）；负数 → `INVALID_ARGUMENT`。
+    """
+    if int(quota_cents) < 0:
+        return _fail(ErrorCode.INVALID_ARGUMENT, "专属额度不能是负数")
+    from data.db import transaction                       # 局部 import：与文件内其余函数同口径
+    try:
+        row = _owned_payee(payee_id, tool=QUOTA_TOOL)
+        if not row["is_whitelist"]:
+            return _fail(ErrorCode.INVALID_STATE, "该收款人不在白名单里，谈不上专属额度")
+        value = int(quota_cents) or None
+        with transaction(dao.connection()):
+            payee_dao.update_payee(payee_id, current_user_id(), whitelist_quota=value)
+            dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                             intent="payee_whitelist_edit", tool=QUOTA_TOOL,
+                             params_json={"payee_id": payee_id, "quota_cents": value},
+                             risk_level="L1", permission_tier="L1", result="success",
+                             error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = f"专属额度已设为 {int(quota_cents) / 100:.2f} 元" if quota_cents else "专属额度已清除"
+    return _ok({"payee_id": payee_id, "whitelist_quota": value},
+               {"name": row["name"], "whitelist_quota": value}, f"{row['name']}：{label}")

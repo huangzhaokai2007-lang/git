@@ -14,7 +14,7 @@ import datetime
 from typing import Mapping
 
 from agent import _relative_time, confirm_card, payee_clarify, payee_resolve
-from agent._write_common import Prepared, ShapeResult, _code_of
+from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
 from agent._write_transfer import _payee_query                     # 同一份「回显串归一化」
 from tools import payee, transfer
 
@@ -46,8 +46,28 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
 
 
 def _shape_whitelist(slots: Mapping) -> ShapeResult:
-    """加白：统一解析关卡。**已黑名单的人 → FORBIDDEN**（黑白互斥，先解除再谈加白）。"""
-    return _resolve_shape(slots)
+    """加白：统一解析关卡。**已黑名单的人 → FORBIDDEN**（黑白互斥，先解除再谈加白）。
+
+    2026-10-24（人类原文「要为白名单人员设置有效时间与额度」）：可选 `quota`（元）/`expire`
+    （日期或「月底」这类相对说法）两个槽位 —— 在本步归一化；缺了不报错
+    （额度未设 = 一律要验证码；有效期空 = 长期有效）。
+    """
+    shaped = _resolve_shape(slots)
+    if shaped.error_code:                              # 黑名单等硬拒绝：原样透传（不吞错误码）
+        return shaped
+    filled = dict(shaped.filled)
+    if filled.get("quota") is not None and filled.get("quota_cents") is None:
+        raw = str(filled["quota"]).strip()
+        if raw:
+            filled["quota_cents"] = yuan_to_cents(filled["quota"])
+    if filled.get("expire"):
+        expire = _iso_expire(filled["expire"])
+        if expire is None:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
+                               message="有效期看不懂，请用 2026-12-31 这样的日期（或说「月底」）")
+        filled["expire"] = expire
+    return ShapeResult(filled=filled, missing=shaped.missing, clarify=shaped.clarify,
+                       candidates=shaped.candidates)
 
 
 def _prepare_whitelist(filled: dict) -> Prepared:
@@ -65,6 +85,8 @@ def _prepare_whitelist(filled: dict) -> Prepared:
     if row.get("is_whitelist"):
         return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人已经在白名单里了")
     facts = {**row, "tier": payee.WHITELIST_TIER}
+    if filled.get("quota_cents") is not None:                 # 2026-10-24：加白时一并设专属额度
+        facts["quota_cents"] = int(filled["quota_cents"])
     if filled.get("expire"):
         expire = _iso_expire(filled["expire"])
         if expire is None:
@@ -97,7 +119,9 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
               ("手机号", str(facts["masked_phone"])),
               ("变更", "加入白名单"),
               ("影响", "专属额度内转账免验证码（含深夜）；超额度仍需验证码"),
-              *([("有效期", f"{facts['expire']}（仅展示，不影响免码判定）")] if facts.get("expire") else [])],
+              *([("专属额度", f"{facts['quota_cents'] / 100:.2f} 元（有效期内、额度内免验证码）")]
+                if facts.get("quota_cents") is not None else []),
+              *([("有效期至", str(facts["expire"]))] if facts.get("expire") else [])],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], "加入白名单"))
 
@@ -113,11 +137,18 @@ def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None)
     del otp
     result = payee.set_payee_whitelist(str(confirmation.target_id), True, confirmation.credential)
     expire = str(confirmation.filled.get("expire") or "")
+    quota = confirmation.filled.get("quota_cents")
+    notes: list[str] = []
     if result.ok and expire:                                  # 有效期是白名单属性，加白成功后再记
         marked = payee.set_whitelist_expire(str(confirmation.target_id), expire)
         if marked.ok:
-            result = result.model_copy(update={
-                "message": f"{result.message}（白名单有效期到 {expire}）"})
+            notes.append(f"有效期至 {expire}")
+    if result.ok and quota is not None:                       # 专属额度（T46）
+        marked = payee.set_whitelist_quota(str(confirmation.target_id), int(quota))
+        if marked.ok:
+            notes.append(f"专属额度 {int(quota) / 100:.2f} 元")
+    if result.ok and notes:
+        result = result.model_copy(update={"message": f"{result.message}（{'，'.join(notes)}）"})
     return result
 
 

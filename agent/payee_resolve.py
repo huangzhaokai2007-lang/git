@@ -137,7 +137,8 @@ def _people() -> list[dict]:
                     "blacklist": bool(extra.get("blacklist")),
                     "blacklist_reason": extra.get("blacklist_reason"),
                     "whitelist_quota": extra.get("whitelist_quota"),
-                    "whitelist_expire": extra.get("whitelist_expire")})
+                    "whitelist_expire": extra.get("whitelist_expire"),
+                    "note": extra.get("note")})
     return out
 
 
