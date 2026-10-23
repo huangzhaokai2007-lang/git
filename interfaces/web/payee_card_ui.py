@@ -191,6 +191,22 @@ def _is_expired(person: dict) -> bool:
     return bool(person.get("is_whitelist")) and payee_risk.is_expired(person)
 
 
+def _quota_note(executor: ThreadPoolExecutor, person: dict) -> str:
+    """白名单专属额度：总额 + **本月剩余**（剩余额度由 `agent.payee_risk` 算，界面不重算）。"""
+    total = person.get("whitelist_quota")
+    if not person.get("is_whitelist") or total is None:
+        return ""
+    left = executor.submit(payee_risk.remaining_quota, person).result()
+    left_txt = "—" if left is None else f"{left / 100:.2f} 元"
+    return f" · 额度 {total / 100:.2f} 元（剩余 {left_txt}）"
+
+
+def _recent_note(person: dict) -> str:
+    """最近一次转账时间（工具层回填的 `last_used_ts`；没有就不印）。"""
+    ts = str(person.get("last_used_ts") or "")
+    return f" · 最近转账 {ts[:10]}" if ts else " · 从未转账"
+
+
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """渲染收款人查询卡：筛选 + 统计 + 每行备注 + 「转账/加白/移出白名单/拉黑/解除/删除」+ 改备注表单。
 
@@ -225,8 +241,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
             [3.4, 0.75, 0.75, 0.75, 0.75], vertical_alignment="center")
         note = f" · 备注 {person['note']}" if person.get("note") else ""
+        quota = _quota_note(executor, person)
+        recent = _recent_note(person)
         left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
-                      f"{tags}{_expire_note(person)}{note}")
+                      f"{tags}{_expire_note(person)}{quota}{note}{recent}")
         if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
                                help=f"给 {person['name']} 转账"):
             _dispatch_start(executor, session_id, "transfer_single", who,

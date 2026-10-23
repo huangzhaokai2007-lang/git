@@ -127,6 +127,13 @@ def apply_quota(payee: Mapping, amount_cents: int, base_tier: str, *,
     return _higher_tier(base_tier, TIER_L2), "已超出白名单专属额度，需要验证码"
 
 
+def remaining_quota(payee: Mapping, month: str | None = None) -> int | None:
+    """本月**剩余**专属额度（分）；未设额度 → None。与 `assess/apply_quota` 同一份实现。"""
+    if payee.get("whitelist_quota") is None:
+        return None
+    return payee_dao.remaining_quota_cents(dict(payee), month or month_prefix())
+
+
 def assess(payee: Mapping, amount_cents: int, *, month: str | None = None) -> RiskDecision:
     """对「给这个人转这么多钱」做风控：黑名单 → 额度 → 既有档位。
 

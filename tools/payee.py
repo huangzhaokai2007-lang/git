@@ -197,7 +197,8 @@ def list_payees() -> ToolResult:
                             "blacklist_reason": row["blacklist_reason"],
                             "whitelist_quota": row["whitelist_quota"],
                             "whitelist_expire": row["whitelist_expire"],
-                            "note": row["note"]} for row in rows}
+                            "note": row["note"],
+                            "last_used_ts": row["last_used_ts"]} for row in rows}
     facts = {"total_count": len(items), "whitelist_count": len(whitelisted),
              "non_whitelist_count": len(items) - len(whitelisted), "items": items,
              "profiles": profiles}
