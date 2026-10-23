@@ -57,7 +57,11 @@ def test_other_actions_and_negations_keep_the_original_classifier(seeded, monkey
 
     monkeypatch.setattr(classifier, "classify", classify)
     turn = flow.handle(text, session_id="language-negative")
-    assert calls and turn.intent == "out_of_scope" and turn.tool_calls == []
+    if text == '帮我挂失银行卡':
+        assert not calls and turn.intent == 'card_report_lost' and turn.ask == 'card_lost_choice'
+        assert not turn.executed
+    else:
+        assert calls and turn.intent == "out_of_scope" and turn.tool_calls == []
 
 
 def test_missing_card_routes_to_choice_without_classifying_or_writing(seeded, monkeypatch):

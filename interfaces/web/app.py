@@ -33,6 +33,7 @@ import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
 import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
+import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
 
@@ -117,6 +118,12 @@ def _ask(text: str, *, display: str | None = None) -> None:
         cards_ui.reset(turn)
     if turn.ask in ("card_lock", "card_missing", "card_unlock"): limits_ui.reset()
     if turn.ask == "limit_adjust": locks_ui.reset()
+    if turn.ask in ('card_lost', 'card_lost_choice', 'card_lost_records'):
+        limits_ui.reset()
+        locks_ui.reset()
+    elif turn.ask in ('card_lock', 'card_missing', 'card_unlock', 'limit_adjust'):
+        lost_ui.reset()
+    lost_ui.accept_turn(_agent_executor(), state['session_id'], turn.ask)
     limits_ui.accept_turn(_agent_executor(), state["session_id"], text, turn.ask)
     locks_ui.accept_turn(_agent_executor(), state["session_id"], turn.ask)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
@@ -199,7 +206,7 @@ def _sidebar() -> str:
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:
-            if prompt in ("卡片查询", "调整额度", "锁卡"):
+            if prompt in ("卡片查询", "调整额度", "锁卡", "帮我挂失"):
                 st.session_state["navigate-page"] = PAGES[0]
             _ask(prompt)
             st.rerun()
@@ -210,6 +217,7 @@ def _sidebar() -> str:
             cards_ui.reset()
             limits_ui.reset()
             locks_ui.reset()
+            lost_ui.reset()
             st.session_state["bound-card-query"] = False
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0)):
                 st.session_state[key] = value
@@ -235,6 +243,7 @@ def _chat_page() -> None:
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
+        lost_ui.render(_agent_executor(), st.session_state['session_id'], show_button=False)
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()
@@ -264,6 +273,9 @@ def main() -> None:
     st.markdown(ui.CSS, unsafe_allow_html=True)
     if not _ensure_db():
         return
+    if not st.get_option('global.appTest'):
+        from agent import card_lost_flow
+        card_lost_flow.start_runner()
     _init_state()
     cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
     ui.sim_banner()

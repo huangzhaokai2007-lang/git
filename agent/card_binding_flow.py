@@ -81,8 +81,10 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
                                  states=["IDLE", "CLARIFY", "REPLY", "AUDIT"], reply=result.message,
                                  ask=result.message)
     history = [safe_chat_text(turn) for turn in history] if history else None
-    from agent import card_limit_flow, card_lock_flow
+    from agent import card_limit_flow, card_lock_flow, card_lost_flow, card_lost_language
 
+    if kind := card_lost_language.recognize(text):
+        return card_lost_flow.chat_entry(session_id or 'lost', kind)
     if kind := card_lock_flow.recognize(text):
         return card_lock_flow.chat_entry(session_id or 'lock', kind)
     if kind := card_limit_flow.recognize(text):

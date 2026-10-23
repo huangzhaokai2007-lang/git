@@ -16,7 +16,7 @@ def recognize(text: str) -> str | None:
         return 'unlock'
     if '挂失' in clean:
         return None
-    if '卡' in clean and re.search(r'找不到|没找到|不见了|丢了|丢失|遗失|被偷', clean):
+    if '卡' in clean and re.search(r'不知道放哪|找不到|没找到|不见了|丢了|丢失|遗失|被偷', clean):
         return 'missing'
     if not re.search(r'锁卡|锁定.{0,8}卡|锁住.{0,8}卡|停用.{0,8}卡', clean):
         return None
@@ -28,7 +28,7 @@ def chat_entry(session_id: str, kind: str):
     result = (card_unlock if kind == 'unlock' else card_lock).chat_entry(session_id)
     asks = {'records': 'lock_records', 'lock': 'card_lock', 'missing': 'card_missing', 'unlock': 'card_unlock'}
     replies = {'records': '请查看锁卡与解锁记录。', 'lock': '请先选择要临时锁定的银行卡；确认后才会执行。',
-               'missing': '暂时找不到卡，可以先临时锁定继续寻找；如果已确认遗失，请查看挂失说明。',
+               'missing': '暂时找不到卡，推荐先临时锁卡继续寻找；找到后可验证解锁。确认遗失并需要补卡时，可查看挂失说明进入办理。',
                'unlock': '请选择本人临时锁定的银行卡，验证模拟短信验证码后自助解锁。'}
     return Turn(trace_id=result.facts.get('trace_id', f'trace-{uuid.uuid4().hex[:12]}'), intent='card_unlock' if kind == 'unlock' else 'card_lock', confidence=1,
                 states=['IDLE', 'CLASSIFY', 'CLARIFY', 'REPLY', 'AUDIT'], tier='L0',
