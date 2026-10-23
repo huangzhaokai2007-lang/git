@@ -105,9 +105,15 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
 #: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
 _CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡",
-               "gift_plan": "送礼计划确认卡"}
+               "gift_plan": "送礼计划确认卡", "payee_whitelist": "白名单确认卡",
+               "payee_blacklist": "黑名单确认卡", "payee_unblacklist": "解除黑名单确认卡",
+               "payee_delete": "删除收款人确认卡"}
 _CARD_TARGET = {"subscription_cancel": "商户", "gift_plan": "联系人",
                 "wealth_buy": "产品", "wealth_redeem": "产品"}
+#: **只有这些意图**的卡有「金额」「预计到账」两截 —— 联系人状态类操作（加白/拉黑/删除）没有金额，
+#: 否则会印出空的「金额（元）」和转账专用的「预计到账」，让白名单卡看起来像转账卡（实测缺陷）。
+_MONEY_INTENTS = frozenset({"transfer_single", "transfer_scheduled", "subscription_cancel",
+                            "aa_collect", "gift_plan", "wealth_buy", "wealth_redeem"})
 
 
 def confirm_card(confirmation: Any) -> str | None:
@@ -120,17 +126,22 @@ def confirm_card(confirmation: Any) -> str | None:
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
     target = _CARD_TARGET.get(intent, "收款人")
+    money = intent in _MONEY_INTENTS
     with st.container(border=True):
         st.markdown(f"##### 📋 {title}（等待您的确认）")
         head = st.columns(4)
-        head[0].metric("金额（元）", confirmation.amount_yuan)
-        head[1].metric(target, confirmation.target_name)
-        head[2].metric("权限档（风险等级）", confirmation.tier)
-        head[3].metric("短信验证码", "需要" if confirmation.requires_otp else "不需要")
+        slot = 0
+        if money:                                         # 只有涉及金额的意图才印金额
+            head[slot].metric("金额（元）", confirmation.amount_yuan or "—")
+            slot += 1
+        head[slot].metric(target, confirmation.target_name or "—")
+        head[slot + 1].metric("权限档（风险等级）", confirmation.tier or "—")
+        head[slot + 2].metric("短信验证码", "需要" if confirmation.requires_otp else "不需要")
         parts = [f"意图：{_line(confirmation.card_text, '意图：') or confirmation.intent}"]
-        if confirmation.masked_phone:                     # 转账才有；订阅取消为空
+        if confirmation.masked_phone:                     # 转账/收款人才有
             parts.append(f"收款账号：{_esc(confirmation.masked_phone)}")
-        parts.append(f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
+        if money:                                         # 「预计到账」是转账专用截
+            parts.append(f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
         st.caption(" · ".join(parts))
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")

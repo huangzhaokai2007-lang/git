@@ -112,6 +112,9 @@ def _prepare_blacklist(filled: dict) -> Prepared:
     profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
     if profile.get("blacklist"):
         return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人已经在黑名单里了")
+    if row.get("is_whitelist"):                           # 人类口径：只有普通收款人能拉黑
+        return Prepared(ok=False, error_code="INVALID_STATE",
+                        message="白名单收款人不能直接拉黑，请先把他移出白名单")
     return Prepared(ok=True, facts={**row, "tier": BLACKLIST_TIER}, credential="")
 
 
@@ -208,7 +211,7 @@ def _prepare_delete(filled: dict) -> Prepared:
     if row is None:
         return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该收款人")
     profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
-    kind = ("白名单" if profile.get("is_whitelist")
+    kind = ("白名单" if row.get("is_whitelist")            # 状态在 `items` 里，profiles 只有黑名单/额度
             else "黑名单" if profile.get("blacklist") else "普通")
     return Prepared(ok=True, facts={**row, "kind": kind, "tier": DELETE_TIER}, credential="")
 

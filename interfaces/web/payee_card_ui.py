@@ -189,13 +189,13 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                 _dispatch_start(executor, session_id, "payee_whitelist",
                                 {"payee": person["name"]}, f"（按钮）把{person['name']}加入白名单")
                 st.rerun()
-        if not person["blacklist"]:
+        if kind == "normal":                              # 只有**普通**收款人能拉黑（白名单先移出）
             if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 加入黑名单（之后转账/送礼被拒）"):
                 _dispatch_start(executor, session_id, "payee_blacklist",
                                 {"payee": person["name"]}, f"（按钮）把{person['name']}加入黑名单")
                 st.rerun()
-        else:
+        elif person["blacklist"]:
             if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 移出黑名单（需验证码）"):
                 _dispatch_start(executor, session_id, "payee_unblacklist",

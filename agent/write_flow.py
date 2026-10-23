@@ -200,14 +200,16 @@ def edit(session_id: str, updates: Mapping) -> Step:
     spec = write_intents.spec_of(confirmation.intent)
     raw = {k: confirmation.filled.get(k) for k in spec.missing
            if confirmation.filled.get(k) is not None}
-    if confirmation.intent == "aa_collect":                           # AA 的人名快照随卡带过去
-        for key in ("aa_names", "aa_target"):
-            if key in confirmation.filled:
-                raw[key] = confirmation.filled[key]
+    if confirmation.intent == "aa_collect":                           # AA：用**姓名**重解析（id 不认名字匹配）
+        names = list(confirmation.filled.get("aa_names") or [])
+        if names:
+            raw["payee_ids"] = names
+        if "aa_target" in confirmation.filled:
+            raw["aa_target"] = confirmation.filled["aa_target"]
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
     derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
-               "amounts": ("per_person_cents", "amount_cents"),
+               "amounts": ("per_person_cents", "amount_cents", "amount"),
                "schedule": (), "date": ()}
     for key, value in updates.items():
         if value in (None, ""):

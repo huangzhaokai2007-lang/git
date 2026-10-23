@@ -160,3 +160,36 @@ def test_resume_edit_via_stereotype_without_llm(wired, monkeypatch) -> None:
     edited = orchestrator.handle("金额改成 50 元", session_id=SESSION)
     assert len(calls) == before                                          # 改卡零 LLM 调用
     assert "50.00" in edited.reply and WANGWU in edited.reply
+
+
+# ---------------- AA 每人金额：表格化修改要**真的生效** ----------------
+
+def _fake_aa(monkeypatch) -> None:
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": [WANGWU, ZHANG],
+                                                    "amount": "300"},
+                                          "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+
+
+def test_edit_aa_amounts_recomputes_total(wired, monkeypatch) -> None:
+    """AA 卡：把每人金额改成 王五 200 / 赵六 100 → 逐人明细更新、总额跟着变成 300（原 300 不变）。"""
+    _fake_aa(monkeypatch)
+    card = orchestrator.handle("向王五和张小美 AA 收款 300 元", session_id=SESSION)
+    assert card.tier == "L1" and "一键均摊" in card.reply
+    edited = write_flow.edit(SESSION, {"amounts": "王五 200 元、张小美 100 元"})
+    assert "200.00" in edited.reply and "100.00" in edited.reply
+    assert "按人金额" in edited.reply
+
+
+def test_edit_aa_amounts_changes_the_total(wired, monkeypatch) -> None:
+    """改金额不改总额的话就只是装饰 —— 这里改总额 300 → 500，卡面总额必须跟着变。"""
+    _fake_aa(monkeypatch)
+    orchestrator.handle("向王五和张小美 AA 收款 300 元", session_id=SESSION)
+    edited = write_flow.edit(SESSION, {"amounts": "王五 300 元、张小美 200 元"})
+    assert "500.00" in edited.reply                                     # 总额 = 合计
+    assert "300.00" in edited.reply
