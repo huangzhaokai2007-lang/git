@@ -93,7 +93,8 @@ def _people() -> list[dict]:
         out.append({**item, "tags": extra.get("tags") or [],
                     "blacklist": bool(extra.get("blacklist")),
                     "blacklist_reason": extra.get("blacklist_reason"),
-                    "whitelist_quota": extra.get("whitelist_quota")})
+                    "whitelist_quota": extra.get("whitelist_quota"),
+                    "whitelist_expire": extra.get("whitelist_expire")})
     return out
 
 

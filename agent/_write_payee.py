@@ -10,12 +10,13 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify, payee_resolve
+from agent import _relative_time, confirm_card, payee_clarify, payee_resolve
 from agent._write_common import Prepared, ShapeResult, _code_of
 from agent._write_transfer import _payee_query                     # 同一份「回显串归一化」
-from tools import payee
+from tools import payee, transfer
 
 
 def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeResult:
@@ -50,7 +51,10 @@ def _shape_whitelist(slots: Mapping) -> ShapeResult:
 
 
 def _prepare_whitelist(filled: dict) -> Prepared:
-    """只读 T20 取那一笔 → 事实包 + 签发 `confirm_ref`（**本步不写库**，写库在 EXECUTE）。"""
+    """只读 T20 取那一笔 → 事实包 + 签发 `confirm_ref`（**本步不写库**，写库在 EXECUTE）。
+
+    可选 `expire` 槽位（「有效期到 2026-12-31」/「月底」）：**仅展示**，不参与风控（人类口径）。
+    """
     listed = payee.list_payees()
     if not listed.ok:
         return Prepared(ok=False, error_code=_code_of(listed), message=listed.message)
@@ -60,9 +64,28 @@ def _prepare_whitelist(filled: dict) -> Prepared:
         return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该收款人")
     if row.get("is_whitelist"):
         return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人已经在白名单里了")
+    facts = {**row, "tier": payee.WHITELIST_TIER}
+    if filled.get("expire"):
+        expire = _iso_expire(filled["expire"])
+        if expire is None:
+            return Prepared(ok=False, error_code="INVALID_ARGUMENT",
+                            message="有效期看不懂，请用 2026-12-31 这样的日期（或说「月底」）")
+        facts["expire"] = expire
     ref = payee.issue_confirm_ref(payee.WHITELIST_ACTION,
                                   payee.whitelist_target(str(row["payee_id"]), True))
-    return Prepared(ok=True, facts={**row, "tier": payee.WHITELIST_TIER}, credential=ref)
+    return Prepared(ok=True, facts=facts, credential=ref)
+
+
+def _iso_expire(raw: object) -> str | None:
+    """有效期：ISO 日期优先，也接受相对说法（月底/下个月5号）—— 归一成 `YYYY-MM-DD`。"""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.date.fromisoformat(text[:10]).isoformat()
+    except ValueError:
+        when = _relative_time.parse(text, transfer._now())
+        return when[:10] if when else None
 
 
 def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
@@ -73,7 +96,8 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
         rows=[("收款人", str(facts["name"])),
               ("手机号", str(facts["masked_phone"])),
               ("变更", "加入白名单"),
-              ("影响", "专属额度内转账免验证码（含深夜）；超额度仍需验证码")],
+              ("影响", "专属额度内转账免验证码（含深夜）；超额度仍需验证码"),
+              *([("有效期", f"{facts['expire']}（仅展示，不影响免码判定）")] if facts.get("expire") else [])],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], "加入白名单"))
 
@@ -85,9 +109,16 @@ def _plain_whitelist(filled: dict, facts: Mapping, tier: str) -> str:
 
 
 def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
-    """EXECUTE：调 **T25** 落库（OTP 已由 `write_flow` 校验；工具层只认 `confirm_ref`）。"""
+    """EXECUTE：调 **T25** 落库；带有效期 → 再调 **T36** 记有效期（**仅展示**）。"""
     del otp
-    return payee.set_payee_whitelist(str(confirmation.target_id), True, confirmation.credential)
+    result = payee.set_payee_whitelist(str(confirmation.target_id), True, confirmation.credential)
+    expire = str(confirmation.filled.get("expire") or "")
+    if result.ok and expire:                                  # 有效期是白名单属性，加白成功后再记
+        marked = payee.set_whitelist_expire(str(confirmation.target_id), expire)
+        if marked.ok:
+            result = result.model_copy(update={
+                "message": f"{result.message}（白名单有效期到 {expire}）"})
+    return result
 
 
 # ---------------- 加入黑名单（T28 · L1 确认卡、无 OTP） ----------------

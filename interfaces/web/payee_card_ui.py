@@ -140,12 +140,33 @@ def render_payee_card(reply: str) -> bool:
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import datetime
 import streamlit as st
 
 from agent import confirm_card, payee_resolve, write_flow
 
 #: 三类人员的中文标签（面向用户只说大白话；与 `render_lists` 的措辞同口径）
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
+
+#: 白名单有效期的展示状态阈值（**仅展示**，不参与风控 —— 人类明确口径）
+_EXPIRE_SOON_DAYS = 30
+
+
+def _expire_note(person: dict) -> str:
+    """白名单有效期的展示串：有效 / 即将到期 / 已过期（纯展示，不参与免码判定）。"""
+    expire = str(person.get("whitelist_expire") or "")
+    if not expire or not person.get("is_whitelist"):
+        return ""
+    try:
+        deadline = datetime.date.fromisoformat(expire[:10])
+    except ValueError:
+        return ""
+    left = (deadline - datetime.date.today()).days
+    if left < 0:
+        return f" · 白名单已过期（{expire}）"
+    if left <= _EXPIRE_SOON_DAYS:
+        return f" · 白名单至 {expire}（{left} 天内到期）"
+    return f" · 白名单至 {expire}"
 
 
 def _dispatch_start(executor: ThreadPoolExecutor, session_id: str, intent: str,
@@ -181,7 +202,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
             [3.4, 0.75, 0.75, 0.75, 0.75], vertical_alignment="center")
         left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
-                      f"{tags}")
+                      f"{tags}{_expire_note(person)}")
         if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
                                help=f"给 {person['name']} 转账"):
             _dispatch_start(executor, session_id, "transfer_single", who,

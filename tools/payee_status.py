@@ -21,6 +21,45 @@ from tools._query_common import (
 )
 from tools.schemas import ErrorCode, ToolResult
 
+#: 白名单有效期的档位与工具名（**仅展示、不参与风控** —— 人类明确口径）
+EXPIRE_TIER, EXPIRE_TOOL = "L1", "set_whitelist_expire"
+
+
+def set_whitelist_expire(payee_id: str, expire_date: str) -> ToolResult:
+    """T36 设白名单有效期（**仅展示**，不参与任何风控判定）。`data` = `{payee_id, whitelist_expire}`。
+
+    空串 = 清除（长期有效）。要求该收款人**在白名单里**（否则 `INVALID_STATE`：有效期属于白名单属性）。
+    L1：只是一条展示用元数据，不动钱、不改白名单资格。
+    """
+    value = str(expire_date or "").strip()
+    if value:
+        try:
+            value = datetime.date.fromisoformat(value[:10]).isoformat()
+        except ValueError:
+            return _fail(ErrorCode.INVALID_ARGUMENT, "有效期格式不对，请用 2026-12-31 这样的日期")
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id, tool=EXPIRE_TOOL, intent="payee_whitelist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    if not row["is_whitelist"]:
+        return _fail(ErrorCode.INVALID_STATE, "该收款人不在白名单里，谈不上有效期")
+    from data.db import transaction
+    with transaction(dao.connection()):
+        dao.connection().execute("UPDATE payee SET whitelist_expire = ? WHERE id = ? AND user_id = ?",
+                                 (value or None, payee_id, user_id))
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_whitelist", tool=EXPIRE_TOOL,
+                         params_json={"payee_id": payee_id, "expire": value or None},
+                         risk_level=EXPIRE_TIER, permission_tier=EXPIRE_TIER,
+                         result="success", error_code=None)
+    label = f"白名单有效期到 {value}" if value else "白名单长期有效"
+    return _ok({"payee_id": payee_id, "whitelist_expire": value or None},
+               {"name": row["name"], "whitelist_expire": value or ""}, f"{row['name']}：{label}")
+
 
 # ---------------- T25 set_payee_whitelist（SPEC-CHANGE 新增 · L2） ----------------
 #

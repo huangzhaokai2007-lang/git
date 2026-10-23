@@ -76,7 +76,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
-    "payee_whitelist": ("payee",),                                         # T25 set_payee_whitelist（L2）
+    "payee_whitelist": ("payee", "expire"),                                         # T25 set_payee_whitelist（L2）
     "payee_blacklist": ("payee",),                                         # T28 set_payee_blacklist（L1）
     "aa_collect": ("payee_ids", "amount", "amounts"),
     "payee_unblacklist": ("payee",),                                       # T29 unset_payee_blacklist（L2）
@@ -177,6 +177,8 @@ SYSTEM_PROMPT = (
     "payee_unblacklist（解除黑名单）的判定：「把王小明移出黑名单」「解除对X的拉黑」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_add 的区分：只是新增联系人不是它，"
     "要**恢复**一个被拉黑的人才是 payee_unblacklist。\n"
+    "payee_whitelist 的 `expire` 槽位：用户说「有效期到 2026-12-31」「有效期到月底」时填原话"
+    "（仅展示、不参与风控）；没说就不填（长期有效）。\n"
     "transfer_scheduled 的 `repeat` 槽位：用户说「每个月/每月末/每周」这类**循环**时填原话"
     "（例如「每个月月末给房东转 3000」→ repeat=「每个月月末」）；没说就不填（一次性预约）。\n"
     "scheduled_list（查预约）的判定：「我的预约」「那笔定时转账到时间了吗」「查一下预约记录」都判它；"

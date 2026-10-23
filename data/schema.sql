@@ -47,6 +47,7 @@ CREATE TABLE payee (
   -- v2（转账域串联 · SPEC-CHANGE）：标签 / 白名单专属额度 / 黑名单
   tags TEXT,                                      -- 逗号分隔，可空（如 "妈妈,家人"）
   whitelist_quota INTEGER,                        -- 白名单免验证码额度，单位分；NULL=无额度
+  whitelist_expire TEXT,                          -- 白名单有效期（ISO 日期）；**仅展示、不参与风控**；NULL=长期
   blacklist INTEGER NOT NULL DEFAULT 0,           -- 1=黑名单；与 is_whitelist 互斥
   blacklist_reason TEXT                           -- 拉黑原因，可空
 );
