@@ -57,7 +57,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "anomaly_check": ("period",),                                          # T4 detect_anomalies
     "bill_report": ("period", "kind"),                                     # T5 generate_bill_report
     "transfer_single": ("payee", "amount"),                                # T6/T7
-    "transfer_scheduled": ("payee", "amount", "schedule", "repeat"),                 # T7 schedule 参数
+    "transfer_scheduled": ("payee", "amount", "schedule", "repeat", "repeat_until"),                 # T7 schedule 参数
     "scheduled_cancel": (),                                                # F16 Q4：取消预约（无槽位，工具侧挑唯一 pending）
     "aa_collect": ("payee_ids", "amount", "amounts"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
@@ -210,6 +210,8 @@ SYSTEM_PROMPT = (
     "gift_order_list（查送礼订单）的判定：「我的送礼订单」「订单到哪了」「查一下订单」都判它；"
     "`status` 只在用户说了状态时填（created/paid/cancelled/failed）。与 gift_plan 的区分："
     "**新建**送礼计划是 gift_plan，**查订单**才是它。\n"
+    "transfer_scheduled 的 `repeat_until` 槽位：用户说了**循环到什么时候**才填"
+    "（「每个月月末给房东转 3000，到年底」→ repeat_until=年底）；没说就不填（一直循环）。\n"
     "scheduled_list（查预约）的判定：「我的预约」「那笔定时转账到时间了吗」「查一下预约记录」都判它；"
     "无槽位。与 transfer_scheduled 的区分：**新建**预约是 transfer_scheduled，**查看/查询**预约才是它。\n"
     "scheduled_run（立即执行预约）的判定：「现在就把那笔预约转了」「立即执行我的预约」都判它；"

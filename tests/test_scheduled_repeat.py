@@ -148,3 +148,30 @@ def test_orchestration_monthly_schedule(wired, monkeypatch) -> None:
     assert done.executed is True and "每月循环" in done.reply
     row = raw(wired, "SELECT repeat_cycle FROM scheduled_transfer WHERE status = 'pending'")[0]
     assert row["repeat_cycle"] == "monthly"
+
+
+# ---------------- 2026-10-24 人类规格：周期结束条件 ----------------
+
+def test_repeat_until_stops_the_series(wired, monkeypatch) -> None:
+    """设了结束日：越过结束日就不再续期（T35 返回 next_id=None）。"""
+    sid = _make_schedule(wired, monkeypatch, repeat="每个月")
+    assert ops.set_schedule_repeat(sid, "monthly", "2026-11-15").ok is True
+    assert raw(wired, "SELECT repeat_until FROM scheduled_transfer WHERE id = ?", (sid,))[0][
+        "repeat_until"] == "2026-11-15"
+    assert ops.run_scheduled_now(sid).ok is True
+    nxt = ops.schedule_next_occurrence(sid)
+    assert nxt.ok is True and nxt.data["next_id"] is None
+    assert "结束日" in nxt.message
+
+
+def test_repeat_without_until_keeps_going(wired, monkeypatch) -> None:
+    """没设结束日：照旧续期（回归保护）。"""
+    sid = _make_schedule(wired, monkeypatch, repeat="每个月")
+    assert ops.run_scheduled_now(sid).ok is True
+    nxt = ops.schedule_next_occurrence(sid)
+    assert nxt.data["next_id"] is not None
+
+
+def test_repeat_until_bad_date_rejected(wired, monkeypatch) -> None:
+    sid = _make_schedule(wired, monkeypatch, repeat="每个月")
+    assert ops.set_schedule_repeat(sid, "monthly", "下个月三十二号").ok is False

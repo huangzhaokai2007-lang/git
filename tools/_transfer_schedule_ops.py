@@ -132,12 +132,18 @@ def _next_occurrence(execute_at: str, cycle: str) -> str:
         timespec="minutes")
 
 
-def set_schedule_repeat(schedule_id: str, cycle: str) -> ToolResult:
+def set_schedule_repeat(schedule_id: str, cycle: str, until: str = "") -> ToolResult:
     """T34 给**待执行**预约记循环周期（`monthly` / `weekly`；空串 = 取消循环）。L1，不扣款。
 
     只改周期字段；`execute_at` / 金额 / 收款人 / 档位一个字不动（第一次执行前的时间就是首期）。
     """
     value = str(cycle or "").strip()
+    end = str(until or "").strip()[:10]                      # 结束日（可空 = 一直循环）
+    if end:
+        try:
+            end = datetime.date.fromisoformat(end).isoformat()
+        except ValueError:
+            return _fail(ErrorCode.INVALID_ARGUMENT, "循环结束日看不懂，请用 2026-12-31 这样的日期")
     if value and value not in REPEAT_CYCLES:
         return _fail(ErrorCode.INVALID_ARGUMENT, "循环周期只支持「每个月」或「每周」")
     try:
@@ -148,16 +154,18 @@ def set_schedule_repeat(schedule_id: str, cycle: str) -> ToolResult:
         return _fail(ErrorCode.INVALID_STATE, f"这笔预约已是 {row['status']} 状态，不能改循环设置")
     conn = dao.connection()
     with transaction(conn):
-        conn.execute("UPDATE scheduled_transfer SET repeat_cycle = ? WHERE id = ?",
-                     (value or None, schedule_id))
+        conn.execute("UPDATE scheduled_transfer SET repeat_cycle = ?, repeat_until = ? WHERE id = ?",
+                     (value or None, end or None, schedule_id))
         dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
                          intent="transfer_scheduled", tool=REPEAT_TOOL,
-                         params_json={"schedule_id": schedule_id, "cycle": value},
+                         params_json={"schedule_id": schedule_id, "cycle": value,
+                                      "until": end or None},
                          risk_level="L1", permission_tier="L1", result="success", error_code=None)
     label = {"monthly": "每月", "weekly": "每周"}.get(value, "不循环")
-    return _ok({"schedule_id": schedule_id, "repeat_cycle": value},
+    suffix = f"（循环至 {end}）" if end else ""
+    return _ok({"schedule_id": schedule_id, "repeat_cycle": value, "repeat_until": end or None},
                {"schedule_id": schedule_id, "repeat_label": label},
-               f"已设为{label}循环")
+               f"已设为{label}循环{suffix}")
 
 
 def schedule_next_occurrence(schedule_id: str) -> ToolResult:
@@ -177,6 +185,10 @@ def schedule_next_occurrence(schedule_id: str) -> ToolResult:
         return _ok({"schedule_id": schedule_id, "next_id": None}, {},
                    "上一期未成功，按口径不再续期")
     when = _next_occurrence(str(row["execute_at"]), cycle)
+    end = str(row.get("repeat_until") or "")
+    if end and when[:10] > end:                               # 越过结束日 → 不再续期（人类规格）
+        return _ok({"schedule_id": schedule_id, "next_id": None}, {},
+                   f"已到循环结束日 {end}，不再续期")
     conn = dao.connection()
     existing = conn.execute(
         "SELECT id FROM scheduled_transfer WHERE user_id = ? AND payee_id = ? AND amount = ?"

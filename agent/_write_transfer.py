@@ -92,6 +92,12 @@ def _shape_scheduled(slots: Mapping) -> ShapeResult:
         if error:
             return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT", message=error)
     cycle = repeat_cycle(filled.get("repeat"))               # 「每个月」→ monthly（认不出 = 一次性）
+    if filled.get("repeat_until"):                           # 循环结束日（「到年底」等相对说法也认）
+        end = _iso_schedule(filled["repeat_until"])
+        filled["repeat_until"] = end[:10] if end else None
+        if end is None:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
+                               message="循环结束日看不懂，请用 2026-12-31 这样的日期")
     if when is None and cycle:
         when = _first_occurrence(cycle, filled.get("repeat"))
         filled["first_auto"] = True                          # 卡面标注「首期为自动推算」
@@ -236,6 +242,8 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
     cycle = {"monthly": "每月循环（首期后按月续期，月末自动对齐）",
              "weekly": "每周循环（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
+    if cycle and filled.get("repeat_until"):               # 人类规格「周期结束条件」
+        cycle = f"{cycle}，循环至 {filled['repeat_until']}"
     rows = [("收款人", f"{facts['payee_name']}（{masked}）"),
             ("金额", f"{facts['amount_yuan']} 元"),
             ("预约时间", str(facts["schedule"]).replace("T", " ")),
@@ -267,7 +275,8 @@ def _book_scheduled(confirmation: confirm_card.Confirmation, otp: str | None) ->
     if result.ok and cycle:
         schedule_id = str((result.data or {}).get("schedule_id") or "")
         if schedule_id:                                       # 周期记在同一笔上（T34）
-            mark = _transfer_schedule_ops.set_schedule_repeat(schedule_id, cycle)
+            mark = _transfer_schedule_ops.set_schedule_repeat(
+                schedule_id, cycle, str(confirmation.filled.get("repeat_until") or ""))
             if mark.ok:
                 label = "每月" if cycle == "monthly" else "每周"
                 result = result.model_copy(update={
