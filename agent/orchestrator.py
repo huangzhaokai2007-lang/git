@@ -240,9 +240,9 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         ctx.intent = injection.UNSAFE_INTENT
         ctx.enter("REFUSE")
         return _finish(ctx, templates.refuse(screen.reason), result="rejected")
-    if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类
+    if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类；S5 非确认先当「改卡」试一次
         ctx.intent = inflight
-        return _apply(ctx, write_flow.resume(ctx.session_id, text))
+        return _apply(ctx, write_flow.resume(ctx.session_id, text, classify=lambda t: (intent_resolver or classifier.classify)(_with_date_context(t), history)))
     ctx.enter("CLASSIFY")
     verdict = (intent_resolver or classifier.classify)(_with_date_context(text), history)
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence

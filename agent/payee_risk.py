@@ -77,15 +77,19 @@ def _higher_tier(a: str, b: str) -> str:
 
 
 def apply_quota(payee: Mapping, amount_cents: int, base_tier: str, *,
-                month: str | None = None) -> tuple[str, str]:
+                month: str | None = None,
+                factors: list[str] | tuple[str, ...] | None = None) -> tuple[str, str]:
     """**只做白名单「专属额度」这一层的档位覆盖**（不调 `preview_transfer`，调用方已调过）。
 
     返回 `(最终档位, 追加提示)`。
-    - 非白名单 / 额度内 → 维持 `base_tier`（普通收款人由既有档位决定）；
+    - 非白名单 → 维持 `base_tier`（普通收款人由既有档位决定）；
+    - 额度内 → 维持 `base_tier`；**例外：v2 SPEC-CHANGE —— 额度内免验证码覆盖「深夜」因子**
+      （人类需求原文「白名单在专属额度内转账，不需要验证码」，未排除夜间）。
+      短时多笔 / 金额激增 / 首次收款等**异常因子仍照常升档**；
     - 超额度 / 未设额度 → 至少升到 L2（要验证码），并给出提示。
 
-    ⚠️ 只加"更严格"、不"放松"：night / velocity 等在 `base_tier` 里已经体现，
-    本函数用 `_higher_tier` 保证绝不会把 L2 降回 L1。
+    ⚠️ 除「深夜」这一处覆盖外，只加"更严格"、不"放松"：本函数用 `_higher_tier`
+    保证绝不会把 velocity 等给出的 L2 降回 L1。
     """
     if not payee or not payee.get("is_whitelist"):
         return base_tier, ""
@@ -94,6 +98,11 @@ def apply_quota(payee: Mapping, amount_cents: int, base_tier: str, *,
         return _higher_tier(base_tier, TIER_L2), "该白名单收款人未设专属额度，转账需要验证码"
     remaining = payee_dao.remaining_quota_cents(dict(payee), month or month_prefix())
     if remaining is None or int(amount_cents) <= remaining:
+        got = [str(f) for f in (factors or [])]
+        if [f for f in got if f != "night"]:            # 有其它异常因子 → 照常升档
+            return base_tier, ""
+        if "night" in got:
+            return TIER_L1, "白名单专属额度内，深夜时段也免验证码"
         return base_tier, ""
     return _higher_tier(base_tier, TIER_L2), "已超出白名单专属额度，需要验证码"
 

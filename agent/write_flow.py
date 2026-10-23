@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Mapping
+from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
@@ -138,8 +138,14 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     return step
 
 
-def resume(session_id: str, text: str) -> Step:
-    """接续在途确认：等确认 / 等 OTP；回复非确认内容 → 回到 SLOT_FILL（本笔作废、不执行）。"""
+def resume(session_id: str, text: str,
+           *, classify: "Callable[[str], Any] | None" = None) -> Step:
+    """接续在途确认：等确认 / 等 OTP；回复非确认内容 → 回到 SLOT_FILL（本笔作废、不执行）。
+
+    S5（可编辑卡片）：给了 `classify` 回调时，非确认回复先当成**改卡**试一次 ——
+    分类结果与在途意图一致 → 走 `edit()`（旧卡字段 + 新值 → 重走 shape/风控 → 出新卡）；
+    意图不一致 → 维持旧行为（清卡、回 SLOT_FILL 追问）。
+    """
     confirmation = confirm_card.current(session_id)
     assert confirmation is not None                                   # 调用方已判存在
     spec = write_intents.spec_of(confirmation.intent)
@@ -152,6 +158,13 @@ def resume(session_id: str, text: str) -> Step:
         return _execute(session_id, confirmation, text.strip())
     head = Step(states=["CONFIRM_CARD"], intent=confirmation.intent, tier=confirmation.tier)
     if not confirm_card.is_confirmation(text):
+        if classify is not None:                                       # S5：改卡（同意图才算）
+            try:
+                verdict = classify(text)
+            except Exception:                                          # 分类失败 → 走旧行为，不崩
+                verdict = None
+            if verdict is not None and verdict.intent == confirmation.intent:
+                return edit(session_id, verdict.slots)
         confirm_card.clear(session_id)
         head.states.append("SLOT_FILL")
         head.missing = list(spec.missing)                              # 缺槽名由描述符声明
@@ -162,6 +175,42 @@ def resume(session_id: str, text: str) -> Step:
         head.ask = head.reply
         return head
     return _execute(session_id, confirmation, None)                    # L1：会话内确认卡即可
+
+
+# ---------------- S5：可编辑卡片 ----------------
+
+def edit(session_id: str, updates: Mapping) -> Step:
+    """**改卡 = 重走校验**（设计 §4）：把在途确认卡的关键字段改掉，重新 `shape → 风控 → 出新卡`。
+
+    不是直接改卡 —— 卡上数字必须来自 facts；这里只做「旧卡字段 + 新值 → 重跑 start()」，
+    由工具层重新出事实包、重新定档。只允许在 confirm 阶段改（OTP 阶段先完成或撤销）。
+    """
+    confirmation = confirm_card.current(session_id)
+    if confirmation is None:
+        return Step(states=[], result="rejected", reply="当前没有待确认的操作",
+                    error_code="NOT_FOUND")
+    if confirmation.stage != "confirm":
+        return Step(states=[], result="rejected",
+                    reply="验证码阶段不能修改卡片，请先完成或撤销", error_code="INVALID_STATE")
+    spec = write_intents.spec_of(confirmation.intent)
+    raw = {k: confirmation.filled.get(k) for k in spec.missing
+           if confirmation.filled.get(k) is not None}
+    if confirmation.intent == "aa_collect":                           # AA 的人名快照随卡带过去
+        for key in ("aa_names", "aa_target"):
+            if key in confirmation.filled:
+                raw[key] = confirmation.filled[key]
+    #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
+    derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
+               "contact": ("payee_id",), "budget": ("amount_cents",),
+               "schedule": (), "date": ()}
+    for key, value in updates.items():
+        if value in (None, ""):
+            raw.pop(key, None)
+            continue
+        raw[key] = str(value)
+        for stale in derived.get(key, ()):
+            raw.pop(stale, None)
+    return start(confirmation.intent, raw, session_id)
 
 
 # ---------------- PRECHECK：定档 → 待复核 / 确认卡 ----------------

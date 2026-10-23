@@ -17,7 +17,7 @@ import pytest
 
 from agent import confirm_card, llm, orchestrator, session_memory
 from tests.conftest import raw
-from tools import payee
+from tools import payee, payee_status
 
 SESSION = "sess-whitelist"
 
@@ -29,11 +29,11 @@ def wired(seeded, monkeypatch, clock):
     monkeypatch.setattr(confirm_card, "_now", clock)
     confirm_card.reset_state()
     session_memory.reset()
-    payee._CONFIRM_REFS.clear()
+    payee_status._CONFIRM_REFS.clear()          # 凭证进程内状态，逐用例复位
     yield seeded
     confirm_card.reset_state()
     session_memory.reset()
-    payee._CONFIRM_REFS.clear()
+    payee_status._CONFIRM_REFS.clear()
 
 
 def _payee_id(path, name: str) -> str:
@@ -113,11 +113,9 @@ def test_orchestration_needs_otp_before_writing(wired, monkeypatch) -> None:
     _fake(monkeypatch, seen)
     card = orchestrator.handle(f"把{ZHANG}加入白名单", session_id=SESSION)
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"
-    # 影响必须事先说清，且**不许过度承诺**「免验证码」——
-    # 白名单只是把基础档降到 L1；night / velocity 等 §5 风险因子仍会升档（实测：23:40 时
-    # 连种子里的白名单收款人王五也会被 night 顶到 L2 要验证码）。
-    assert "基础档位降为 L1" in card.reply
-    assert "风险因子" in card.reply
+    # 影响必须事先说清（v2 SPEC-CHANGE 口径）：专属额度内免验证码（含深夜）、超额度要码。
+    assert "专属额度内转账免验证码" in card.reply
+    assert "超额度仍需验证码" in card.reply
     assert _flag(wired, ZHANG) == 0                  # 出卡而已，没写库
 
     otp_stage = orchestrator.handle("确认", session_id=SESSION)

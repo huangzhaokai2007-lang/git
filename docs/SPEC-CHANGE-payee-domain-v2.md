@@ -44,7 +44,11 @@ txn    +payee_id
 
 **覆盖关系**：人类需求原文写「白名单：在专属额度内转账，不需要验证码」，比旧 §5 的
 `night(23:00-06:00)` 因子更明确。故**额度内免码、不再被 night 升档**。
-⚠️ 这与此前卡面写的「风险因子仍会升档」冲突 —— 措辞需按新口径再改一版（未做）。
+
+✅ **已实现**（2026-10-22，`payee_risk.apply_quota` 增加 `factors` 入参）：
+额度内 + 只命中「深夜」因子 → L1 + 「白名单专属额度内，深夜时段也免验证码」；
+**短时多笔 / 金额激增 / 首次收款等异常因子仍照常升档**（只覆盖 night，不放松异常场景）。
+卡面 4 处措辞已按新口径回写（表格说明 / 白名单确认卡 / 纯文本回执 / 表单追问）。
 
 ### AA：含非白名单人员 → 要码
 
@@ -53,6 +57,15 @@ txn    +payee_id
 ### 送礼：收货人在黑名单 → 直接拒
 
 「黑名单：禁止转账与送礼」。送礼不收「专属额度」这一层（额度口径只对转账定义）。
+
+### 黑名单增删（F22c/F22d，2026-10-22 追加）
+
+- 加黑 = **T28 `set_payee_blacklist`** · `payee_blacklist` · **L1 无 OTP**（加黑是阻断、风险低于加白）；
+- 解除 = **T29 `unset_payee_blacklist`** · `payee_unblacklist` · **L2 + OTP**（人类需求原文「解除黑名单必须通过验证码确认」）；
+- 黑白**互斥**在工具层强制（加黑清 `is_whitelist`）；
+- 三个状态意图（加白/加黑/解除）的 SLOT_FILL **同一套解析关卡**（标签/同音/黑名单，
+  `resolve_or_explain` 增加 `allow_blacklisted` 开关）—— 修掉「把房东加入白名单」解析失败的缺陷；
+- 工具实现已拆到 `tools/payee_status.py`（原 `tools/payee.py` 349 行超红线），`payee.*` 旧引用不变。
 
 ---
 
@@ -86,6 +99,34 @@ txn    +payee_id
 - [ ] 风控新口径：白名单额度内免码（覆盖 night）；AA 含非白名单要码；送礼黑名单拒
 - [ ] **共享文件提醒**：本改动动了 `agent/_write_transfer.py` / `_write_aa.py` / `_write_gift.py`，
       以及 `data/schema.sql`、`tools/payee.py` —— 合并时别跟别人覆盖
+
+---
+
+## 6. 2026-10-23 追加（PR #43 之后同一分支）
+
+### F22e 删除收款人（T30 `delete_payee` · L1、无 OTP）
+
+- 删的是联系人、不动钱、不授特权（与加黑同档）；历史流水**保留**（审计可回溯）；
+  白/黑名单状态随行消失；已删除 → `NOT_FOUND`；归属 fail-closed。
+- 意图 33 → 34（`payee_delete`）；收款人卡新增「删除」按钮。
+
+### S5 可编辑卡片（设计 §4 落地，**不新增冻结契约**）
+
+- `agent/card_draft.py`：`CardDraft`/`Field` 数据契约（业务状态在 agent 层）。
+- `agent/write_flow.edit(session_id, updates)`：改关键字段 → **重走** shape → 解析/风控 → 出新卡
+  （不是直接改卡）；OTP 阶段拒绝编辑。
+- `resume()` 增加 `classify` 回调：聊天「金额改成 50 元」→ 分类同意图 → 合并旧卡字段出新卡；
+  意图变了 → 维持旧行为。`orchestrator` 只在在途确认时传一次分类（LLM 只在此刻多调一次）。
+- `interfaces/web/card_edit_ui.py`：网页编辑面板（逐字段输入 + 「按修改重新预检」）。
+  可编辑字段表：转账（收款人/金额）、定时（+预约时间）、送礼（收货人/日期/预算）；
+  AA/订阅/理财/白名单等意图不出面板。
+
+### 转账执行回填（设计 §2 补漏）
+
+- `execute_transfer` 事务内回填 `payee.last_used_ts` + `txn.payee_id`：
+  额度从此按 **id** 聚合（不再靠名字兜底），「首次收款」因子转完一次就消失。
+  `data/dao.insert_txn` 加 `payee_id` 参数（data 层内部，非冻结契约）；
+  `data/dao.py` 仍 300 行顶格（有测试钉着）。
 
 ---
 

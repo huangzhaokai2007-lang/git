@@ -157,7 +157,7 @@ def _dispatch(executor: ThreadPoolExecutor, session_id: str, display: str, text:
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """渲染收款人列表卡；每行给「转账」「加白」两个按钮（加黑意图尚未接线，先不放）。
+    """渲染收款人列表卡；每行给「转账 / 加白 / 拉黑或解除 / 删除」按钮。
 
     列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签一并带回）。
     """
@@ -169,8 +169,8 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         kind = ("whitelist" if person["is_whitelist"]
                 else "blacklist" if person["blacklist"] else "normal")
         tags = f" · 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
-        left, transfer_btn, whitelist_btn, blacklist_btn = st.columns([4, 1, 1, 1],
-                                                                      vertical_alignment="center")
+        left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
+            [4, 1, 1, 1, 1], vertical_alignment="center")
         left.markdown(f"**{person['name']}** · `{person['masked_phone']}`"
                       f" · {KIND_CN[kind]}{tags}")
         if transfer_btn.button("转账", key=f"tr-{person['payee_id']}",
@@ -196,3 +196,8 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                 _dispatch(executor, session_id, f"（按钮）把{person['name']}移出黑名单",
                           f"把{person['name']}移出黑名单")
                 st.rerun()
+        if delete_btn.button("删除", key=f"del-{person['payee_id']}",
+                             help=f"删除收款人 {person['name']}（需确认）"):
+            _dispatch(executor, session_id, f"（按钮）删除收款人{person['name']}",
+                      f"删除收款人{person['name']}")
+            st.rerun()

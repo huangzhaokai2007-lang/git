@@ -1,0 +1,130 @@
+"""S5 可编辑卡片：卡内改值 → **重走** shape/风控 → 出新卡（不是直接改卡）。
+
+验收点（设计 §4 + §5 的 S5）：
+- 改金额后**重走风控**（额度内 L1 → 超额度 L2）；
+- 改值只动被改字段，其它字段照旧；
+- 换收款人 → 解析关卡重新跑、档位跟着新收款人走；
+- OTP 阶段**不允许**改卡；
+- 聊天里「金额改成 X」→ 同意图 → 合并旧卡字段出新卡；不同意图 → 维持旧行为（清卡追问）；
+- `CardDraft` 数据契约：字段/值来自确认卡快照，无卡 → None。
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from agent import (
+    card_draft,
+    classifier,
+    confirm_card,
+    llm,
+    orchestrator,
+    session_memory,
+    write_flow,
+)
+from data import payee_dao
+from tests.conftest import raw
+from tools import payee
+
+UID = "u_zhangsan_0001"
+SESSION = "sess-edit"
+WANGWU, ZHANG = "王五", "张小美"
+
+
+@pytest.fixture()
+def wired(seeded, monkeypatch, clock):
+    monkeypatch.setattr(confirm_card, "_now", clock)
+    confirm_card.reset_state()
+    session_memory.reset()
+    yield seeded
+    confirm_card.reset_state()
+    session_memory.reset()
+
+
+def _fake(monkeypatch, payee_name: str = "房东", amount: str = "100") -> None:
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": "transfer_single", "confidence": 0.95,
+                                          "slots": {"payee": payee_name, "amount": amount},
+                                          "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+
+
+def _start_transfer(wired, monkeypatch, amount: str = "100"):
+    _fake(monkeypatch, amount=amount)
+    return orchestrator.handle(f"给房东转 {amount} 元", session_id=SESSION)
+
+
+def test_edit_amount_rereuns_risk(wired, monkeypatch) -> None:
+    """额度内 L1 → 改金额超额度 → **重走风控**变 L2。"""
+    pid = raw(wired, "SELECT id FROM payee WHERE name = ?", (WANGWU,))[0]["id"]
+    payee_dao.update_payee(pid, UID, whitelist_quota=5_000)            # 王五额度 50 元
+    card = _start_transfer(wired, monkeypatch, amount="20")
+    assert card.tier == "L1"                                            # 20 元额度内免码
+    edited = write_flow.edit(SESSION, {"amount": "100"})
+    assert "CONFIRM_CARD" in edited.states and edited.tier == "L2"
+    assert "100.00" in edited.reply and "超出白名单专属额度" in edited.reply
+
+
+def test_edit_keeps_untouched_fields(wired, monkeypatch) -> None:
+    """只改金额：收款人照旧（王五），金额换成新值。"""
+    card = _start_transfer(wired, monkeypatch)
+    edited = write_flow.edit(SESSION, {"amount": "88"})
+    assert "88.00" in edited.reply and WANGWU in edited.reply
+
+
+def test_edit_payee_switches_person_and_tier(wired, monkeypatch) -> None:
+    """换收款人：解析关卡重跑，档位跟着新收款人走（白名单 → 普通）。"""
+    card = _start_transfer(wired, monkeypatch)
+    assert card.tier == "L1"
+    edited = write_flow.edit(SESSION, {"payee": ZHANG})
+    assert ZHANG in edited.reply and edited.tier == "L2"                # 张小美非白名单
+
+
+def test_edit_rejected_at_otp_stage(wired, monkeypatch) -> None:
+    """验证码阶段不能改卡（先完成或撤销）。用张小美（L2 要码）走到 OTP 阶段。"""
+    _fake(monkeypatch, payee_name=ZHANG)
+    orchestrator.handle(f"给{ZHANG}转 100 元", session_id=SESSION)
+    assert "CONFIRM_CARD" in orchestrator.handle("确认", session_id=SESSION).states
+    assert confirm_card.current(SESSION).stage == "otp"
+    blocked = write_flow.edit(SESSION, {"amount": "50"})
+    assert blocked.result == "rejected" and "验证码阶段" in blocked.reply
+    assert confirm_card.current(SESSION) is not None                    # 卡没被清
+
+
+def test_resume_classify_edit_in_chat(wired, monkeypatch) -> None:
+    """聊天口径：卡在途时说「金额改成 50」→ 分类同意图 → 合并旧字段出新卡。"""
+    _fake(monkeypatch)
+    first = orchestrator.handle("给房东转 100 元", session_id=SESSION)
+    assert first.tier == "L1"
+    resolver = lambda text, history: classifier.IntentOut(               # noqa: E731
+        intent="transfer_single", confidence=0.95,
+        slots={"amount": "50"}, missing_slots=[])
+    edited = orchestrator.handle("金额改成 50 元", session_id=SESSION, intent_resolver=resolver)
+    assert "50.00" in edited.reply and WANGWU in edited.reply           # 收款人从旧卡继承
+
+
+def test_resume_different_intent_falls_back(wired, monkeypatch) -> None:
+    """改口说别的意图 → 维持旧行为：清卡、回追问，不执行、不误改。"""
+    _start_transfer(wired, monkeypatch)
+    resolver = lambda text, history: classifier.IntentOut(               # noqa: E731
+        intent="balance_query", confidence=0.95, slots={}, missing_slots=[])
+    turn = orchestrator.handle("帮我查余额", session_id=SESSION, intent_resolver=resolver)
+    assert confirm_card.current(SESSION) is None                         # 旧卡已清
+    assert turn.executed is False
+
+
+def test_draft_of_contract(wired, monkeypatch) -> None:
+    """CardDraft：字段/值来自确认卡快照；无卡 → None；AA（无编辑字段）→ None。"""
+    assert card_draft.draft_of(SESSION) is None
+    _start_transfer(wired, monkeypatch)
+    draft = card_draft.draft_of(SESSION)
+    assert draft is not None and draft.kind == "transfer_single"
+    #: 草稿值是**用户输入的原值**（"100"），卡面展示的 100.00 由事实包负责 —— 不混
+    assert [(f.name, f.value) for f in draft.fields] == [("payee", "房东"), ("amount", "100")]
+    confirm_card.clear(SESSION)
+    assert card_draft.draft_of(SESSION) is None

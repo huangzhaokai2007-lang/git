@@ -83,7 +83,7 @@ def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = Fa
         from agent import orchestrator, write_flow
         ctx = orchestrator._Ctx(trace_id, session_id, 0)
         card = orchestrator._apply(ctx, write_flow.start("payee_whitelist", {"payee": name}, session_id))
-        card.reply = f"{reply}\n\n要把他加入白名单吗？加入后给他转账不再需要短信验证码。\n{card.reply}"
+        card.reply = f"{reply}\n\n要把他加入白名单吗？加入后在专属额度内给他转账免验证码（超额度仍需验证码）。\n{card.reply}"
         return card
     return Turn(trace_id=trace_id, intent=INTENT, confidence=1.0, states=states,
                 tool_calls=["add_payee"], reply=reply, degraded=degraded, error_code=error_code,
