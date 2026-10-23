@@ -46,11 +46,11 @@ OTP = "123456"                        # demo 固定验证码（工具层 OTP_COD
 
 
 def execute_aa(session_id: str):
-    """**v2 口径**：AA 含非白名单成员 → L2 要码。确认 →（验证码）→ 执行，返回最终 Turn。"""
+    """**F22f 口径**：AA 是**收款**方向 → L1 免码。确认 → 直接执行，返回最终 Turn。"""
     stage = orchestrator.handle("确认", session_id=session_id)
     if stage.executed:
         return stage
-    assert "验证码" in stage.reply, stage.reply
+    assert "验证码" in stage.reply, stage.reply                    # 兜底：若将来哪档要码，仍能走通
     return orchestrator.handle(OTP, session_id=session_id)
 
 
@@ -66,10 +66,13 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
     monkeypatch.setattr(llm, "chat_json", chat_json)
 
 
-def aa_intent(names: list[str], amount: str) -> dict:
+def aa_intent(names: list[str], amount: str, *, amounts: str | None = None) -> dict:
     """一条 AA 意图（槽位名与 `classifier.SLOT_SCHEMA['aa_collect']` 一致）。"""
+    slots: dict = {"payee_ids": names, "amount": amount}
+    if amounts:
+        slots["amounts"] = amounts
     return {"intent": "aa_collect", "confidence": 0.95,
-            "slots": {"payee_ids": names, "amount": amount}, "missing_slots": []}
+            "slots": slots, "missing_slots": []}
 
 
 @pytest.fixture()
@@ -92,8 +95,8 @@ def test_confirm_card_issues_no_request_before_confirmation(wired, monkeypatch) 
     """出确认卡这一步**T9 一次都没被调用**：审计里没有 `create_aa_request`。"""
     card = turn(monkeypatch, f"向{WANGWU}和{ZHAOLIU} AA 收款 300 元",
                 [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    assert card.executed is False and card.tier == "L2"       # v2：含非白名单（赵六）→ 要码
-    assert "含非白名单收款人" in card.reply
+    assert card.executed is False and card.tier == "L1"       # F22f：收款方向免验证码
+    assert "一键均摊" in card.reply
     assert "CONFIRM_CARD" in card.states and "【AA 收款确认卡】" in card.reply
     assert "每人" in card.reply and "余数" in card.reply
     assert "已发起" not in card.reply                       # 还没发起，不许这么说
@@ -182,7 +185,7 @@ def test_wording_never_claims_money_received(wired, monkeypatch) -> None:
 # ---------------- ⑥ v2：成员全白名单 → 免码 ----------------
 
 def test_all_whitelist_members_need_no_otp(wired, monkeypatch) -> None:
-    """**v2 口径**：AA 成员**全是白名单** → L1、不弹验证码；这是「含非白名单要码」的互补半边。"""
+    """**F22f 口径**：AA 是收款方向 → 一律 L1 免验证码（白名单成员如此，非白名单也如此）。"""
     from data import payee_dao
     from tools import payee
     pid = payee.add_payee("白名单同事", "13800007777").data["payee_id"]
@@ -191,3 +194,26 @@ def test_all_whitelist_members_need_no_otp(wired, monkeypatch) -> None:
     assert card.tier == "L1"
     assert "验证码" not in card.reply and "非白名单" not in card.reply
     assert aa_audits(wired) == 0
+
+
+# ---------------- ⑦ F22f：按人金额 + 一键均摊 ----------------
+
+def test_per_person_amounts_card_and_execute(wired, monkeypatch) -> None:
+    """「王五 100 元、赵六 200 元」→ 卡面按人明细、合计 = 300，执行走 T31。"""
+    script = [aa_intent([WANGWU, ZHAOLIU], "300.00", amounts=f"{WANGWU} 100 元、{ZHAOLIU} 200 元"),
+              {"intent": "aa_collect", "confidence": 0.9, "slots": {}, "missing_slots": []}]
+    card = turn(monkeypatch, "AA 收款，王五 100 元、赵六 200 元", script)
+    assert "CONFIRM_CARD" in card.states and card.tier == "L1"
+    assert "按人金额" in card.reply and "100.00" in card.reply and "200.00" in card.reply
+    done = execute_aa(SESSION)
+    assert done.executed is True and "按人金额" in done.reply
+    #: 按人金额真实走的是 T31 —— 以其审计行为准（编排层审计行记的是描述符声明的 T9 名，
+    #: 这是 AA 无 preview 族的既有归属口径；T31 自己的审计行在，可回溯）。
+    assert len(raw(wired, "SELECT 1 FROM audit_log WHERE tool = 'create_aa_request_with_amounts'")) > 0
+
+
+def test_per_person_amounts_sum_must_match_total(wired, monkeypatch) -> None:
+    """合计与总额不符 → 直接报错，不出卡。"""
+    script = [aa_intent([WANGWU, ZHAOLIU], "300.00", amounts=f"{WANGWU} 100 元、{ZHAOLIU} 100 元")]
+    result = turn(monkeypatch, "AA 收款", script)
+    assert result.executed is False and "不符" in result.reply

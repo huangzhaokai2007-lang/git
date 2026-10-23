@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 import streamlit as st
 
-from agent import orchestrator, risk_flow
+from agent import orchestrator, payee_flow, risk_flow
 
 import components as ui
 
@@ -85,10 +85,12 @@ def render_payee_form(state: Mapping[str, Any], executor: Any) -> bool:
     turn = state["messages"][-1].get("turn") or {}
     if turn.get("intent") != "payee_add" or turn.get("executed"):
         return False                  # 提交成功（executed=True）就把表单收起来；失败则保留可重试
-    submitted = ui.payee_form()
+    defaults = executor.submit(payee_flow.pending_slots, state["session_id"]).result()
+    submitted = ui.payee_form(defaults)
     if submitted is None:
         return False
     name, phone, whitelist = submitted
+    payee_flow.clear_pending(state["session_id"])
     _ask_submit(state, "（表单提交）新增收款人")
     try:
         result = executor.submit(orchestrator.submit_payee, name, phone,

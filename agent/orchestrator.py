@@ -255,6 +255,7 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
     if ctx.intent == payee_flow.INTENT:                                  # 卡 20：只回引导语，界面据此弹表单
         ctx.enter("PRECHECK")
         ctx.tier = payee_flow.PAYEE_ADD_TIER
+        payee_flow.capture_pending(ctx.session_id, ctx.slots)            # 表单预填：姓名/手机号已说过
         return _finish(ctx, payee_flow.PROMPT, result="pending_confirm")
     if ctx.intent == risk_flow.INTENT and not risk_flow.answers_ready(ctx.slots.get("answers")):
         #: F10：聊天里只说"做测评"（或一个答案都没说出来）→ 回引导语、界面弹问卷（**不计分**）；

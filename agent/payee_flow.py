@@ -33,6 +33,26 @@ PAYEE_ADD_TIER = "L1"
 #: 聊天触发时回的引导语（**不写库**；界面见到 `turn.intent == "payee_add"` 就弹表单）
 PROMPT = "好的，请在下面的表单里填写收款人的姓名和手机号，提交后我立刻帮您加上。"
 
+#: 聊天句里已经说出的姓名/手机号 → 表单**预填**（用户不必再敲一遍）。
+#: Turn 不携带 slots（编排层 API），故由本模块按 session 暂存；界面弹表单时取一次。
+_PENDING_SLOTS: dict[str, dict] = {}
+
+
+def capture_pending(session_id: str, slots: dict) -> None:
+    """记下本轮 payee_add 说出的姓名/手机号（供界面预填表单）。"""
+    _PENDING_SLOTS[session_id] = {"name": str(slots.get("name") or ""),
+                                  "phone": str(slots.get("phone") or "")}
+
+
+def pending_slots(session_id: str) -> dict:
+    """取最近一次 payee_add 的预填值（无 → 空 dict；提交成功后由表单侧清除）。"""
+    return dict(_PENDING_SLOTS.get(session_id) or {})
+
+
+def clear_pending(session_id: str) -> None:
+    """表单提交成功后清掉预填（下一次再弹就是空表单）。"""
+    _PENDING_SLOTS.pop(session_id, None)
+
 
 def _audit(trace_id: str, session_id: str, tier: str, result: str,
            error_code: str | None, params: dict) -> None:

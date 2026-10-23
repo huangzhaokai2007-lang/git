@@ -57,7 +57,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "transfer_single": ("payee", "amount"),                                # T6/T7
     "transfer_scheduled": ("payee", "amount", "schedule"),                 # T7 schedule 参数
     "scheduled_cancel": (),                                                # F16 Q4：取消预约（无槽位，工具侧挑唯一 pending）
-    "aa_collect": ("payee_ids", "amount"),                                 # T9 create_aa_request
+    "aa_collect": ("payee_ids", "amount", "amounts"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
     "subscription_cancel": ("sub_id", "merchant"),                          # T11 cancel_subscription（card-24 扩 merchant）
     "subscription_remind": (),                                             # §3 有此意图、§2 无对应工具 → 留空待定
@@ -78,6 +78,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
     "payee_whitelist": ("payee",),                                         # T25 set_payee_whitelist（L2）
     "payee_blacklist": ("payee",),                                         # T28 set_payee_blacklist（L1）
+    "aa_collect": ("payee_ids", "amount", "amounts"),
     "payee_unblacklist": ("payee",),                                       # T29 unset_payee_blacklist（L2）
     "payee_delete": ("payee",),                                            # T30 delete_payee（L1）
     "smalltalk": (),                                                       # 闲聊无需槽位
@@ -173,6 +174,9 @@ SYSTEM_PROMPT = (
     "payee_unblacklist（解除黑名单）的判定：「把王小明移出黑名单」「解除对X的拉黑」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_add 的区分：只是新增联系人不是它，"
     "要**恢复**一个被拉黑的人才是 payee_unblacklist。\n"
+    "aa_collect（AA 收款）的判定：「向张三和李四 AA 收款 100 元」「大家 AA 一下」都判它；"
+    "`payee_ids` 填名单，`amount` 填总额；若用户说「王五 100 元、赵六 200 元」这种**按人金额**，"
+    "把整句原样放进 `amounts` 槽位，`amount` 可以不填（合计由系统算）。\n"
     "payee_delete（删除收款人）的判定：「把王小明删掉」「删除收款人张三」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_blacklist 的区分：拉黑是禁止转账、"
     "删除是把联系人整个移走（历史流水保留），要**移除联系人**才是 payee_delete。\n"

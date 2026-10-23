@@ -207,6 +207,7 @@ def edit(session_id: str, updates: Mapping) -> Step:
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
     derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
+               "amounts": ("per_person_cents", "amount_cents"),
                "schedule": (), "date": ()}
     for key, value in updates.items():
         if value in (None, ""):

@@ -198,6 +198,20 @@ class AaData(BaseModel):
     per_person_amount: int
 
 
+class AaAmountsReq(BaseModel):
+    """T31 入参（SPEC-CHANGE 新增）：按人金额的 AA 收款请求。"""
+
+    model_config = STRICT
+
+    payee_ids: list[str] = Field(min_length=1)
+    amounts: list[int] = Field(min_length=1)
+
+
+class AaAmountsData(BaseModel):
+    request_id: str
+    total_amount: int
+
+
 # ---------- T17 add_payee（卡 20：收款人自助添加） ----------
 
 class AddPayeeReq(BaseModel):

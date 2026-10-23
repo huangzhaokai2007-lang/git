@@ -132,32 +132,37 @@ def render_payee_card(reply: str) -> bool:
 
 
 # ================= S6：行内操作按钮（与上方「只读卡片」并存，不互斥） =================
-#: 上方汤版只渲染回执表格；下面这组给每行加「转账 / 加白 / 拉黑」按钮，
-#: 按钮 = 替用户说一句完整的话、走同一条 orchestrator.handle 流水线。
+#: 上方汤版只渲染回执表格；下面这组给每行加「转账 / 加白 / 拉黑 / 删除」按钮。
+#: 按钮**确定性直达写流水线**（`write_flow.start`，意图是按钮给的、不是模型猜的）——
+#: 实测缺陷：走 orchestrator.handle 时，若上一张确认卡还在途，按钮消息会被当成
+#: 「在途卡回复」串台（拉黑按钮弹出转账确认卡）。
 
 import time
 from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import orchestrator, payee_resolve
+from agent import confirm_card, payee_resolve, write_flow
 
 #: 三类人员的中文标签（面向用户只说大白话；与 `render_lists` 的措辞同口径）
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
 
 
-def _dispatch(executor: ThreadPoolExecutor, session_id: str, display: str, text: str) -> None:
-    """替用户发一句话，并把回执记进会话（与 `app._ask` 同口径，不写业务）。"""
+def _dispatch_start(executor: ThreadPoolExecutor, session_id: str, intent: str,
+                    slots: dict, display: str) -> None:
+    """按钮直达 `write_flow.start`（零 LLM 分类），并把回执记进会话。"""
     state = st.session_state
     state["messages"].append({"role": "user", "text": display})
-    turn = executor.submit(orchestrator.handle, text, session_id=session_id).result()
-    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": turn.model_dump()})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": turn.model_dump()})
-    state["clarify_round"] = state.get("clarify_round", 0) + (1 if "CLARIFY" in turn.states else 0)
+    confirm_card.clear(session_id)                       # 在途卡作废：按钮是新一笔操作
+    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    text = step.reply or step.ask or ""
+    state["messages"].append({"role": "assistant", "text": text, "turn": None})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": None})
+    state["clarify_round"] = state.get("clarify_round", 0) + (1 if step.missing else 0)
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """渲染收款人列表卡；每行给「转账 / 加白 / 拉黑或解除 / 删除」按钮。
+    """渲染收款人列表卡；每行给「转账 / 加白 / 拉黑或解除 / 删除」按钮（紧凑排版）。
 
     列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签一并带回）。
     """
@@ -168,36 +173,36 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     for person in people:
         kind = ("whitelist" if person["is_whitelist"]
                 else "blacklist" if person["blacklist"] else "normal")
-        tags = f" · 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
+        tags = f" 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
         left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
-            [4, 1, 1, 1, 1], vertical_alignment="center")
-        left.markdown(f"**{person['name']}** · `{person['masked_phone']}`"
-                      f" · {KIND_CN[kind]}{tags}")
-        if transfer_btn.button("转账", key=f"tr-{person['payee_id']}",
+            [3.4, 0.75, 0.75, 0.75, 0.75], vertical_alignment="center")
+        left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
+                      f"{tags}")
+        if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
                                help=f"给 {person['name']} 转账"):
-            _dispatch(executor, session_id, f"（按钮）给{person['name']}转账",
-                      f"给{person['name']}转账")
+            _dispatch_start(executor, session_id, "transfer_single", {"payee": person["name"]},
+                            f"（按钮）给{person['name']}转账")
             st.rerun()
         if not person["is_whitelist"] and not person["blacklist"]:
-            if whitelist_btn.button("加白", key=f"wl-{person['payee_id']}",
+            if whitelist_btn.button("加白", key=f"wl-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 加入白名单（需验证码）"):
-                _dispatch(executor, session_id, f"（按钮）把{person['name']}加入白名单",
-                          f"把{person['name']}加入白名单")
+                _dispatch_start(executor, session_id, "payee_whitelist",
+                                {"payee": person["name"]}, f"（按钮）把{person['name']}加入白名单")
                 st.rerun()
         if not person["blacklist"]:
-            if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}",
+            if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 加入黑名单（之后转账/送礼被拒）"):
-                _dispatch(executor, session_id, f"（按钮）把{person['name']}加入黑名单",
-                          f"把{person['name']}加入黑名单")
+                _dispatch_start(executor, session_id, "payee_blacklist",
+                                {"payee": person["name"]}, f"（按钮）把{person['name']}加入黑名单")
                 st.rerun()
         else:
-            if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}",
+            if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 移出黑名单（需验证码）"):
-                _dispatch(executor, session_id, f"（按钮）把{person['name']}移出黑名单",
-                          f"把{person['name']}移出黑名单")
+                _dispatch_start(executor, session_id, "payee_unblacklist",
+                                {"payee": person["name"]}, f"（按钮）把{person['name']}移出黑名单")
                 st.rerun()
-        if delete_btn.button("删除", key=f"del-{person['payee_id']}",
+        if delete_btn.button("删除", key=f"del-{person['payee_id']}", width="content",
                              help=f"删除收款人 {person['name']}（需确认）"):
-            _dispatch(executor, session_id, f"（按钮）删除收款人{person['name']}",
-                      f"删除收款人{person['name']}")
+            _dispatch_start(executor, session_id, "payee_delete",
+                            {"payee": person["name"]}, f"（按钮）删除收款人{person['name']}")
             st.rerun()
