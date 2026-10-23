@@ -51,6 +51,15 @@ from agent._write_gift import (
     _prepare_gift,
     _shape_gift,
 )
+from agent._write_gift_ops import (
+    _card as _card_gift_order,
+    _execute_cancel as _execute_gift_cancel,
+    _execute_pay as _execute_gift_pay,
+    _plain as _plain_gift_order,
+    _prepare_cancel as _prepare_gift_cancel,
+    _prepare_pay as _prepare_gift_pay,
+    _shape as _shape_gift_order,
+)
 from agent._write_schedule_ops import (
     _card_cancel,
     _card_modify,
@@ -236,6 +245,24 @@ _SPECS["scheduled_modify"] = WriteSpec(
     execute_tool="reschedule_scheduled", target_key="schedule_id",
     what="修改预约时间", shape=_shape_modify, prepare=_prepare_modify,
     card=_card_modify, plain=_plain_modify, execute=_execute_modify)
+
+#: F20 追加（T39）：**取消送礼订单** —— L1（只解锁冻结金额，余额不动）。
+_SPECS["gift_order_cancel"] = WriteSpec(
+    intent="gift_order_cancel", intent_cn="取消订单", title="取消订单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("order_id",), tools=("list_gift_orders",), execute_tool="cancel_gift_order",
+    target_key="order_id",
+    what="取消订单", shape=_shape_gift_order, prepare=_prepare_gift_cancel,
+    card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_cancel)
+
+#: F20 追加（T40）：**支付送礼订单** —— L2（真扣款，要验证码）。
+_SPECS["gift_order_pay"] = WriteSpec(
+    intent="gift_order_pay", intent_cn="支付订单", title="支付订单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("order_id",), tools=("list_gift_orders",), execute_tool="pay_gift_order",
+    target_key="order_id",
+    what="支付订单", shape=_shape_gift_order, prepare=_prepare_gift_pay,
+    card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_pay)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

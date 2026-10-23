@@ -50,6 +50,8 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "payee_delete": "L1",           # F22e SPEC-CHANGE：删除收款人只移联系人、不动钱（与加黑同档）
     "scheduled_run": "L1",          # F16 追加：立即执行，实际档位沿用预约冻结值（facts.tier 取高）
     "scheduled_modify": "L1",       # F16 追加：只改未来某一笔的时间，不动钱
+    "gift_order_cancel": "L1",      # F20 追加：取消订单只解锁冻结金额，余额不动
+    "gift_order_pay": "L2",         # F20 追加：支付订单真扣款 → 要验证码
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）
