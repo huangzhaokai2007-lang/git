@@ -26,7 +26,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from pypinyin import lazy_pinyin
+from pypinyin import Style, lazy_pinyin, pinyin
 
 from tools import payee, transfer
 
@@ -80,6 +80,49 @@ def _py(text: str) -> tuple[str, ...]:
     return tuple(lazy_pinyin(raw)) if raw else ()
 
 
+def _py_sets(text: str) -> tuple[frozenset[str], ...]:
+    """**每个字的全部读音**集合（多音字：单/曾/解/仇… 一字多读）。
+
+    依据实测：`pypinyin` 的 `heteronym=True` 能给出 `单 → {dan, chan, shan}`、
+    `曾 → {ceng, zeng}` —— 这正是「多音字消歧」要的数据（默认 `lazy_pinyin` 只给第一个读音，
+    于是「单（shàn）老师」会被读成 dān，跟用户说的 shàn 对不上）。
+    """
+    raw = str(text or "").strip()
+    if not raw:
+        return ()
+    return tuple(frozenset(part) for part in pinyin(raw, style=Style.NORMAL, heteronym=True))
+
+
+def _py_forms(text: str) -> set[str]:
+    """名字拼音的**所有可能写法**（多音字展开；超过 8 种就截断 —— 不猜、只认前 8 种）。"""
+    readings = _py_sets(text)
+    if not readings:
+        return set()
+    forms = {""}
+    for part in readings:
+        forms = {form + one for form in forms for one in part}
+        if len(forms) > 8:
+            forms = set(sorted(forms)[:8])
+    return forms
+
+
+def _py_hit(query: str, name: str) -> bool:
+    """同音命中（**含多音字消歧** + **直接输拼音**）：
+
+    - 查询是纯英文字母（用户直接打拼音，如 `zhangxiaomei`）→ 与名字的**任一读法拼写**比；
+    - 否则逐字比**读音集合**（任一字有交集即该字匹配）——单/山、曾/增这类多音字因此能命中。
+    """
+    want = str(query or "").strip()
+    if not want:
+        return False
+    if want.isascii() and want.isalpha():
+        return want.lower() in {form.lower() for form in _py_forms(name)}
+    left, right = _py_sets(want), _py_sets(name)
+    if not left or not right or len(left) != len(right):
+        return False
+    return all(a & b for a, b in zip(left, right))
+
+
 def _people() -> list[dict]:
     """当前用户的收款人 + 标签/黑名单画像（来自 T20；工具失败则空列表，由调用方报错）。"""
     listed = payee.list_payees()
@@ -110,7 +153,8 @@ def _match(query: str, people: list[dict]) -> tuple[list[dict], str]:
         return exact, HOW_EXACT
     want = _py(query)
     if want:
-        homophone = [p for p in people if _py(p["name"]) == want]
+        #: 同音层：**多音字消歧**（单/山、曾/增…）与**直接打拼音**都走 `_py_hit`
+        homophone = [p for p in people if _py_hit(query, p["name"])]
         if homophone:
             return homophone, HOW_PINYIN
     found = transfer.resolve_payee(query)             # 回落 T6：姓名/手机号/银行的子串匹配
