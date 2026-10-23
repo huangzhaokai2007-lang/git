@@ -62,7 +62,7 @@ def test_list_orders_and_bad_status(wired) -> None:
                              [{"item_id": "g_2", "name": "蛋糕", "price": 20_000}])
     listed = orders.list_gift_orders()
     assert listed.facts["total_count"] == 1
-    assert listed.facts["items"][0]["status_cn"] == "已下单"
+    assert listed.facts["items"][0]["status_cn"] == "待支付"
     assert orders.list_gift_orders("paid").facts["total_count"] == 0     # 状态筛选
     assert orders.list_gift_orders("bogus").ok is False                  # 非法状态
 
@@ -82,7 +82,7 @@ def test_orchestration_gift_creates_queryable_order(wired, monkeypatch) -> None:
     listed = orchestrator.handle("我的送礼订单", session_id=SESSION)
     assert listed.intent == "gift_order_list" and "list_gift_orders" in listed.tool_calls
     assert "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |" in listed.reply
-    assert CONTACT in listed.reply and "已下单" in listed.reply
+    assert CONTACT in listed.reply and "待支付" in listed.reply
 
 
 def test_render_gift_orders() -> None:
@@ -91,9 +91,9 @@ def test_render_gift_orders() -> None:
     assert "还没有送礼订单" in empty and "|" not in empty
     text = render_lists.render_gift_orders({"total_count": 1, "items": [
         {"order_id": "ord_abc", "contact": "王五", "gift_date": "2026-10-30",
-         "amount_yuan": "300.00", "status": "created", "status_cn": "已下单"}]})
+         "amount_yuan": "300.00", "status": "created", "status_cn": "待支付"}]})
     assert "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |" in text
-    assert "ord_abc" in text and "已下单" in text and "300.00" in text
+    assert "ord_abc" in text and "待支付" in text and "300.00" in text
 
 
 # ---------------- 2026-10-24 口径：黑名单不能送礼（直接拒、无需验证码） ----------------

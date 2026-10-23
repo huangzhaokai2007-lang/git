@@ -19,8 +19,8 @@ __all__ = ["badge", "holdings_line", "payee_row", "render_aa_requests", "render_
 #: 覆盖仓内三套状态机的全部取值（AA 4 · 预约 4 · 送礼订单 4），共 9 个码；
 #: **只做视觉标记**，不改任何判定（中文仍由各渲染器自己的词表给）。
 _STATUS_EMOJI = {"active": "⏳", "done": "✅", "expired": "⌛", "cancelled": "⛔",
-                 "created": "🧾", "paid": "✅", "pending": "⏳", "success": "✅",
-                 "failed": "⚠️"}
+                 "created": "🧾", "paid": "✅", "shipped": "🚚", "completed": "✅",
+                 "pending": "⏳", "success": "✅", "failed": "⚠️"}
 
 
 def badge(status: object, label: str) -> str:

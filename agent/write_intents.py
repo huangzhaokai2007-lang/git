@@ -90,12 +90,17 @@ from agent._write_aa_ops import (
 )
 from agent._write_gift_ops import (
     _card as _card_gift_order,
+    _card_advance as _card_gift_advance,
     _execute_cancel as _execute_gift_cancel,
+    _execute_advance as _execute_gift_advance,
     _execute_pay as _execute_gift_pay,
     _plain as _plain_gift_order,
+    _plain_advance as _plain_gift_advance,
     _prepare_cancel as _prepare_gift_cancel,
+    _prepare_advance as _prepare_gift_advance,
     _prepare_pay as _prepare_gift_pay,
     _shape as _shape_gift_order,
+    _shape_advance as _shape_gift_advance,
 )
 from agent._write_schedule_ops import (
     _card_cancel,
@@ -300,6 +305,15 @@ _SPECS["gift_order_pay"] = WriteSpec(
     target_key="order_id",
     what="支付订单", shape=_shape_gift_order, prepare=_prepare_gift_pay,
     card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_pay)
+
+#: 2026-10-24（人类规格 5 状态）→ L1：只改状态、不动钱。
+_SPECS["gift_order_advance"] = WriteSpec(
+    intent="gift_order_advance", intent_cn="订单状态", title="订单状态确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("order_id", "action"), tools=("list_gift_orders",),
+    execute_tool="advance_gift_order", target_key="order_id",
+    what="订单状态", shape=_shape_gift_advance, prepare=_prepare_gift_advance,
+    card=_card_gift_advance, plain=_plain_gift_advance, execute=_execute_gift_advance)
 
 #: F22 追加（T43）：**登记某人已付** —— L1（只改 AA 的份额状态，不动钱）。
 _SPECS["aa_mark_paid"] = WriteSpec(

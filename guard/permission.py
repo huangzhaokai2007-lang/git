@@ -52,6 +52,7 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "scheduled_modify": "L1",       # F16 追加：只改未来某一笔的时间，不动钱
     "gift_order_cancel": "L1",      # F20 追加：取消订单只解锁冻结金额，余额不动
     "gift_order_pay": "L2",         # F20 追加：支付订单真扣款 → 要验证码
+    "gift_order_advance": "L1",     # 2026-10-24：发货/完成只改状态，不动钱
     "aa_mark_paid": "L1",           # F22 追加：登记某人已付，不动钱
     "aa_cancel": "L1",              # F22 追加：撤销 AA，不动钱
     "aa_remind": "L1",              # 2026-10-24：提醒未付，不动钱

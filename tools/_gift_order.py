@@ -53,9 +53,11 @@ class RecordGiftOrderReq(BaseModel):
 
 LIST_TOOL, RECORD_TOOL = "list_gift_orders", "record_gift_order"
 #: 订单状态（与 `schema.sql` 的注释一致）
-GIFT_ORDER_STATUSES = ("created", "paid", "cancelled", "failed")
+GIFT_ORDER_STATUSES = ("created", "paid", "shipped", "completed", "cancelled", "failed")
 #: 状态中文（纯文案；未知值原样透传）
-STATUS_CN = {"created": "已下单", "paid": "已支付", "cancelled": "已取消", "failed": "失败"}
+#: 2026-10-24：按人类规格改 5 状态词表（待支付 / 已支付 / 已发货 / 已完成 / 已取消）
+STATUS_CN = {"created": "待支付", "paid": "已支付", "shipped": "已发货",
+             "completed": "已完成", "cancelled": "已取消", "failed": "失败"}
 
 
 def record_gift_order(plan_id: str, lock_id: str, contact: str, gift_date: str,

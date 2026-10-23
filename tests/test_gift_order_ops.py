@@ -106,3 +106,47 @@ def test_orchestration_cancel_order(wired, monkeypatch) -> None:
     done = orchestrator.handle("确认", session_id=SESSION)
     assert done.executed is True and done.tool_calls == ["cancel_gift_order"]
     assert raw(wired, "SELECT status FROM gift_order WHERE id = ?", (order_id,))[0]["status"] == "cancelled"
+
+
+# ---------------- 2026-10-24 人类规格：5 状态流转 ----------------
+
+def _order(wired, monkeypatch, pay: bool = False) -> str:
+    """下一单；pay=True 时再支付（created → paid）。"""
+    order_id = _created_order(wired, monkeypatch)
+    if pay:
+        assert ops.pay_gift_order(order_id).ok is True
+    return order_id
+
+
+def test_advance_ship_then_complete(wired, monkeypatch) -> None:
+    """paid → shipped → completed；只有对的状态能推进（L1，不动钱）。"""
+    order_id = _order(wired, monkeypatch, pay=True)
+    available_before, balance_before = _money(wired)
+    assert ops.advance_gift_order(order_id, "ship").ok is True
+    assert raw(wired, "SELECT status FROM gift_order WHERE id = ?", (order_id,))[0]["status"] == "shipped"
+    assert ops.advance_gift_order(order_id, "complete").ok is True
+    assert raw(wired, "SELECT status FROM gift_order WHERE id = ?", (order_id,))[0]["status"] == "completed"
+    assert _money(wired) == (available_before, balance_before)      # 全程不动钱
+    assert ops.advance_gift_order(order_id, "ship").ok is False      # 已完成 → 不能再发货
+
+
+def test_advance_rejects_wrong_state_and_action(wired, monkeypatch) -> None:
+    order_id = _order(wired, monkeypatch)               # 待支付
+    assert ops.advance_gift_order(order_id, "ship").ok is False      # 未支付不能发货
+    assert ops.advance_gift_order(order_id, "bogus").ok is False
+    paid = _order(wired, monkeypatch, pay=True)
+    assert ops.advance_gift_order(paid, "complete").ok is False      # 未发货不能完成
+
+
+def test_cancel_paid_order_refunds(wired, monkeypatch) -> None:
+    """「未发货可取消」：已支付（未发货）取消 → **退款回余额**；已发货则不可取消。"""
+    order_id = _order(wired, monkeypatch, pay=True)
+    total = raw(wired, "SELECT total FROM gift_order WHERE id = ?", (order_id,))[0]["total"]
+    _, balance_before = _money(wired)
+    result = ops.cancel_gift_order(order_id)
+    assert result.ok is True and "退款" in result.message
+    assert _money(wired)[1] == balance_before + total
+    shipped = _order(wired, monkeypatch, pay=True)
+    assert ops.advance_gift_order(shipped, "ship").ok is True
+    blocked = ops.cancel_gift_order(shipped)
+    assert blocked.ok is False and "未发货才可取消" in blocked.message
