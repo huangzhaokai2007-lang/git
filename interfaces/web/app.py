@@ -130,7 +130,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
-    state["bound-card-query"] = turn.intent == "card_query" and turn.error_code is None
+    state["bound-card-query"] = (turn.intent == "card_query" or turn.ask == 'card_lock') and turn.error_code is None
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [item for item in state["balance"] if item["text"] != turn.reply][-1:]
         state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})

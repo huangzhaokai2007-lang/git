@@ -27,7 +27,7 @@ def chat_entry(session_id: str, kind: str):
     from agent.orchestrator import Turn
     result = (card_unlock if kind == 'unlock' else card_lock).chat_entry(session_id)
     asks = {'records': 'lock_records', 'lock': 'card_lock', 'missing': 'card_missing', 'unlock': 'card_unlock'}
-    replies = {'records': '请查看锁卡与解锁记录。', 'lock': '请先选择要临时锁定的银行卡；确认后才会执行。',
+    replies = {'records': '请查看锁卡与解锁记录。', 'lock': '已展开银行卡列表，请点击目标卡旁的小锁，核对办理须知并验证后确认锁卡。',
                'missing': '暂时找不到卡，推荐先临时锁卡继续寻找；找到后可验证解锁。确认遗失并需要补卡时，可查看挂失说明进入办理。',
                'unlock': '请选择本人临时锁定的银行卡，验证模拟短信验证码后自助解锁。'}
     return Turn(trace_id=result.facts.get('trace_id', f'trace-{uuid.uuid4().hex[:12]}'), intent='card_unlock' if kind == 'unlock' else 'card_lock', confidence=1,

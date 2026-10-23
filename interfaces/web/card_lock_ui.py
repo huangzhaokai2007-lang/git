@@ -39,6 +39,13 @@ def _state(executor: ThreadPoolExecutor, session: str) -> dict:
 
 def accept_turn(executor: ThreadPoolExecutor, session: str, ask: str | None) -> None:
     state = _state(executor, session)
+    if ask == 'card_lock':
+        import card_binding_ui
+        _cancel_preview(executor, session, state)
+        card_binding_ui.reset()
+        st.session_state['bound-card-query'] = True
+        state.update(open=False, preview=None, result=None, error=None, mode='lock', inline=False)
+        return
     if ask in ('card_lock', 'card_missing', 'card_unlock'):
         _cancel_preview(executor, session, state)
         state.update(open=True, preview=None, result=None, error=None,
@@ -86,6 +93,10 @@ def row_confirmation(executor: ThreadPoolExecutor, session: str, card_id: str) -
                 st.toast(result['message'])
             else:
                 state['error'] = result['message']
+            st.rerun()
+        if st.button('取消解锁' if unlocking else '取消锁卡', key=f'lock-inline-cancel-{card_id}'):
+            _cancel_preview(executor, session, state)
+            state.update(open=False, preview=None, result=None, error=None)
             st.rerun()
     if state['error']:
         st.caption(state['error'])
