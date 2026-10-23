@@ -152,9 +152,9 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
              "velocity_window_minutes": VELOCITY_MINUTES_WRITE, "velocity_min_writes": VELOCITY_MIN_WRITES,
              **{f"limits_{key}": value for key, value in limits.items()}, **limits_yuan,
              **_money_facts(account["balance"], "balance"), **_money_facts(fee, "fee"),
+             **_money_facts(account["balance"] - amount - fee, "balance_after"),
              **_money_facts(amount, "amount"), **_money_facts(mean, "history_mean")}
-    data = PreviewData(preview_token=token, fee=fee, tier=judged["tier"],
-                       requires_otp=judged["requires_otp"], limits=limits)
+    data = PreviewData(preview_token=token, fee=fee, tier=judged["tier"], requires_otp=judged["requires_otp"], limits=limits)
     _store_token(token, {"user_id": current_user_id(), "session_id": current_session_id(),
                          "payee_id": payee["id"], "payee_name": payee["name"], "amount": amount,
                          "fee": fee, "tier": judged["tier"], "requires_otp": judged["requires_otp"],

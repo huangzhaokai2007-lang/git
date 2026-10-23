@@ -190,7 +190,13 @@ def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
         title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
         rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
               ("金额", f"{facts['amount_yuan']} 元"),
-              ("预计到账", confirm_card.expected_arrival(tier))],
+              ("预计到账", confirm_card.expected_arrival(tier)),
+              #: 2026-10-24 人类规格「转账卡片：转账后余额 / 今日剩余额度」——
+              #: 两个数都直接来自 T7 的事实包（`balance_after` / `limits_daily_remaining`），不重算。
+              *([("转账后余额", f"{facts['balance_after_yuan']} 元")]
+                if facts.get("balance_after_yuan") else []),
+              *([("今日剩余额度", f"{facts['limits_daily_remaining_yuan']} 元")]
+                if facts.get("limits_daily_remaining_yuan") else [])],
         tier=tier, requires_otp=requires_otp,
         risk_note=note)
 
