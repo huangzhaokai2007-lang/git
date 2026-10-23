@@ -36,6 +36,7 @@ from tools.payee_status import (    # noqa: F401,E402 —— 保持 payee.set_pa
     issue_confirm_ref,
     set_payee_blacklist,
     set_payee_note,
+    set_payee_tags,
     set_payee_whitelist,
     set_whitelist_expire,
     set_whitelist_quota,

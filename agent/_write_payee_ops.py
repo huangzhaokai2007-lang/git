@@ -226,3 +226,68 @@ def _execute_note(confirmation: confirm_card.Confirmation, otp: str | None) -> o
     del otp
     return payee.set_payee_note(str(confirmation.filled["payee_id"]),
                                 str(confirmation.filled.get("note") or ""))
+
+
+# ---------------- 改标签（L1）（2026-10-24 人类原文「添加收款人时增加标签字段」） ----------------
+
+TAGS_TIER = "L1"
+
+
+def _split_tags(raw: object) -> list[str]:
+    """「妈妈、房东」/「妈妈,房东」/ 列表 → 干净的标签列表（去空、去重、保序）。"""
+    if isinstance(raw, (list, tuple)):
+        parts = [str(x) for x in raw]
+    else:
+        text = str(raw or "")
+        for sep in ("、", ",", "，", ";", "；", " "):
+            text = text.replace(sep, ",")
+        parts = text.split(",")
+    out: list[str] = []
+    for part in parts:
+        tag = part.strip()
+        if tag and tag not in out:
+            out.append(tag)
+    return out
+
+
+def _shape_tags(slots: Mapping) -> ShapeResult:
+    """SLOT_FILL：谁 + 标签（说了就改，没说就问）。"""
+    filled, code, text = _resolve(slots)
+    if code:
+        return ShapeResult(filled=filled, error_code=code, message=text)
+    missing = [] if filled.get("payee_id") else ["payee"]
+    if filled.get("tags") is None and filled.get("tag") is None:
+        missing.append("tags")
+    else:
+        filled["tags"] = _split_tags(filled.get("tags") if filled.get("tags") is not None
+                                     else filled.get("tag"))
+    return ShapeResult(filled=filled, missing=missing,
+                       clarify="请说明标签（例如「妈妈、家人」）。" if "tags" in missing else "")
+
+
+def _prepare_tags(filled: dict) -> Prepared:
+    row, code = _row_of(str(filled.get("payee_id") or ""))
+    if row is None:
+        return Prepared(ok=False, error_code=code or "NOT_FOUND", message="找不到该收款人")
+    return Prepared(ok=True, facts={**row, "tier": TAGS_TIER}, credential="")
+
+
+def _card_tags(intent: str, filled: dict, facts: Mapping, tier: str,
+               requires_otp: bool) -> confirm_card.CardInput:
+    current = "、".join(facts.get("tags") or []) or "（无）"
+    return confirm_card.CardInput(
+        title="修改标签确认卡", intent_cn="修改标签",
+        rows=[("收款人", str(facts["name"])), ("当前标签", current),
+              ("新标签", "、".join(filled.get("tags") or []) or "（清空）")],
+        tier=tier, requires_otp=requires_otp, risk_note=confirm_card.risk_note([], "修改标签"))
+
+
+def _plain_tags(filled: dict, facts: Mapping, tier: str) -> str:
+    return (f"请确认：把 {facts.get('name')} 的标签改成"
+            f"「{'、'.join(filled.get('tags') or []) or '清空'}」，权限档 {tier}。")
+
+
+def _execute_tags(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
+    del otp
+    return payee.set_payee_tags(str(confirmation.filled["payee_id"]),
+                                list(confirmation.filled.get("tags") or []))

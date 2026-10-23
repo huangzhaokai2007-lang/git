@@ -332,3 +332,39 @@ def set_whitelist_quota(payee_id: str, quota_cents: int) -> ToolResult:
     label = f"专属额度已设为 {int(quota_cents) / 100:.2f} 元" if quota_cents else "专属额度已清除"
     return _ok({"payee_id": payee_id, "whitelist_quota": value},
                {"name": row["name"], "whitelist_quota": value}, f"{row['name']}：{label}")
+
+# ---------------- T47 标签（2026-10-24 追加：人类原文「添加收款人时增加标签字段」） ----------------
+
+TAGS_TOOL = "set_payee_tags"
+#: 单个标签最长 8 字、最多 5 个（标签是**指代用的短词**，长了反而不好用）
+TAG_MAX_CHARS, TAG_MAX_COUNT = 8, 5
+
+
+def set_payee_tags(payee_id: str, tags: list[str]) -> ToolResult:
+    """T47 设置/修改收款人**标签**（L1：标签影响「用标签指代人员」的解析，不动钱）。
+
+    `tags` 为空列表 = 清空标签。返回 `data = {payee_id, tags}`。
+    约束：去空白、去重、去空项；单标签 ≤ 8 字、最多 5 个（超了 → `INVALID_ARGUMENT`）。
+    """
+    cleaned: list[str] = []
+    for raw in tags or []:
+        tag = str(raw or "").strip().replace(",", " ").strip()
+        if not tag or tag in cleaned:
+            continue
+        if len(tag) > TAG_MAX_CHARS:
+            return _fail(ErrorCode.INVALID_ARGUMENT, f"标签「{tag}」太长（最多 {TAG_MAX_CHARS} 字）")
+        cleaned.append(tag)
+    if len(cleaned) > TAG_MAX_COUNT:
+        return _fail(ErrorCode.INVALID_ARGUMENT, f"标签最多 {TAG_MAX_COUNT} 个")
+    try:
+        row = _owned_payee(payee_id, tool=TAGS_TOOL)
+        payee_dao.update_payee(payee_id, current_user_id(),
+                               tags=",".join(cleaned) if cleaned else None)
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_tags", tool=TAGS_TOOL, params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = "、".join(cleaned) if cleaned else "（已清空）"
+    return _ok({"payee_id": payee_id, "tags": cleaned},
+               {"name": row["name"], "tags": cleaned}, f"{row['name']}：标签为 {label}")

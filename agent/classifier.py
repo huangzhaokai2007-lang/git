@@ -33,7 +33,7 @@ INTENT_LABELS = (
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
     "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "payee_whitelist_edit", "payee_whitelist_remove",
-    "payee_note", "smalltalk", "out_of_scope", "unsafe_request",
+    "payee_note", "payee_tags", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -44,7 +44,7 @@ IntentLabel = Literal[
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
     "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "payee_whitelist_edit", "payee_whitelist_remove",
-    "payee_note", "smalltalk", "out_of_scope", "unsafe_request",
+    "payee_note", "payee_tags", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -95,6 +95,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "payee_whitelist_edit": ("payee", "quota", "expire"),                  # 修改白名单信息
     "payee_whitelist_remove": ("payee",),                                  # 移出白名单
     "payee_note": ("payee", "note"),                                       # 修改备注
+    "payee_tags": ("payee", "tags"),                                       # 修改标签
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
@@ -192,6 +193,7 @@ SYSTEM_PROMPT = (
     "（仅展示、不参与风控）；没说就不填（长期有效）。\n"
     "transfer_scheduled 的 `repeat` 槽位：用户说「每个月/每月末/每周」这类**循环**时填原话"
     "（例如「每个月月末给房东转 3000」→ repeat=「每个月月末」）；没说就不填（一次性预约）。\n"
+    "payee_tags（改标签）：「给王五加上标签房东」「李四的标签改成同事」。`tags` 填原话。\n"
     "payee_whitelist_edit（修改白名单信息）：「把王五的额度改成 5000」「白名单有效期改到 2026-12-31」；"
     "`quota` 填元、`expire` 填日期原话。payee_whitelist_remove（移出白名单）：「把王五移出白名单」。\n"
     "payee_note（改备注）：「给王五加个备注」「把李四的备注改成老同学」。\n"

@@ -57,6 +57,7 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "payee_whitelist_edit": "L2",   # 2026-10-24：修改白名单信息必须验证码（人类原文）
     "payee_whitelist_remove": "L1", # 2026-10-24：移出白名单要确认、不要码
     "payee_note": "L1",             # 2026-10-24：备注是纯说明文字
+    "payee_tags": "L1",             # 2026-10-24：标签只影响指代解析
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）

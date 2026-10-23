@@ -52,19 +52,24 @@ from agent._write_gift import (
     _shape_gift,
 )
 from agent._write_payee_ops import (
+    _card_tags as _card_payee_tags,
     _card_edit as _card_payee_edit,
     _card_note as _card_payee_note,
     _card_remove as _card_payee_remove,
     _execute_edit as _execute_payee_edit,
+    _execute_tags as _execute_payee_tags,
     _execute_note as _execute_payee_note,
     _execute_remove as _execute_payee_remove,
     _plain_edit as _plain_payee_edit,
+    _plain_tags as _plain_payee_tags,
     _plain_note as _plain_payee_note,
     _plain_remove as _plain_payee_remove,
     _prepare_edit as _prepare_payee_edit,
+    _prepare_tags as _prepare_payee_tags,
     _prepare_note as _prepare_payee_note,
     _prepare_remove as _prepare_payee_remove,
     _shape_edit as _shape_payee_edit,
+    _shape_tags as _shape_payee_tags,
     _shape_note as _shape_payee_note,
     _shape_remove as _shape_payee_remove,
 )
@@ -335,6 +340,15 @@ _SPECS["payee_note"] = WriteSpec(
     target_key="payee_id",
     what="修改备注", shape=_shape_payee_note, prepare=_prepare_payee_note,
     card=_card_payee_note, plain=_plain_payee_note, execute=_execute_payee_note)
+
+#: 2026-10-24（人类原文「添加收款人时增加标签字段」，标签用于**用标签指代人员**）→ L1。
+_SPECS["payee_tags"] = WriteSpec(
+    intent="payee_tags", intent_cn="修改标签", title="修改标签确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "tags"), tools=("list_payees",), execute_tool="set_payee_tags",
+    target_key="payee_id",
+    what="修改标签", shape=_shape_payee_tags, prepare=_prepare_payee_tags,
+    card=_card_payee_tags, plain=_plain_payee_tags, execute=_execute_payee_tags)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

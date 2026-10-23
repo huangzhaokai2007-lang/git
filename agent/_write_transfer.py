@@ -24,6 +24,10 @@ from tools import transfer
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
 TRANSFER_CN = {"transfer_single": "单笔转账", "transfer_scheduled": "定时转账"}
 
+#: 预约时间合法性的三个界（人类规格「过去 / 5 分钟内 / 超过 1 年，均拒绝并提示」）
+SCHEDULE_MIN_AHEAD = datetime.timedelta(minutes=5)
+SCHEDULE_MAX_AHEAD = datetime.timedelta(days=365)
+
 #: 预约时间认不出时的追问（纯措辞，不含业务数字）。相对说法已支持（见 `_relative_time`）。
 SCHEDULE_CLARIFY = ("请说明预约时间，格式如 2026-10-21 09:00（也接受 2026-10-21），"
                     "或直接说「明天」「下周一」「下个月 5 号」「月底」这类说法。")
@@ -41,6 +45,22 @@ def _iso_schedule(value: object) -> str | None:
         return datetime.datetime.fromisoformat(text).isoformat(timespec="minutes")
     except ValueError:
         return _relative_time.parse(text, transfer._now())
+
+
+def _schedule_guard(when: str) -> str:
+    """预约时间合法性：过去 / 5 分钟内 / 超过 1 年 → 返回拒绝文案（否则空串）。
+
+    依据人类规格「时间合法性校验：过去时间、5 分钟内、超过 1 年，均拒绝并提示」。
+    """
+    moment = datetime.datetime.fromisoformat(when)
+    now = transfer._now()
+    if moment <= now:
+        return f"预约时间 {when.replace('T', ' ')} 已经过去了，请换一个将来的时间。"
+    if moment - now < SCHEDULE_MIN_AHEAD:
+        return "预约时间太近了（5 分钟内），请至少提前 5 分钟；想马上转请用「即时转账」。"
+    if moment - now > SCHEDULE_MAX_AHEAD:
+        return "预约时间超过 1 年了，请换一个 1 年内的日期。"
+    return ""
 
 
 def _first_occurrence(cycle: str, hint: object) -> str:
@@ -67,6 +87,10 @@ def _shape_scheduled(slots: Mapping) -> ShapeResult:
     shaped = _shape_transfer(slots)
     filled, missing = dict(shaped.filled), list(shaped.missing)
     when = _iso_schedule(filled.get("schedule"))
+    if when is not None:                                      # 2026-10-24：时间合法性三界
+        error = _schedule_guard(when)
+        if error:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT", message=error)
     cycle = repeat_cycle(filled.get("repeat"))               # 「每个月」→ monthly（认不出 = 一次性）
     if when is None and cycle:
         when = _first_occurrence(cycle, filled.get("repeat"))
