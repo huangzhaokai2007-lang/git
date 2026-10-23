@@ -86,6 +86,8 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
     if kind := card_lost_language.recognize(text):
         return card_lost_flow.chat_entry(session_id or 'lost', kind)
     if kind := card_lock_flow.recognize(text):
+        if kind == 'missing':
+            return card_lost_flow.chat_entry(session_id or 'lost', 'choice')
         return card_lock_flow.chat_entry(session_id or 'lock', kind)
     if kind := card_limit_flow.recognize(text):
         return card_limit_flow.chat_entry(text, session_id or "limit", kind)

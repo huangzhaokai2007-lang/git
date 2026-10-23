@@ -2,11 +2,13 @@
 from tests.test_card_binding_ui import app, bind, click, fill
 from tests.conftest import raw
 from datetime import timedelta
+import pytest
 
 
-def test_ambiguous_loss_offers_both_paths(monkeypatch, seeded):
+@pytest.mark.parametrize('text', ['帮我挂失', '我有张卡丢了', '银行卡不见了'])
+def test_ambiguous_loss_offers_both_paths(monkeypatch, seeded, text):
     at = app(monkeypatch, seeded)
-    at.chat_input[0].set_value('帮我挂失').run()
+    at.chat_input[0].set_value(text).run()
     assert not at.exception
     labels = [b.label for b in at.button]
     assert '临时锁卡，继续寻找' in labels

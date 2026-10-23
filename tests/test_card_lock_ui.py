@@ -105,8 +105,8 @@ def test_missing_card_offers_temporary_lock_without_executing(monkeypatch, seede
     bind(at)
     at.chat_input[0].set_value('我找不到我的信用卡了').run()
     assert not at.exception
-    assert any(button.label == '临时锁定' for button in at.button)
-    assert any(button.label == '挂失说明' for button in at.button)
-    click(at, '临时锁定')
-    assert any(button.label == '锁定 6222 **** **** 0001' for button in at.button)
+    assert any(button.label == '临时锁卡，继续寻找' for button in at.button)
+    assert any(button.label == '确认挂失并补卡' for button in at.button)
+    click(at, '临时锁卡，继续寻找')
+    assert any(button.key == f'lock-toggle-{CARD}' for button in at.button)
     assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'
