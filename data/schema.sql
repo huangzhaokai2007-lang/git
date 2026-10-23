@@ -49,6 +49,7 @@ CREATE TABLE payee (
   whitelist_quota INTEGER,                        -- 白名单免验证码额度，单位分；NULL=无额度
   whitelist_expire TEXT,                          -- 白名单有效期（ISO 结束日期）；到期自动降级为普通收款人；NULL=长期
   note TEXT,                                      -- 备注（用户自己写的说明，可空；不是风控字段）
+  card_no TEXT,                                  -- 银行卡号**脱敏形态**（如 **** **** **** 8888）；完整号绝不入库
   blacklist INTEGER NOT NULL DEFAULT 0,           -- 1=黑名单；与 is_whitelist 互斥
   blacklist_reason TEXT                           -- 拉黑原因，可空
 );

@@ -51,7 +51,7 @@ def update_payee(payee_id: str, user_id: str, **fields: object) -> dict | None:
 
     白名单、黑名单**互斥**在这里强制：置 `is_whitelist=1` 时清 `blacklist`，反之亦然。
     """
-    allowed = {"tags", "whitelist_quota", "whitelist_expire", "note", "is_whitelist",
+    allowed = {"tags", "whitelist_quota", "whitelist_expire", "note", "card_no", "is_whitelist",
                "blacklist", "blacklist_reason"}
     bad = set(fields) - allowed
     if bad:

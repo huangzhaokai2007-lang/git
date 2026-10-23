@@ -96,7 +96,8 @@ def render_payee_form(state: Mapping[str, Any], executor: Any) -> bool:
             orchestrator.submit_payee, submitted["name"], submitted["phone"],
             session_id=state["session_id"], whitelist=submitted["whitelist"],
             note=submitted["note"], quota=submitted["quota"],
-            expire=submitted["expire"], tags=submitted.get("tags", "")).result()
+            expire=submitted["expire"], tags=submitted.get("tags", ""),
+            card_no=submitted.get("card_no", "")).result()
     except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
         _failure(state, exc)
         return True

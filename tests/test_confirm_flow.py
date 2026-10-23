@@ -259,3 +259,19 @@ def test_immediate_transfer_still_works_after_the_stopgap(wired, monkeypatch) ->
                     [intent({"payee": WANGWU, "amount": "100.00"})])
     assert "CONFIRM_CARD" in step.states and "【转账确认卡】" in step.reply
     assert "还没接通" not in step.reply
+
+
+# ---------------- 2026-10-24 人类规格 §二：卡片状态 ----------------
+
+def test_card_shows_state(wired, monkeypatch) -> None:
+    """确认卡第二行给状态：需要验证码 → 「等待验证码」；不需要 → 「草稿（待你确认）」。"""
+    from agent import confirm_card
+    card = confirm_card.CardInput(
+        title="测试卡", intent_cn="测试", rows=[("金额", "1.00 元")],
+        tier="L2", requires_otp=True, risk_note="常规测试，未触发风险因子")
+    text = confirm_card.render(card)
+    assert "状态：" in text and confirm_card.STATE_WAIT_OTP in text
+    plain = card.model_copy(update={"requires_otp": False, "tier": "L1"})
+    text2 = confirm_card.render(plain)
+    assert confirm_card.STATE_DRAFT in text2 and "待你确认" in text2
+    assert confirm_card.state_line("未定义状态") == "未定义状态"      # 认不出就原样，不猜

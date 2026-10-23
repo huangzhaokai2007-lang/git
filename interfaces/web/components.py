@@ -220,6 +220,8 @@ def payee_form(defaults: dict | None = None) -> dict | None:
                                  value=str(defaults.get("name") or ""))
             phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678",
                                   value=str(defaults.get("phone") or ""))
+            card_no = st.text_input("银行卡号（可空）", key="payee-card-no",
+                                    placeholder="只保存脱敏形态（**** **** **** 8888）")
             tags = st.text_input("标签（可空，多个用、分隔）", key="payee-tags",
                                  placeholder="例如：妈妈、家人（之后可以说「给我妈转 200」）")
             note = st.text_input("备注（可空）", key="payee-note",
@@ -238,7 +240,8 @@ def payee_form(defaults: dict | None = None) -> dict | None:
             submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
         if submitted:
             return {"name": name, "phone": phone, "whitelist": bool(whitelist),
-                    "note": note, "quota": quota, "expire": expire, "tags": tags}
+                    "note": note, "quota": quota, "expire": expire, "tags": tags,
+                    "card_no": card_no}
     return None
 
 

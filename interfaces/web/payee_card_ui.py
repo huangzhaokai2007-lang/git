@@ -243,8 +243,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         note = f" · 备注 {person['note']}" if person.get("note") else ""
         quota = _quota_note(executor, person)
         recent = _recent_note(person)
+        card = f" · 卡号 {person['card_no']}" if person.get("card_no") else ""
         left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
-                      f"{tags}{_expire_note(person)}{quota}{note}{recent}")
+                      f"{tags}{_expire_note(person)}{quota}{note}{card}{recent}")
         if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
                                help=f"给 {person['name']} 转账"):
             _dispatch_start(executor, session_id, "transfer_single", who,

@@ -139,7 +139,8 @@ def _people() -> list[dict]:
                     "whitelist_quota": extra.get("whitelist_quota"),
                     "whitelist_expire": extra.get("whitelist_expire"),
                     "note": extra.get("note"),
-                    "last_used_ts": extra.get("last_used_ts")})
+                    "last_used_ts": extra.get("last_used_ts"),
+                    "card_no": extra.get("card_no")})
     return out
 
 

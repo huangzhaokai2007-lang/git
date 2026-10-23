@@ -83,7 +83,7 @@ def _reply(result: ToolResult) -> tuple[str, bool, str | None]:
 
 def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = False,
                  note: str = "", quota: str = "", expire: str = "",
-                 tags: str = "") -> "Turn":
+                 tags: str = "", card_no: str = "") -> "Turn":
     """表单提交入口（界面只调这一个函数）：PRECHECK（guard 定档）→ EXECUTE → 校验回执 → AUDIT。
 
     `whitelist=True`（表单里勾了「同时加入白名单」）时，**加完人立刻接上白名单确认卡** ——
@@ -105,6 +105,8 @@ def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = Fa
         raw_tags = str(tags).replace("、", ",").replace("，", ",")
         payee_tool.set_payee_tags(str(result.data["payee_id"]),
                                   [t for t in raw_tags.split(",") if t.strip()])
+    if result.ok and str(card_no or "").strip():         # 2026-10-24：添加时可一并记卡号（T50，只存脱敏）
+        payee_tool.set_payee_card_no(str(result.data["payee_id"]), str(card_no))
     if result.ok and str(note or "").strip():            # 2026-10-24：添加时可一并写备注（T45）
         payee_tool.set_payee_note(str(result.data["payee_id"]), str(note))
     if result.ok and whitelist:                          # 勾了复选框 → 接着走 L2 确认卡

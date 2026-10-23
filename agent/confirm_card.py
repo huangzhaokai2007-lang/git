@@ -52,7 +52,25 @@ FACTOR_NOTES = {
 }
 
 #: 卡面模板。`{rows}` 由调用方拼好的多行「标签：值」构成（card-24 起不再硬编码转账字段）。
+#: 卡片状态词表（人类规格 §二：草稿 / 解析中 / 等待验证码 / 已确认 / 执行中 / 已完成 / 失败 / 已过期 / 已取消）
+STATE_DRAFT, STATE_PARSING, STATE_WAIT_OTP = "草稿", "解析中", "等待验证码"
+STATE_CONFIRMED, STATE_RUNNING = "已确认", "执行中"
+STATE_DONE, STATE_FAILED, STATE_EXPIRED, STATE_CANCELLED = "已完成", "失败", "已过期", "已取消"
+
+#: 状态徽章（纯视觉标记，不改任何判定）
+STATE_BADGE = {STATE_DRAFT: "📝", STATE_PARSING: "🔍", STATE_WAIT_OTP: "🕓",
+               STATE_CONFIRMED: "✅", STATE_RUNNING: "⏳", STATE_DONE: "✅",
+               STATE_FAILED: "⚠️", STATE_EXPIRED: "⌛", STATE_CANCELLED: "⛔"}
+
+
+def state_line(state: str) -> str:
+    """卡面状态行（人类规格「卡片需包含状态」）；认不出的状态原样返回，不猜。"""
+    badge = STATE_BADGE.get(state, "")
+    return f"{badge} {state}".strip()
+
+
 CARD_TEMPLATE = """【{title}】
+状态：{state}
 意图：{intent_cn}
 {rows}
 权限档：{tier}{otp_hint}
@@ -97,10 +115,17 @@ def expected_arrival(tier: str) -> str:
 
 
 def render(card: CardInput) -> str:
-    """渲染确认卡文本（占位符全部来自 `card`，缺字段由 Pydantic 拦下）。"""
+    """渲染确认卡文本（占位符全部来自 `card`，缺字段由 Pydantic 拦下）。
+
+    2026-10-24（人类规格 §二「卡片需包含状态」）：卡面第二行给**状态**——
+    还没输验证码 → 「等待验证码」；不需要验证码 → 「草稿（待你确认）」。
+    状态是**纯展示**：判定仍由档位/OTP 决定（这里不参与任何决策）。
+    """
     rows = "\n".join(f"{label}：{value}" for label, value in card.rows)
+    state = STATE_WAIT_OTP if card.requires_otp else f"{STATE_DRAFT}（待你确认）"
+    payload = card.model_dump(exclude={"rows"})
     return CARD_TEMPLATE.format(otp_hint="（需输入短信验证码）" if card.requires_otp else "",
-                                rows=rows, **card.model_dump(exclude={"rows"}))
+                                state=state_line(state), rows=rows, **payload)
 
 
 def is_confirmation(text: str) -> bool:

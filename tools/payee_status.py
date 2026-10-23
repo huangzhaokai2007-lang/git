@@ -368,3 +368,34 @@ def set_payee_tags(payee_id: str, tags: list[str]) -> ToolResult:
     label = "、".join(cleaned) if cleaned else "（已清空）"
     return _ok({"payee_id": payee_id, "tags": cleaned},
                {"name": row["name"], "tags": cleaned}, f"{row['name']}：标签为 {label}")
+
+
+# ---------------- T50 银行卡号（2026-10-24：人类规格「添加收款人卡片：银行卡号」） ----------------
+
+CARD_NO_TOOL = "set_payee_card_no"
+#: 卡号只留后四位：`**** **** **** 8888`（**完整卡号绝不入库、绝不回显**，铁律 8）
+_CARD_NO_DIGITS = re.compile(r"\d{12,19}")
+
+
+def set_payee_card_no(payee_id: str, card_no: str) -> ToolResult:
+    """T50 记录收款人**银行卡号（脱敏形态）**。L1：只是展示用信息，不参与风控。
+
+    入参可以是完整卡号，但**入库前一律脱敏**成 `**** **** **** 8888`；空串 = 清除。
+    返回 `data = {payee_id, card_no}`（脱敏形态）。
+    """
+    digits = "".join(ch for ch in str(card_no or "") if ch.isdigit())
+    if digits and not (12 <= len(digits) <= 19):
+        return _fail(ErrorCode.INVALID_ARGUMENT, "银行卡号一般是 12-19 位数字，请核对")
+    masked = f"**** **** **** {digits[-4:]}" if digits else ""
+    try:
+        row = _owned_payee(payee_id, tool=CARD_NO_TOOL)
+        payee_dao.update_payee(payee_id, current_user_id(), card_no=masked or None)
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_card_no", tool=CARD_NO_TOOL,
+                         params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = f"卡号已记为 {masked}" if masked else "卡号已清除"
+    return _ok({"payee_id": payee_id, "card_no": masked},
+               {"name": row["name"], "card_no": masked}, f"{row['name']}：{label}")

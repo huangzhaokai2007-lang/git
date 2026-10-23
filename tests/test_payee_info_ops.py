@@ -124,3 +124,28 @@ def test_note_intent(wired, monkeypatch) -> None:
     done = orchestrator.handle("确认", session_id=SESSION)
     assert done.executed is True
     assert raw(wired, "SELECT note FROM payee WHERE id = ?", (pid,))[0]["note"] == "妈妈，别转错"
+
+
+# ---------------- 2026-10-24：银行卡号（只存脱敏形态） ----------------
+
+def test_card_no_is_stored_masked(wired) -> None:
+    """T50：完整卡号入库前脱敏成 `**** **** **** 8888`；位数不对拒绝；空串清除。"""
+    from tools import payee
+    pid = _pid(wired, WANGWU)
+    got = payee.set_payee_card_no(pid, "6222 0212 3456 8888")
+    assert got.ok is True and got.data["card_no"] == "**** **** **** 8888"
+    assert raw(wired, "SELECT card_no FROM payee WHERE id = ?", (pid,))[0]["card_no"] == "**** **** **** 8888"
+    assert payee.list_payees().facts["profiles"][pid]["card_no"] == "**** **** **** 8888"
+    assert payee.set_payee_card_no(pid, "123").ok is False        # 位数不对
+    assert payee.set_payee_card_no(pid, "").ok is True
+    assert raw(wired, "SELECT card_no FROM payee WHERE id = ?", (pid,))[0]["card_no"] is None
+
+
+def test_card_no_never_stores_full_number(wired) -> None:
+    """铁律 8：库里绝不能出现完整卡号。"""
+    from tools import payee
+    pid = _pid(wired, ZHANG)
+    full = "6222021234567890123"
+    assert payee.set_payee_card_no(pid, full).ok is True
+    row = raw(wired, "SELECT * FROM payee WHERE id = ?", (pid,))[0]
+    assert full not in str(dict(row)) and "7890123" not in str(dict(row))
