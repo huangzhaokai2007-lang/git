@@ -30,7 +30,7 @@ from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import confirm_card, templates, write_intents
+from agent import card_draft, confirm_card, templates, write_intents
 from guard import permission
 
 logger = logging.getLogger(__name__)
@@ -158,6 +158,11 @@ def resume(session_id: str, text: str,
         return _execute(session_id, confirmation, text.strip())
     head = Step(states=["CONFIRM_CARD"], intent=confirmation.intent, tier=confirmation.tier)
     if not confirm_card.is_confirmation(text):
+        #: S5 改卡：先走**确定性句式**（「金额改成 50 元」不赌 LLM 脾气），
+        #: 刻板句式命中 → 直接改；否则再试 LLM 分类兜底（自由措辞的改卡）。
+        updates = card_draft.parse_edit(text, confirmation.intent)
+        if updates is not None:
+            return edit(session_id, updates)
         if classify is not None:                                       # S5：改卡（同意图才算）
             try:
                 verdict = classify(text)

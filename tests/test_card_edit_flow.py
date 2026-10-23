@@ -128,3 +128,35 @@ def test_draft_of_contract(wired, monkeypatch) -> None:
     assert [(f.name, f.value) for f in draft.fields] == [("payee", "房东"), ("amount", "100")]
     confirm_card.clear(SESSION)
     assert card_draft.draft_of(SESSION) is None
+
+
+# ---------------- 改卡句式的确定性解析（不赌 LLM 脾气） ----------------
+
+def test_parse_edit_stereotyped_phrases() -> None:
+    """刻板句式直接解析成槽位更新；自由文本 / 无编辑字段的意图 → None。"""
+    assert card_draft.parse_edit("金额改成 50 元", "transfer_single") == {"amount": "50"}
+    assert card_draft.parse_edit("收款人改为张小美", "transfer_single") == {"payee": "张小美"}
+    assert card_draft.parse_edit("改成 80", "transfer_single") == {"amount": "80"}
+    assert card_draft.parse_edit("预约时间改成 2026-10-30", "transfer_scheduled") == {"schedule": "2026-10-30"}
+    assert card_draft.parse_edit("预算调整为 300 元", "gift_plan") == {"budget": "300"}
+    assert card_draft.parse_edit("帮我查余额", "transfer_single") is None
+    assert card_draft.parse_edit("金额改成 50", "aa_collect") is None    # AA 没有编辑字段
+    assert card_draft.parse_edit("日期改成 2026-10-30", "transfer_single") is None  # 字段不属于该意图
+
+
+def test_resume_edit_via_stereotype_without_llm(wired, monkeypatch) -> None:
+    """「金额改成 50 元」走确定性规则：**不再分类**、收款人保留、金额换成新值。"""
+    _fake(monkeypatch)
+    calls: list[int] = []
+    real = llm.chat_json
+
+    def counting(system, user, schema):
+        calls.append(1)
+        return real(system, user, schema)
+
+    monkeypatch.setattr(llm, "chat_json", counting)
+    orchestrator.handle("给房东转 100 元", session_id=SESSION)
+    before = len(calls)
+    edited = orchestrator.handle("金额改成 50 元", session_id=SESSION)
+    assert len(calls) == before                                          # 改卡零 LLM 调用
+    assert "50.00" in edited.reply and WANGWU in edited.reply
