@@ -47,7 +47,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         left, pay_btn, cancel_btn = st.columns([3.6, 0.9, 0.9], vertical_alignment="center")
         left.markdown(f"**{item['contact']}** · {item['amount_yuan']} 元 · "
                       f"{item['gift_date']} · {item['status_cn']} · `{order_id}`")
-        if item["status"] == "created":                     # 只有「待支付」能支付/取消
+        if item["status"] == "created":                     # 待支付：可支付 / 可取消（解锁）
             if pay_btn.button("支付", key=f"gpay-{order_id}", width="content",
                               help="从储蓄账户真扣款（需验证码）"):
                 _start(executor, session_id, "gift_order_pay", {"order_id": order_id},
@@ -57,4 +57,21 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                                  help="取消订单并解锁冻结金额"):
                 _start(executor, session_id, "gift_order_cancel", {"order_id": order_id},
                        f"（按钮）取消订单 {order_id}")
+                st.rerun()
+        elif item["status"] == "paid":                     # 已支付未发货：可发货 / 可取消（退款）
+            if pay_btn.button("发货", key=f"gship-{order_id}", width="content",
+                              help="标记已发货（之后不可取消）"):
+                _start(executor, session_id, "gift_order_advance",
+                       {"order_id": order_id, "action": "ship"}, f"（按钮）订单 {order_id} 发货")
+                st.rerun()
+            if cancel_btn.button("取消", key=f"grcancel-{order_id}", width="content",
+                                 help="取消订单并退款"):
+                _start(executor, session_id, "gift_order_cancel", {"order_id": order_id},
+                       f"（按钮）取消订单 {order_id}（退款）")
+                st.rerun()
+        elif item["status"] == "shipped":                  # 已发货：可标记完成（不可取消）
+            if pay_btn.button("完成", key=f"gdone-{order_id}", width="content",
+                              help="标记订单已完成"):
+                _start(executor, session_id, "gift_order_advance",
+                       {"order_id": order_id, "action": "complete"}, f"（按钮）订单 {order_id} 完成")
                 st.rerun()
