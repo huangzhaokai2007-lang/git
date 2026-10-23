@@ -7,6 +7,7 @@ export default function () {
   let pending = null;
   let settleTimer = 0;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+  const chains = typeof createCardChains === 'function' ? createCardChains(reduced) : null;
 
   function cardId(tile) {
     return tile.querySelector('.bank-card-identity')?.dataset.card || '';
@@ -66,6 +67,7 @@ export default function () {
     if (!next) return;
     const first = next !== root;
     root = next;
+    chains?.sync(root);
     if (first) {
       resizeObserver?.disconnect();
       resizeObserver = new ResizeObserver(schedule);
@@ -105,7 +107,7 @@ export default function () {
   }
 
   const observer = new MutationObserver(schedule);
-  observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-selected', 'data-revision']});
+  observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-selected', 'data-revision', 'data-status']});
   document.addEventListener('click', click, true);
   window.addEventListener('resize', schedule);
   reduced.addEventListener('change', schedule);
@@ -118,5 +120,6 @@ export default function () {
     document.removeEventListener('click', click, true);
     window.removeEventListener('resize', schedule);
     reduced.removeEventListener('change', schedule);
+    chains?.destroy();
   };
 }

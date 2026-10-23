@@ -5,11 +5,15 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v2 as components
 
-_FOCUS_JS = Path(__file__).with_name('card_focus.js').read_text(encoding='utf-8')
+_FOCUS_JS = '\n'.join(Path(__file__).with_name(name).read_text(encoding='utf-8')
+                     for name in ('card_chains.js', 'card_focus.js'))
 
 
 CSS = """<style>
 .bank-gallery-state,.bank-card-identity {display:none}
+.bank-chain-overlay {position:absolute;inset:0;width:100%;height:100%;z-index:3;
+ pointer-events:none;filter:drop-shadow(0 3px 2px #07132299);border-radius:20px}
+.bank-chain-badge {transform-box:fill-box;transform-origin:center}
 .st-key-bank-gallery {position:relative;isolation:isolate}
 .st-key-bank-gallery [class*="st-key-bank-tile-"] {margin-bottom:0}
 .st-key-bank-gallery-details:has(.st-key-detail-close) {animation:bank-details-reveal .5s ease .4s both}
@@ -86,7 +90,7 @@ def deck(items: list[dict], selected: str | None, render_card, revision: int = 0
         st.markdown(f'<span class="bank-gallery-state" data-selected="{escape(selected or "", quote=True)}" data-revision="{revision}"></span>', unsafe_allow_html=True)
         for item in items:
             with st.container(key=f"bank-tile-{item['type']}-{item['card_id']}"):
-                st.markdown(f'<span class="bank-card-identity" data-card="{escape(item["card_id"], quote=True)}"></span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="bank-card-identity" data-card="{escape(item["card_id"], quote=True)}" data-status="{escape(item["status"], quote=True)}"></span>', unsafe_allow_html=True)
                 render_card(item)
     animator = components.component('bank_card_focus', js=_FOCUS_JS)
     animator(key='cards-focus-animation')
