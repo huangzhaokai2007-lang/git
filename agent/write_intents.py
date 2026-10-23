@@ -294,7 +294,8 @@ _SPECS["gift_order_cancel"] = WriteSpec(
     credential_kind="none", otp_in_tool=False,
     missing=("order_id",), tools=("list_gift_orders",), execute_tool="cancel_gift_order",
     target_key="order_id",
-    what="取消订单", shape=_shape_gift_order, prepare=_prepare_gift_cancel,
+    what="取消订单", shape=lambda slots: _shape_gift_order({**dict(slots), "_intent": "cancel"}),
+    prepare=_prepare_gift_cancel,
     card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_cancel)
 
 #: F20 追加（T40）：**支付送礼订单** —— L2（真扣款，要验证码）。

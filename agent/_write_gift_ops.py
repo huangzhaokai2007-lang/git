@@ -31,10 +31,15 @@ def _pending_orders() -> tuple[list[dict], str | None]:
     return list(listed.facts.get("items") or []), None
 
 
-def _pick(slots: Mapping) -> tuple[dict | None, str | None, list[str], str]:
-    """挑一笔未支付订单：给了 `order_id`（界面按钮）就用它；否则一笔→直接定，多笔→追问。"""
+def _pick(slots: Mapping, *, statuses: tuple[str, ...] = ("created",)) -> tuple[dict | None, str | None, list[str], str]:
+    """挑一笔订单：给了 `order_id`（界面按钮）就用它；否则一笔→直接定，多笔→追问。
+
+    `statuses` 决定候选范围：支付只认 `created`；**取消认 `created` + `paid`**
+    （人类规格「未发货可取消」——已支付但未发货也能取消并退款）。
+    """
     filled = dict(slots)
-    items, code = _pending_orders()
+    items, code = _all_orders()
+    items = [it for it in items if it["status"] in statuses]
     if code is not None:
         return None, code, [], "取不到您的送礼订单"
     if filled.get("order_id"):
@@ -43,16 +48,21 @@ def _pick(slots: Mapping) -> tuple[dict | None, str | None, list[str], str]:
             return None, "NOT_FOUND", [], "这笔订单已不在未支付状态"
         return row, None, [], ""
     if not items:
-        return None, "NOT_FOUND", [], "您没有未支付的送礼订单"
+        everything, _ = _all_orders()
+        if everything:                                  # 有订单但都不在可操作状态 → 说清原因
+            current = "、".join(f"{it['contact']}（{it['status_cn']}）" for it in everything)
+            return None, "INVALID_STATE", [], f"没有可取消的订单（**未发货**才能取消）；当前：{current}"
+        return None, "NOT_FOUND", [], "您还没有送礼订单"
     if len(items) > 1:
         return None, None, ["order_id"], PICK_AMBIGUOUS
     return items[0], None, [], ""
 
 
 def _shape(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL（取消/支付共用）：挑一笔未支付订单。"""
+    """SLOT_FILL（取消/支付共用）：挑一笔订单。取消范围含「已支付未发货」。"""
     filled = dict(slots)
-    row, code, missing, clarify = _pick(filled)
+    statuses = ("created", "paid") if filled.get("_intent") == "cancel" else ("created",)
+    row, code, missing, clarify = _pick(filled, statuses=statuses)
     if code is not None:
         return ShapeResult(filled=filled, error_code=code, message=clarify)
     if row is None:
@@ -64,7 +74,7 @@ def _shape(slots: Mapping) -> ShapeResult:
 
 def _prepare(slots_filled: dict, tier: str) -> Prepared:
     """只读那一笔（不调工具）：事实包给卡面（订单号/收货人/金额/状态）。"""
-    items, code = _pending_orders()
+    items, code = _all_orders()
     if code is not None:
         return Prepared(ok=False, error_code=code, message="取不到您的送礼订单")
     row = next((it for it in items if it["order_id"] == slots_filled.get("order_id")), None)
@@ -130,12 +140,16 @@ def _shape_advance(slots: Mapping) -> ShapeResult:
     word = {"发货": "ship", "已发货": "ship", "完成": "complete", "已完成": "complete"}.get(action, action)
     if word in ("ship", "complete"):
         filled["action"] = word
-    items, code = _pending_orders()
+    items, code = _all_orders()
     if code is not None:
         return ShapeResult(filled=filled, error_code=code, message="取不到您的送礼订单")
-    ready = [it for it in items if it["status"] == ("paid" if word == "ship" else "shipped")]
-    if not ready:                                          # 退回全量列表 → 交给 prepare 给出准确状态
-        ready = items
+    need = "paid" if word == "ship" else "shipped"
+    ready = [it for it in items if it["status"] == need]
+    if not ready:                                          # 没有可推进的单 → 说清当前状态
+        current = "、".join(f"{it['contact']}（{it['status_cn']}）" for it in items) or "（无）"
+        return ShapeResult(filled=filled, error_code="INVALID_STATE",
+                           message=f"没有可{'发货（需已支付）' if word == 'ship' else '标记完成（需已发货）'}的订单；"
+                                   f"当前订单：{current}")
     if filled.get("order_id"):
         chosen = next((it for it in ready if it["order_id"] == filled["order_id"]), None)
         if chosen is None:
