@@ -98,11 +98,10 @@
 - id: trf-008
   input: "明天给王五转 100 元"
   slots: {payee: 王五, amount: "100.00", schedule: 明天}
-  # F16 落地后：**相对日（明天）不支持**（Q10）→ 追问格式，**绝不出确认卡、绝不当即时转账**。
-  # 钉的是 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
-  # ⚠️ 本用例曾被提交 967073f 回退成 F16 落地前的止损断言（「还没接通」），已按已批准行为改回。
-  expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
-           must_contain: ["预约时间"], must_not_contain: ["确认卡", "实时到账"]}
+  # F16 追加：**相对时间已支持**（人类需求）→「明天」= 次日 09:00，出**定时确认卡**；
+  # 仍**绝不当即时转账**（不印「实时到账」）。
+  expect: {intent: transfer_scheduled, tool_calls: [preview_transfer], tier: L1, executed: false,
+           must_contain: ["预约时间", "确认卡"], must_not_contain: ["实时到账", "预计到账"]}
 - id: trf-009
   input: "下个月给王五转 100 元"
   slots: {payee: 王五, amount: "100.00"}

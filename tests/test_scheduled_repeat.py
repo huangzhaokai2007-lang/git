@@ -53,6 +53,44 @@ def test_repeat_words_normalize() -> None:
     assert repeat_cycle(None) is None
 
 
+# ---------------- 相对时间 + 循环不追问日期（实测缺陷） ----------------
+
+def test_relative_time_parser() -> None:
+    """明天/下周一/下个月5号/月底/时刻 → ISO（确定性，不读系统钟）。"""
+    import datetime
+    from agent import _relative_time as rt
+    now = datetime.datetime(2026, 10, 23, 12, 0)               # 周五
+    assert rt.parse("明天", now) == "2026-10-24T09:00"
+    assert rt.parse("后天 晚上 8 点", now) == "2026-10-25T20:00"
+    assert rt.parse("下周一", now) == "2026-10-26T09:00"
+    assert rt.parse("下个月 5 号", now) == "2026-11-05T09:00"
+    assert rt.parse("月底", now) == "2026-10-31T09:00"
+    assert rt.parse("瞎说的", now) is None
+    assert rt.next_month_end(now).isoformat() == "2026-10-31"
+
+
+def test_iso_schedule_accepts_relative(wired) -> None:
+    """`_iso_schedule` 先认 ISO、再认相对说法（以前只认 ISO）。"""
+    from agent._write_transfer import _iso_schedule
+    assert _iso_schedule("2026-11-01 09:00") == "2026-11-01T09:00"
+    assert _iso_schedule("明天") is not None                  # 钉住的测试钟 +1 天
+    assert _iso_schedule("胡言乱语") is None
+
+
+def test_monthly_without_date_does_not_ask(wired, monkeypatch) -> None:
+    """「每个月月末给房东转 300」**不给日期** → 自动推首期（最近月末），不再追问格式。"""
+    _fake(monkeypatch, {"payee": "房东", "amount": "300", "repeat": "每个月月末"})
+    card = orchestrator.handle("每个月月末给房东转 300 元", session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states, card.reply
+    assert "预约时间" in card.reply and "循环" in card.reply
+    assert "请说明预约时间" not in card.reply
+    done = orchestrator.handle("确认", session_id=SESSION)
+    assert done.executed is True
+    row = raw(wired, "SELECT execute_at, repeat_cycle FROM scheduled_transfer WHERE status = 'pending'")[0]
+    assert row["repeat_cycle"] == "monthly"
+    assert row["execute_at"].endswith("T09:00")               # 缺省 09:00
+
+
 def _make_schedule(wired, monkeypatch, when: str = "2026-10-31 09:00", repeat: str = "") -> str:
     slots = {"payee": WANGWU, "amount": "100", "schedule": when}
     if repeat:

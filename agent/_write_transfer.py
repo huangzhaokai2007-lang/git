@@ -17,42 +17,64 @@ import datetime
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
+from agent import _relative_time                              # 相对时间说法（明天/下周一/月底）
 from agent._write_common import repeat_cycle, Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
 TRANSFER_CN = {"transfer_single": "单笔转账", "transfer_scheduled": "定时转账"}
 
-#: 预约时间认不出时的追问（纯措辞，不含业务数字）。**相对日（明天/下周一）暂不支持**（Q10）。
-SCHEDULE_CLARIFY = ("请说明预约时间，格式如 2026-10-21 09:00（也接受 2026-10-21）；"
-                    "「明天」「下周一」这类相对说法暂不支持。")
+#: 预约时间认不出时的追问（纯措辞，不含业务数字）。相对说法已支持（见 `_relative_time`）。
+SCHEDULE_CLARIFY = ("请说明预约时间，格式如 2026-10-21 09:00（也接受 2026-10-21），"
+                    "或直接说「明天」「下周一」「下个月 5 号」「月底」这类说法。")
 
 
 def _iso_schedule(value: object) -> str | None:
-    """预约时间：接受 ISO8601 日期或日期时间；**认不出 → `None`**（当缺槽追问，绝不猜）。"""
+    """预约时间：先按 ISO8601 解析，失败再按**相对说法**（明天/下周一/月底…）解析。
+
+    两者都认不出 → `None`（当缺槽追问，绝不猜）。
+    """
     text = str(value or "").strip()
     if not text:
         return None
     try:
         return datetime.datetime.fromisoformat(text).isoformat(timespec="minutes")
     except ValueError:
-        return None
+        return _relative_time.parse(text, transfer._now())
+
+
+def _first_occurrence(cycle: str, hint: object) -> str:
+    """循环预约**没给日期**时推导首期：先看原话（「每个月月末」→ 最近月末），再按周期取缺省。"""
+    from_hint = _relative_time.parse(hint, transfer._now())
+    if from_hint:
+        return from_hint
+    if cycle == "monthly":
+        day = _relative_time.next_month_end(transfer._now())
+    else:                                                    # weekly：从今天起 +7 天
+        day = (transfer._now() + datetime.timedelta(days=7)).date()
+    return datetime.datetime(day.year, day.month, day.day, 9, 0).isoformat(timespec="minutes")
 
 
 def _shape_scheduled(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：收款人 / 金额沿用转账口径，另加 `schedule`（ISO8601）。
+    """SLOT_FILL：收款人 / 金额沿用转账口径，另加 `schedule`（ISO 或相对说法）。
 
     收款人解析与金额换算**直接复用 `_shape_transfer`**（同一份实现，不复制）—— 同名追问、
-    脱敏手机号透出等 F17 行为因此自动一致。预约时间认不出 → 追问并给出格式。
+    脱敏手机号透出等 F17 行为因此自动一致。
+
+    **循环预约可以不给日期**：「每个月月末给房东转 300」→ 按周期推出首期（最近月末），
+    不再追问格式（实测缺陷：以前会问「请说明预约时间」）。
     """
     shaped = _shape_transfer(slots)
     filled, missing = dict(shaped.filled), list(shaped.missing)
     when = _iso_schedule(filled.get("schedule"))
+    cycle = repeat_cycle(filled.get("repeat"))               # 「每个月」→ monthly（认不出 = 一次性）
+    if when is None and cycle:
+        when = _first_occurrence(cycle, filled.get("repeat"))
+        filled["first_auto"] = True                          # 卡面标注「首期为自动推算」
     if when is None:
         missing.append("schedule")
     else:
         filled["schedule"] = when
-    cycle = repeat_cycle(filled.get("repeat"))               # 「每个月」→ monthly（认不出 = 一次性）
     if cycle:
         filled["repeat_cycle"] = cycle
     clarify = shaped.clarify or (SCHEDULE_CLARIFY if "schedule" in missing else "")
