@@ -17,8 +17,8 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from agent import confirm_card
-from agent._write_common import Prepared, ShapeResult, _code_of
+from agent import confirm_card, payee_resolve
+from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
 from agent._write_transfer import _iso_schedule
 from tools import _transfer_schedule
 from tools.schemas import ToolResult
@@ -108,7 +108,11 @@ def _execute_run(confirmation: confirm_card.Confirmation, otp: str | None) -> To
 # ---------------- 改时间（T33） ----------------
 
 def _shape_modify(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：挑一笔 + **新时间**（缺哪个补哪个，两件事一起问）。"""
+    """SLOT_FILL：挑一笔 + **改什么**（时间 / 金额 / 收款人，至少一项；可同时改）。
+
+    2026-10-24（人类规格「预约管理卡：修改内容：时间、金额、收款人、周期规则」）：
+    时间 → T33；金额/收款人 → T51（同一次确认里可叠加）。
+    """
     filled = dict(slots)
     row, code, missing, clarify = _pick(filled, PICK_AMBIGUOUS)
     if code is not None:
@@ -116,12 +120,32 @@ def _shape_modify(slots: Mapping) -> ShapeResult:
     if row is not None:
         filled["schedule_id"] = row["schedule_id"]
         filled["amount_cents"] = row["amount"]
-    when = _iso_schedule(filled.get("schedule")) if filled.get("schedule") else None
-    if when is None:
+    changed = False
+    if filled.get("schedule"):
+        when = _iso_schedule(filled.get("schedule"))
+        if when is None:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
+                               message="新时间看不懂，请用 2026-11-01 09:00 这样的格式")
+        filled["execute_at_new"] = when
+        changed = True
+    if filled.get("amount") is not None:
+        cents = yuan_to_cents(filled["amount"])
+        if not cents or cents <= 0:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT", message="金额必须大于 0")
+        filled["amount_cents_new"] = int(cents)
+        changed = True
+    if filled.get("payee") and not filled.get("payee_id_new"):
+        person, pcode, pf = payee_resolve.resolve_or_explain(str(filled["payee"]))
+        if pcode:
+            return ShapeResult(filled=filled, error_code=pcode, message=str(pf.get("message") or ""))
+        if person is None:
+            return ShapeResult(filled=filled, error_code="NOT_FOUND", message="找不到这位收款人")
+        filled["payee_id_new"] = person["payee_id"]
+        filled["payee_name_new"] = person["name"]
+        changed = True
+    if row is not None and not changed:
         missing = [*missing, "schedule"]
         clarify = clarify or NEW_TIME_CLARIFY
-    else:
-        filled["execute_at_new"] = when
     return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
@@ -133,23 +157,35 @@ def _prepare_modify(filled: dict) -> Prepared:
     row = next((it for it in items if it["schedule_id"] == filled.get("schedule_id")), None)
     if row is None:
         return Prepared(ok=False, error_code="NOT_FOUND", message="这笔预约已不在待执行状态")
-    return Prepared(ok=True, facts={**row, "tier": MODIFY_TIER,
-                                    "execute_at_old": row["execute_at"],
-                                    "execute_at_new": filled.get("execute_at_new")},
-                    credential="")
+    facts = {**row, "tier": MODIFY_TIER,
+             "execute_at_old": row["execute_at"], "execute_at_new": filled.get("execute_at_new"),
+             "amount_cents_new": filled.get("amount_cents_new"),
+             "payee_name_new": filled.get("payee_name_new")}
+    return Prepared(ok=True, facts=facts, credential="")
 
 
 def _card_modify(intent: str, filled: dict, facts: Mapping, tier: str,
                  requires_otp: bool) -> confirm_card.CardInput:
     """改时间确认卡：谁 / 多少 / **原时间 → 新时间**（只改时间，金额一分不动）。"""
+    rows = []
+    if facts.get("payee_name_new"):                       # 改收款人 → 原 → 新
+        rows.append(("收款人", f"{facts['payee_name']} → {facts['payee_name_new']}"))
+    else:
+        rows.append(("收款人", str(facts["payee_name"])))
+    if facts.get("amount_cents_new") is not None:         # 改金额 → 原 → 新
+        rows.append(("金额", f"{facts['amount_yuan']} 元 → "
+                            f"{facts['amount_cents_new'] / 100:.2f} 元"))
+    else:
+        rows.append(("金额", f"{facts['amount_yuan']} 元（不变）"))
+    if facts.get("execute_at_new"):
+        rows += [("原预约时间", str(facts["execute_at_old"]).replace("T", " ")),
+                 ("新预约时间", str(facts["execute_at_new"]).replace("T", " "))]
+    else:
+        rows.append(("预约时间", f"{str(facts['execute_at_old']).replace('T', ' ')}（不变）"))
     return confirm_card.CardInput(
-        title="修改预约时间确认卡", intent_cn="修改预约时间",
-        rows=[("收款人", str(facts["payee_name"])),
-              ("金额", f"{facts['amount_yuan']} 元（不变）"),
-              ("原预约时间", str(facts["execute_at_old"]).replace("T", " ")),
-              ("新预约时间", str(facts["execute_at_new"]).replace("T", " "))],
-        tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], "修改预约时间"))
+        title="修改预约确认卡", intent_cn="修改预约",
+        rows=rows, tier=tier, requires_otp=requires_otp,
+        risk_note=confirm_card.risk_note([], "修改预约"))
 
 
 def _plain_modify(filled: dict, facts: Mapping, tier: str) -> str:
@@ -160,11 +196,23 @@ def _plain_modify(filled: dict, facts: Mapping, tier: str) -> str:
 
 
 def _execute_modify(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
-    """EXECUTE：调 **T33** 改时间（只改 `pending` 那一笔的时间）。"""
+    """EXECUTE：时间 → **T33**；金额/收款人 → **T51**（可叠加，按顺序执行）。"""
     del otp
     from tools import _transfer_schedule_ops
-    return _transfer_schedule_ops.reschedule_scheduled(
-        str(confirmation.filled["schedule_id"]), str(confirmation.filled["execute_at_new"]))
+    filled = confirmation.filled
+    schedule_id = str(filled["schedule_id"])
+    result = None
+    if filled.get("execute_at_new"):
+        result = _transfer_schedule_ops.reschedule_scheduled(
+            schedule_id, str(filled["execute_at_new"]))
+        if not result.ok:
+            return result
+    if filled.get("amount_cents_new") is not None or filled.get("payee_id_new"):
+        result = _transfer_schedule_ops.update_scheduled(
+            schedule_id, filled.get("amount_cents_new"), filled.get("payee_id_new"))
+        if not result.ok:
+            return result
+    return result
 
 
 # ---------------- 取消预约（F16 · Q4：L1 确认卡、**不要 OTP**） ----------------

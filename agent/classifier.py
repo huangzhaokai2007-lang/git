@@ -85,7 +85,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "payee_delete": ("payee",),                                            # T30 delete_payee（L1）
     "scheduled_list": (),                                                  # T24 list_scheduled（L0 只读，无槽位）
     "scheduled_run": (),                                                   # T32 立即执行（哪一笔由流程挑）
-    "scheduled_modify": ("schedule",),                                     # T33 改时间（新时间）
+    "scheduled_modify": ("schedule", "amount", "payee"),                   # T33 改时间 / T51 改金额·收款人
     "gift_order_list": ("status",),                                        # T37 查订单（可选状态筛选）
     "gift_order_cancel": ("order_id",),                                    # T39 取消订单
     "gift_order_pay": ("order_id",),                                       # T40 支付订单
@@ -216,6 +216,8 @@ SYSTEM_PROMPT = (
     "（「每个月月末给房东转 3000，到年底」→ repeat_until=年底）；没说就不填（一直循环）。\n"
     "scheduled_list（查预约）的判定：「我的预约」「那笔定时转账到时间了吗」「查一下预约记录」都判它；"
     "无槽位。与 transfer_scheduled 的区分：**新建**预约是 transfer_scheduled，**查看/查询**预约才是它。\n"
+    "scheduled_modify 还能改**金额/收款人**（「把那笔预约改成 200 元」「预约的收款人换成赵六」）——"
+    "`amount` 填元、`payee` 填人；与改时间可同时说。\n"
     "scheduled_run（立即执行预约）的判定：「现在就把那笔预约转了」「立即执行我的预约」都判它；"
     "无槽位（哪一笔由流程挑）。scheduled_modify（改预约时间）的判定：「把那笔预约改到明天」"
     "「预约时间改成 2026-11-01 09:00」都判它；`schedule` 槽位填**新时间**。\n"

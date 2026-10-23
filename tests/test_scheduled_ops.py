@@ -116,3 +116,40 @@ def test_orchestration_modify_and_run(wired, monkeypatch) -> None:
     ran = orchestrator.handle("确认", session_id=SESSION)
     assert ran.executed is True and ran.tool_calls == ["run_scheduled_now"]
     assert raw(wired, "SELECT status FROM scheduled_transfer WHERE id = ?", (sid,))[0]["status"] == "success"
+
+
+# ---------------- 2026-10-24 人类规格：预约可改金额 / 收款人 ----------------
+
+def test_update_amount_and_payee(wired, monkeypatch) -> None:
+    """T51：改金额 / 改收款人（L1，不动钱；tier 保持冻结值）。"""
+    sid = _make_schedule(wired, monkeypatch)
+    zhaoliu = raw(wired, "SELECT id FROM payee WHERE name = '赵六'")[0]["id"]
+    assert ops.update_scheduled(sid, 20_000, zhaoliu).ok is True
+    row = raw(wired, "SELECT amount, payee_id, tier, status FROM scheduled_transfer WHERE id = ?",
+              (sid,))[0]
+    assert row["amount"] == 20_000 and row["payee_id"] == zhaoliu
+    assert row["tier"] == "L1" and row["status"] == "pending"        # 档位不变、仍是待执行
+
+
+def test_update_rejects_bad_input(wired, monkeypatch) -> None:
+    """金额 ≤ 0 / 什么都没改 / 黑名单收款人 → 拒绝。"""
+    sid = _make_schedule(wired, monkeypatch)
+    assert ops.update_scheduled(sid, 0).ok is False
+    assert ops.update_scheduled(sid).ok is False
+    from tools import payee
+    black = payee.add_payee("黑名单甲", "13800006666").data["payee_id"]
+    assert payee.set_payee_blacklist(black, "赖账").ok is True
+    blocked = ops.update_scheduled(sid, None, black)
+    assert blocked.ok is False and "黑名单" in blocked.message
+
+
+def test_orchestration_modify_amount(wired, monkeypatch) -> None:
+    """「把那笔预约改成 200 元」→ 卡面「金额 100.00 元 → 200.00 元」→ 确认生效。"""
+    sid = _make_schedule(wired, monkeypatch)
+    _fake(monkeypatch, "scheduled_modify", {"amount": "200"})
+    card = orchestrator.handle("把那笔预约改成 200 元", session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states and card.tier == "L1"
+    assert "100.00 元 → 200.00 元" in card.reply
+    done = orchestrator.handle("确认", session_id=SESSION)
+    assert done.executed is True
+    assert raw(wired, "SELECT amount FROM scheduled_transfer WHERE id = ?", (sid,))[0]["amount"] == 20_000

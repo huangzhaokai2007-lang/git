@@ -23,7 +23,9 @@ import uuid
 
 from data import dao
 from data.db import transaction
-from tools._query_common import _fail, _money_facts, _ok, current_session_id
+from tools._query_common import (
+    ToolError, _fail, _money_facts, _ok, current_session_id, current_user_id,
+)
 from tools._scheduled_common import STATUS_PENDING, _owned
 from tools._transfer_schedule import execute_scheduled
 from tools.schemas import ErrorCode, ToolResult
@@ -213,3 +215,63 @@ def schedule_next_occurrence(schedule_id: str) -> ToolResult:
     return _ok({"schedule_id": schedule_id, "next_id": next_id},
                {"schedule_id": next_id, "execute_at": when},
                f"下一期已排到 {when.replace('T', ' ')}")
+
+
+# ---------------- T51 改金额 / 收款人（2026-10-24 人类规格「预约管理卡：修改内容」） ----------------
+
+UPDATE_TOOL = "update_scheduled"
+
+
+def update_scheduled(schedule_id: str, amount: int | None = None,
+                     payee_id: str | None = None) -> ToolResult:
+    """T51 改预约的**金额**和/或**收款人**（只对 `pending`；时间改期走 T33）。
+
+    L1：不动钱，只改预约内容；`tier` **保持预约落库时冻结的值**（Q5：到期不重定档）。
+    金额必须为正；收款人必须属于当前用户。`data` = `{schedule_id, amount, payee_id}`。
+    """
+    if amount is None and payee_id is None:
+        return _fail(ErrorCode.INVALID_ARGUMENT, "请说明要改金额还是改收款人")
+    if amount is not None and int(amount) <= 0:
+        return _fail(ErrorCode.INVALID_ARGUMENT, "预约金额必须大于 0")
+    try:
+        row = _owned(schedule_id, tool=UPDATE_TOOL)
+        if row["status"] != STATUS_PENDING:
+            return _fail(ErrorCode.INVALID_STATE, f"这笔预约已是 {row['status']} 状态，不能修改")
+        payee_name = None
+        if payee_id is not None:
+            payee = dao.get_payee(str(payee_id))
+            if payee is None or payee["user_id"] != current_user_id():
+                return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+            if payee["blacklist"]:
+                return _fail(ErrorCode.FORBIDDEN, f"{payee['name']} 已在黑名单，不能作为收款人")
+            payee_name = payee["name"]
+        conn = dao.connection()
+        with transaction(conn):
+            if amount is not None:
+                conn.execute("UPDATE scheduled_transfer SET amount = ? WHERE id = ?",
+                             (int(amount), schedule_id))
+            if payee_id is not None:
+                conn.execute("UPDATE scheduled_transfer SET payee_id = ? WHERE id = ?",
+                             (str(payee_id), schedule_id))
+            dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                             intent="scheduled_modify", tool=UPDATE_TOOL,
+                             params_json={"schedule_id": schedule_id, "amount": amount,
+                                          "payee_id": payee_id},
+                             risk_level="L1", permission_tier="L1", result="success",
+                             error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    except ValueError as exc:
+        return _fail(ErrorCode.INTERNAL, str(exc))
+    facts = {"schedule_id": schedule_id}
+    if amount is not None:
+        facts.update(_money_facts(int(amount), "amount"))
+    if payee_name:
+        facts["payee_name"] = payee_name
+    label = []
+    if amount is not None:
+        label.append(f"金额改成 {int(amount) / 100:.2f} 元")
+    if payee_name:
+        label.append(f"收款人改成 {payee_name}")
+    return _ok({"schedule_id": schedule_id, "amount": amount, "payee_id": payee_id}, facts,
+               "已把预约的" + "、".join(label))
