@@ -102,6 +102,34 @@ txn    +payee_id
 
 ---
 
+## 6. 2026-10-23 追加（PR #43 之后同一分支）
+
+### F22e 删除收款人（T30 `delete_payee` · L1、无 OTP）
+
+- 删的是联系人、不动钱、不授特权（与加黑同档）；历史流水**保留**（审计可回溯）；
+  白/黑名单状态随行消失；已删除 → `NOT_FOUND`；归属 fail-closed。
+- 意图 33 → 34（`payee_delete`）；收款人卡新增「删除」按钮。
+
+### S5 可编辑卡片（设计 §4 落地，**不新增冻结契约**）
+
+- `agent/card_draft.py`：`CardDraft`/`Field` 数据契约（业务状态在 agent 层）。
+- `agent/write_flow.edit(session_id, updates)`：改关键字段 → **重走** shape → 解析/风控 → 出新卡
+  （不是直接改卡）；OTP 阶段拒绝编辑。
+- `resume()` 增加 `classify` 回调：聊天「金额改成 50 元」→ 分类同意图 → 合并旧卡字段出新卡；
+  意图变了 → 维持旧行为。`orchestrator` 只在在途确认时传一次分类（LLM 只在此刻多调一次）。
+- `interfaces/web/card_edit_ui.py`：网页编辑面板（逐字段输入 + 「按修改重新预检」）。
+  可编辑字段表：转账（收款人/金额）、定时（+预约时间）、送礼（收货人/日期/预算）；
+  AA/订阅/理财/白名单等意图不出面板。
+
+### 转账执行回填（设计 §2 补漏）
+
+- `execute_transfer` 事务内回填 `payee.last_used_ts` + `txn.payee_id`：
+  额度从此按 **id** 聚合（不再靠名字兜底），「首次收款」因子转完一次就消失。
+  `data/dao.insert_txn` 加 `payee_id` 参数（data 层内部，非冻结契约）；
+  `data/dao.py` 仍 300 行顶格（有测试钉着）。
+
+---
+
 ## 6. 验证
 
 ```bash
