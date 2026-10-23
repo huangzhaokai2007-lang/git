@@ -291,3 +291,52 @@ def _execute_tags(confirmation: confirm_card.Confirmation, otp: str | None) -> o
     del otp
     return payee.set_payee_tags(str(confirmation.filled["payee_id"]),
                                 list(confirmation.filled.get("tags") or []))
+
+
+# ---------------- 记卡号（L1）（2026-10-24：用户实测「记一下卡号」应有入口） ----------------
+
+CARD_NO_TIER = "L1"
+
+
+def _shape_card_no(slots: Mapping) -> ShapeResult:
+    filled, code, text = _resolve(slots)
+    if code:
+        return ShapeResult(filled=filled, error_code=code, message=text)
+    missing = [] if filled.get("payee_id") else ["payee"]
+    if not str(filled.get("card_no") or "").strip():
+        missing.append("card_no")
+    return ShapeResult(filled=filled, missing=missing,
+                       clarify="请说明卡号（只保存脱敏形态，如 **** **** **** 8888）。"
+                       if "card_no" in missing else "")
+
+
+def _prepare_card_no(filled: dict) -> Prepared:
+    row, code = _row_of(str(filled.get("payee_id") or ""))
+    if row is None:
+        return Prepared(ok=False, error_code=code or "NOT_FOUND", message="找不到该收款人")
+    #: 卡面要印脱敏卡号（含后四位数字）→ 必须先放进事实包（数字护栏要求）。
+    digits = "".join(ch for ch in str(filled.get("card_no") or "") if ch.isdigit())
+    facts = {**row, "tier": CARD_NO_TIER}
+    if digits:
+        facts["card_no_masked"] = f"**** **** **** {digits[-4:]}"
+    return Prepared(ok=True, facts=facts, credential="")
+
+
+def _card_card_no(intent: str, filled: dict, facts: Mapping, tier: str,
+                  requires_otp: bool) -> confirm_card.CardInput:
+    masked = str(facts.get("card_no_masked") or "（清除）")
+    return confirm_card.CardInput(
+        title="记录卡号确认卡", intent_cn="记录卡号",
+        rows=[("收款人", str(facts["name"])), ("当前卡号", str(facts.get("card_no") or "（无）")),
+              ("新卡号（脱敏）", masked), ("说明", "只保存后四位，完整卡号不入库")],
+        tier=tier, requires_otp=requires_otp, risk_note=confirm_card.risk_note([], "记录卡号"))
+
+
+def _plain_card_no(filled: dict, facts: Mapping, tier: str) -> str:
+    return f"请确认：记录 {facts.get('name')} 的银行卡号（只存脱敏形态），权限档 {tier}。"
+
+
+def _execute_card_no(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
+    del otp
+    return payee.set_payee_card_no(str(confirmation.filled["payee_id"]),
+                                   str(confirmation.filled.get("card_no") or ""))

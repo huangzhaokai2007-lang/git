@@ -280,6 +280,25 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
             _dispatch_start(executor, session_id, "payee_delete", who,
                             f"（按钮）删除收款人{person['name']}")
             st.rerun()
+    whitelisted = [p for p in all_people if p["is_whitelist"]]
+    if whitelisted:                                        # 2026-10-24：改额度/有效期（L2 + 验证码）
+        with st.container(border=True):
+            st.markdown("###### ✏️ 修改白名单信息（额度 / 有效期）")
+            names = {f"{p['name']}（{p['masked_phone']}）": p["payee_id"] for p in whitelisted}
+            target = st.selectbox("改谁", list(names), key="wl-edit-pick")
+            col_a, col_b = st.columns(2)
+            quota = col_a.text_input("新的专属额度（元，留空=不改）", key="wl-edit-quota")
+            expire = col_b.text_input("新的有效期（留空=不改）", key="wl-edit-expire",
+                                      placeholder="例如 2026-12-31 或 月底")
+            if st.button("提交修改（需验证码）", key="wl-edit-ok", type="primary"):
+                slots = {"payee_id": names[target]}
+                if quota.strip():
+                    slots["quota"] = quota.strip()
+                if expire.strip():
+                    slots["expire"] = expire.strip()
+                _dispatch_start(executor, session_id, "payee_whitelist_edit", slots,
+                                f"（按钮）修改白名单信息：{target}")
+                st.rerun()
     with st.container(border=True):                        # 2026-10-24：查询卡上直接改备注
         st.markdown("###### ✏️ 改某位收款人的备注")
         names = {f"{p['name']}（{p['masked_phone']}）": p["payee_id"] for p in all_people}

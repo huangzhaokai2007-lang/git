@@ -134,9 +134,10 @@ def is_confirmation(text: str) -> bool:
     return any(word in normalized for word in CONFIRM_WORDS)
 
 
-def otp_prompt(what: str = "转账") -> str:
+def otp_prompt(what: str = "转账", masked_phone: str = "") -> str:
     """等 OTP 的追问（不含任何业务数字）。"""
-    return f"请输入短信验证码以完成这笔{what}。"
+    target = f"验证码已发送至 {masked_phone}。" if masked_phone else ""
+    return f"{target}请输入短信验证码以完成这笔{what}（固定 123456）。"
 
 
 def otp_wrong_text(remaining: int) -> str:
@@ -264,6 +265,15 @@ def unlock(session_id: str) -> None:
 
 def remember_pending(pending: Pending) -> None:
     _PENDING[pending.pending_id] = pending
+
+
+def find_pending(session_id: str, target_id: str, amount_cents: int) -> "Pending | None":
+    """同一会话里「同一个对象 + 同一金额」是否已有待复核记录（防重复登记，实测踩过）。"""
+    for item in _PENDING.values():
+        if (item.session_id == session_id and item.target_id == target_id
+                and int(item.amount_cents) == int(amount_cents)):
+            return item
+    return None
 
 
 def pending_of(pending_id: str, session_id: str) -> Pending | None:

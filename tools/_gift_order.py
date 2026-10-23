@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import re
 import logging
 import uuid
 
@@ -55,6 +56,8 @@ class RecordGiftOrderReq(BaseModel):
     platform_order_no: str = ""
 
 LIST_TOOL, RECORD_TOOL = "list_gift_orders", "record_gift_order"
+#: 平台订单号格式（人类规格「订单号做格式校验并作为幂等键」）
+_ORDER_NO_OK = re.compile(r"^[A-Za-z0-9_-]{2,64}$")
 #: 订单状态（与 `schema.sql` 的注释一致）
 GIFT_ORDER_STATUSES = ("created", "paid", "shipped", "completed", "cancelled", "failed")
 #: 状态中文（纯文案；未知值原样透传）
@@ -77,6 +80,9 @@ def record_gift_order(plan_id: str, lock_id: str, contact: str, gift_date: str,
                         platform_order_no=platform_order_no)) is not None:
         return bad
     order_no = str(platform_order_no or "").strip()
+    if order_no and not _ORDER_NO_OK.match(order_no):        # 人类规格「订单号做格式校验」
+        return _fail(ErrorCode.INVALID_ARGUMENT,
+                     "订单号格式不对：只接受 2-64 位字母、数字、短横线或下划线")
     if order_no:                                       # 人类规格：订单号作**幂等键**，重复直接拒
         dup = dao.connection().execute(
             "SELECT id FROM gift_order WHERE user_id = ? AND platform_order_no = ?",

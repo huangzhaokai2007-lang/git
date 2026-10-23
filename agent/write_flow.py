@@ -100,7 +100,8 @@ def compose_result_reply(text: str, facts: Mapping) -> tuple[str, bool]:
 
 # ---------------- EXECUTE ----------------
 
-def _otp_rejected(session_id: str, step: Step, spec: write_intents.WriteSpec) -> Step:
+def _otp_rejected(session_id: str, step: Step, spec: write_intents.WriteSpec,
+                 masked_phone: str = "") -> Step:
     """OTP 被拒的统一处理：数会话级错误次数，错满 3 次锁会话（卡 10 第 4 条）。"""
     remaining = confirm_card.note_otp_error(session_id)
     if confirm_card.is_locked(session_id):
@@ -108,7 +109,7 @@ def _otp_rejected(session_id: str, step: Step, spec: write_intents.WriteSpec) ->
         step.result, step.reply = "rejected", confirm_card.otp_locked_text(spec.what)
         return step
     step.reply = confirm_card.otp_wrong_text(remaining)
-    step.ask = confirm_card.otp_prompt(spec.what)
+    step.ask = confirm_card.otp_prompt(spec.what, masked_phone)
     return step
 
 
@@ -120,19 +121,22 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     # `confirm_ref` 族且**本档需要 OTP** 时才在编排层设闸门；L1 意图（如 AA 收款，T9 无 OTP）不走闸门。
     if not spec.otp_in_tool and confirmation.requires_otp and not write_intents.otp_ok(otp):
         step.result = "error"
-        return _otp_rejected(session_id, step, spec)
+        return _otp_rejected(session_id, step, spec, str(confirmation.masked_phone or ""))
     result = spec.execute(confirmation, otp)                         # 入参是整张确认卡（含槽位快照）
     if not result.ok:
         code = error_code_of(result)
         step.result, step.error_code = "error", code
         if code == "FORBIDDEN" and confirmation.requires_otp:        # OTP 错（判定权在工具层）
-            return _otp_rejected(session_id, step, spec)
-        step.reply = templates.tool_error(code, result.message)
+            return _otp_rejected(session_id, step, spec, str(confirmation.masked_phone or ""))
+        step.reply = (f"状态：{confirm_card.state_line(confirm_card.STATE_FAILED)}\n"
+                      f"{templates.tool_error(code, result.message)}")
         return step
     confirm_card.clear(session_id)                                    # 一次性确认：用完即清
     step.executed, step.result = True, "success"
     step.states.append("VERIFY_NUMBERS")
     step.reply, step.degraded = compose_result_reply(result.message, result.facts)
+    #: 2026-10-24（人类规格「卡片需包含状态」）：成功回执挂状态行；在润色**之后**加，避免被改写。
+    step.reply = f"状态：{confirm_card.state_line(confirm_card.STATE_DONE)}\n{step.reply}"
     if step.degraded:
         step.error_code = "HALLUCINATION_BLOCKED"
     return step
@@ -176,7 +180,8 @@ def resume(session_id: str, text: str,
         return head
     if confirmation.requires_otp:                                      # L2：确认卡 + OTP（双因子）
         confirm_card.to_otp_stage(session_id)
-        head.result, head.reply = "pending_confirm", confirm_card.otp_prompt(spec.what)
+        head.result = "pending_confirm"
+        head.reply = confirm_card.otp_prompt(spec.what, str(confirmation.masked_phone or ""))
         head.ask = head.reply
         return head
     return _execute(session_id, confirmation, None)                    # L1：会话内确认卡即可
@@ -226,12 +231,23 @@ def edit(session_id: str, updates: Mapping) -> Step:
 def _to_pending(context: dict, verdict: permission.TierVerdict) -> Step:
     """L3：登记待复核（60s 延迟窗口 + 撤销入口），**不执行**。"""
     spec, prepared = context["spec"], context["prepared"]
+    existing = confirm_card.find_pending(context["session_id"], str(context["target_id"]),
+                                         int(context["amount_cents"]))
+    if existing is not None:                           # 已有同对象的待复核 → 复用，不重复登记
+        confirm_card.clear(context["session_id"])
+        return Step(states=["PENDING_REVIEW"], result="pending_confirm",
+                    intent=context["intent"], tier=verdict.tier,
+                    pending_id=existing.pending_id, to_human=verdict.to_human,
+                    reply=(f"这笔{spec.what}已在待人工复核（同一笔不会重复登记）。"
+                           + confirm_card.pending_text(existing.pending_id,
+                                                       verdict.factors, spec.what)))
     pending_id = f"pend-{uuid.uuid4().hex[:8]}"
     confirm_card.remember_pending(confirm_card.Pending(
         pending_id=pending_id, session_id=context["session_id"],
         credential_kind=spec.credential_kind, credential=prepared.credential,
         target_id=context["target_id"], amount_cents=context["amount_cents"],
         created_at=confirm_card.now_iso()))
+    confirm_card.clear(context["session_id"])        # 在途一次性：避免再回「确认」重复建一笔复核
     return Step(states=["PENDING_REVIEW"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, pending_id=pending_id, to_human=verdict.to_human,
                 reply=confirm_card.pending_text(pending_id, verdict.factors, spec.what))

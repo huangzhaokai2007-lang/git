@@ -92,6 +92,15 @@ def _prepare_gift(filled: dict) -> Prepared:
     _, code, rfacts = payee_resolve.resolve_or_explain(str(filled.get("contact") or ""))
     if code:
         return Prepared(ok=False, error_code=code, message=str(rfacts.get("message") or ""))
+    if filled.get("order_no"):                         # 幂等键前置：锁款之前就拦，别白锁一笔钱
+        from tools import _gift_order
+        order_no = str(filled["order_no"]).strip()
+        listed = _gift_order.list_gift_orders()
+        existing = [it for it in (listed.facts.get("items") or [])
+                    if it.get("platform_order_no") == order_no]
+        if existing:
+            return Prepared(ok=False, error_code="INVALID_STATE",
+                            message=f"该订单已存在送礼计划（订单号 {order_no}），不能重复下单")
     preview = cross_scene.preview_gift(str(filled["contact"]), str(filled["date"]),
                                        int(filled["amount_cents"]))
     if not preview.ok:

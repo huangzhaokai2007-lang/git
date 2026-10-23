@@ -52,23 +52,28 @@ from agent._write_gift import (
     _shape_gift,
 )
 from agent._write_payee_ops import (
+    _card_card_no as _card_payee_card_no,
     _card_tags as _card_payee_tags,
     _card_edit as _card_payee_edit,
     _card_note as _card_payee_note,
     _card_remove as _card_payee_remove,
     _execute_edit as _execute_payee_edit,
+    _execute_card_no as _execute_payee_card_no,
     _execute_tags as _execute_payee_tags,
     _execute_note as _execute_payee_note,
     _execute_remove as _execute_payee_remove,
     _plain_edit as _plain_payee_edit,
+    _plain_card_no as _plain_payee_card_no,
     _plain_tags as _plain_payee_tags,
     _plain_note as _plain_payee_note,
     _plain_remove as _plain_payee_remove,
     _prepare_edit as _prepare_payee_edit,
+    _prepare_card_no as _prepare_payee_card_no,
     _prepare_tags as _prepare_payee_tags,
     _prepare_note as _prepare_payee_note,
     _prepare_remove as _prepare_payee_remove,
     _shape_edit as _shape_payee_edit,
+    _shape_card_no as _shape_payee_card_no,
     _shape_tags as _shape_payee_tags,
     _shape_note as _shape_payee_note,
     _shape_remove as _shape_payee_remove,
@@ -378,6 +383,15 @@ _SPECS["payee_tags"] = WriteSpec(
     target_key="payee_id",
     what="修改标签", shape=_shape_payee_tags, prepare=_prepare_payee_tags,
     card=_card_payee_tags, plain=_plain_payee_tags, execute=_execute_payee_tags)
+
+#: 2026-10-24：记卡号（人类规格「添加收款人卡：银行卡号」；实测「记一下卡号」原先落到备注/闲聊）。
+_SPECS["payee_card_no"] = WriteSpec(
+    intent="payee_card_no", intent_cn="记录卡号", title="记录卡号确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "card_no"), tools=("list_payees",), execute_tool="set_payee_card_no",
+    target_key="payee_id",
+    what="记录卡号", shape=_shape_payee_card_no, prepare=_prepare_payee_card_no,
+    card=_card_payee_card_no, plain=_plain_payee_card_no, execute=_execute_payee_card_no)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)
