@@ -81,5 +81,6 @@ CREATE TABLE scheduled_transfer (                 -- F16：定时转账预约（
   created_at TEXT NOT NULL,
   settled_at TEXT,                                -- 结算时刻；pending 时为 NULL
   txn_id TEXT,                                    -- 成功后回填
-  fail_reason TEXT                                -- 失败原因码（INSUFFICIENT_FUNDS 等）
+  fail_reason TEXT,                               -- 失败原因码（INSUFFICIENT_FUNDS 等）
+  repeat_cycle TEXT                               -- 循环预约：weekly | monthly；NULL = 一次性（T34 设/T35 续期）
 );

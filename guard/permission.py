@@ -48,6 +48,8 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "payee_blacklist": "L1",          # F22c SPEC-CHANGE：加黑是「阻断」不是「授权」，无 OTP
     "payee_unblacklist": "L2",      # F22d SPEC-CHANGE：解除黑名单必须验证码确认（人类需求原文）
     "payee_delete": "L1",           # F22e SPEC-CHANGE：删除收款人只移联系人、不动钱（与加黑同档）
+    "scheduled_run": "L1",          # F16 追加：立即执行，实际档位沿用预约冻结值（facts.tier 取高）
+    "scheduled_modify": "L1",       # F16 追加：只改未来某一笔的时间，不动钱
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）

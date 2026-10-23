@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 
 from data import dao
-from tools import _transfer_schedule, transfer
+from tools import _transfer_schedule, _transfer_schedule_ops, transfer
 
 logger = logging.getLogger(__name__)
 
@@ -57,4 +57,11 @@ def settle_due() -> list[str]:
             continue
         tag = "【预约转账已执行】" if result.ok else "【预约转账未执行】"
         notices.append(f"{tag}{result.message}")
+        if result.ok:                                      # 循环预约：续下一期（T35，系统触发）
+            try:
+                nxt = _transfer_schedule_ops.schedule_next_occurrence(schedule_id)
+                if nxt.ok and nxt.data.get("next_id"):
+                    notices.append(f"【下一期已排期】{nxt.message}")
+            except Exception:                              # noqa: BLE001
+                logger.exception("惰性结算：续期 %s 失败", schedule_id)
     return notices

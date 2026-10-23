@@ -17,7 +17,7 @@ import datetime
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
-from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
+from agent._write_common import repeat_cycle, Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
@@ -52,11 +52,13 @@ def _shape_scheduled(slots: Mapping) -> ShapeResult:
         missing.append("schedule")
     else:
         filled["schedule"] = when
+    cycle = repeat_cycle(filled.get("repeat"))               # 「每个月」→ monthly（认不出 = 一次性）
+    if cycle:
+        filled["repeat_cycle"] = cycle
     clarify = shaped.clarify or (SCHEDULE_CLARIFY if "schedule" in missing else "")
     return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
-#: 脱敏手机号（`139****1001`）；追问文案与卡面用的就是这个形态
 def _payee_query(raw: object) -> str:
     """把「模型回显的卡面串」还原成可解析的查询键（实现见 `_write_common.normalize_query`）。
 
@@ -186,12 +188,16 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
     而 F16 验收第 2 条正是不许把预约当即时。
     """
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    cycle = {"monthly": "每月循环（首期后按月续期，月末自动对齐）",
+             "weekly": "每周循环（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
+    rows = [("收款人", f"{facts['payee_name']}（{masked}）"),
+            ("金额", f"{facts['amount_yuan']} 元"),
+            ("预约时间", str(facts["schedule"]).replace("T", " ")),
+            ("执行说明", "到预约时间后才扣款，此前不会动钱")]
+    if cycle:                                                              # 循环预约：多一行讲清续期口径
+        rows.insert(3, ("循环", cycle))
     return confirm_card.CardInput(
-        title="定时转账确认卡", intent_cn="定时转账",
-        rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
-              ("金额", f"{facts['amount_yuan']} 元"),
-              ("预约时间", str(facts["schedule"]).replace("T", " ")),
-              ("执行说明", "到预约时间后才扣款，此前不会动钱")],
+        title="定时转账确认卡", intent_cn="定时转账", rows=rows,
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
 
@@ -204,88 +210,20 @@ def _plain_scheduled(filled: dict, facts: Mapping, tier: str) -> str:
 
 
 def _book_scheduled(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
-    """EXECUTE：调 **T21** 落一条 `pending` 预约（**不扣款**）—— 验收第 2 条的落点。
+    """EXECUTE：调 **T21** 落一条 `pending` 预约（**不扣款**）；带循环 → 再调 **T34** 记周期。
 
     延迟 import：本模块属编排层，`_transfer_schedule` 属工具层且反过来依赖 `tools.transfer`，
     在函数内导入可彻底避开导入顺序问题（同 `tools/transfer.py` 调 `schedule_args_error` 的做法）。
     """
-    from tools import _transfer_schedule
-    return _transfer_schedule.schedule_transfer(confirmation.credential, otp)
-
-
-# ---------------- 取消预约（F16 · Q4：L1 确认卡、**不要 OTP**） ----------------
-
-#: 取消的档位：**恒 L1**（Q4）。取消是「撤回一个尚未发生的动作」，风险低于发起，且不动钱。
-#: **不沿用原预约冻结的档位** —— 否则一笔 L2 预约的取消也要 OTP，与 Q4 冲突。
-CANCEL_TIER = "L1"
-
-#: 有多笔待执行预约时的追问（纯措辞，不含业务数字）
-CANCEL_AMBIGUOUS = "您有多笔尚未执行的预约，请说明要取消哪一笔（可以说出预约时间）。"
-
-
-def _pending_listed() -> tuple[list[dict], str | None]:
-    """只读 T24 取「待执行」预约；返回 (items, 错误码)。延迟 import 同 `_book_scheduled` 的理由。"""
-    from tools import _transfer_schedule
-    listed = _transfer_schedule.list_scheduled("pending")
-    if not listed.ok:
-        return [], _code_of(listed)
-    return list(listed.facts.get("items") or []), None
-
-
-def _shape_cancel(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：从**只读**列表里挑要取消的那一笔。
-
-    一笔 → 直接定；**零笔 → `NOT_FOUND`**；**多笔 → 追问**（绝不擅自挑一笔）。
-    """
-    filled = dict(slots)
-    items, code = _pending_listed()
-    if code is not None:
-        return ShapeResult(filled=filled, error_code=code, message="取不到您的预约列表")
-    if not items:
-        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有待执行的预约")
-    if len(items) > 1:
-        return ShapeResult(filled=filled, missing=["schedule_id"], clarify=CANCEL_AMBIGUOUS)
-    filled["schedule_id"] = items[0]["schedule_id"]
-    filled["amount_cents"] = items[0]["amount"]                 # 供确认卡显示金额
-    return ShapeResult(filled=filled)
-
-
-def _prepare_cancel(filled: dict) -> Prepared:
-    """取消的确认卡事实包：**只读**列表里那一笔（不调 T23 —— 落库在 EXECUTE 步）。
-
-    `tier` 覆盖成 `CANCEL_TIER`：`write_flow` 用 `facts["tier"]` 定档，而这里的原值是被取消
-    那笔的档位（可能是 L2/L3）。取消**恒 L1**（Q4），故必须覆盖。
-    """
-    items, code = _pending_listed()
-    if code is not None:
-        return Prepared(ok=False, error_code=code, message="取不到您的预约列表")
-    row = next((it for it in items if it["schedule_id"] == filled.get("schedule_id")), None)
-    if row is None:
-        return Prepared(ok=False, error_code="NOT_FOUND", message="这笔预约已不在待执行状态")
-    return Prepared(ok=True, facts={**row, "tier": CANCEL_TIER}, credential="")
-
-
-def _card_cancel(intent: str, filled: dict, facts: Mapping, tier: str,
-                 requires_otp: bool) -> confirm_card.CardInput:
-    """取消预约确认卡：取消哪一笔（收款人 / 金额 / 预约时间）+ 「不会扣款」。"""
-    return confirm_card.CardInput(
-        title="取消预约确认卡", intent_cn="取消预约",
-        rows=[("收款人", str(facts["payee_name"])),
-              ("金额", f"{facts['amount_yuan']} 元"),
-              ("预约时间", str(facts["execute_at"]).replace("T", " ")),
-              ("说明", "该预约尚未执行，取消后不会扣款")],
-        tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], "取消预约"))
-
-
-def _plain_cancel(filled: dict, facts: Mapping, tier: str) -> str:
-    """纯事实版确认文本（取消预约的降级回执）。"""
-    return (f"请确认：取消 {facts.get('execute_at')} 向 {facts.get('payee_name')} 转账 "
-            f"{facts.get('amount_yuan')} 元的预约，权限档 {tier}，不会产生扣款。")
-
-
-def _execute_cancel(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
-    """EXECUTE：调 **T23** 取消（`pending → cancelled`，**不动钱**）。Q4：L1，无 OTP。"""
-    del otp
-    from tools import _transfer_schedule
-    return _transfer_schedule.cancel_scheduled(str(confirmation.filled["schedule_id"]))
+    from tools import _transfer_schedule, _transfer_schedule_ops
+    result = _transfer_schedule.schedule_transfer(confirmation.credential, otp)
+    cycle = str(confirmation.filled.get("repeat_cycle") or "")
+    if result.ok and cycle:
+        schedule_id = str((result.data or {}).get("schedule_id") or "")
+        if schedule_id:                                       # 周期记在同一笔上（T34）
+            mark = _transfer_schedule_ops.set_schedule_repeat(schedule_id, cycle)
+            if mark.ok:
+                label = "每月" if cycle == "monthly" else "每周"
+                result = result.model_copy(update={
+                    "message": f"{result.message}（已设为{label}循环）"})
+    return result

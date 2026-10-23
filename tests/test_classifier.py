@@ -26,7 +26,7 @@ SPEC_INTENTS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "smalltalk", "out_of_scope", "unsafe_request",
 )
 _TIMEOUT_REQUEST = httpx.Request("POST", "https://api.deepseek.com/v1/chat/completions")
 
@@ -181,7 +181,7 @@ def test_import_does_not_build_a_client_or_read_secrets() -> None:
 # ---------------- classifier.py：契约 ----------------
 
 def test_intent_labels_match_the_spec_verbatim() -> None:
-    assert classifier.INTENT_LABELS == SPEC_INTENTS and len(SPEC_INTENTS) == 35
+    assert classifier.INTENT_LABELS == SPEC_INTENTS and len(SPEC_INTENTS) == 37
 
 
 def test_slot_schema_covers_every_intent_exactly() -> None:

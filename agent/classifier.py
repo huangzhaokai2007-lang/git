@@ -32,7 +32,7 @@ INTENT_LABELS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -42,7 +42,7 @@ IntentLabel = Literal[
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -55,7 +55,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "anomaly_check": ("period",),                                          # T4 detect_anomalies
     "bill_report": ("period", "kind"),                                     # T5 generate_bill_report
     "transfer_single": ("payee", "amount"),                                # T6/T7
-    "transfer_scheduled": ("payee", "amount", "schedule"),                 # T7 schedule 参数
+    "transfer_scheduled": ("payee", "amount", "schedule", "repeat"),                 # T7 schedule 参数
     "scheduled_cancel": (),                                                # F16 Q4：取消预约（无槽位，工具侧挑唯一 pending）
     "aa_collect": ("payee_ids", "amount", "amounts"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
@@ -82,6 +82,8 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "payee_unblacklist": ("payee",),                                       # T29 unset_payee_blacklist（L2）
     "payee_delete": ("payee",),                                            # T30 delete_payee（L1）
     "scheduled_list": (),                                                  # T24 list_scheduled（L0 只读，无槽位）
+    "scheduled_run": (),                                                   # T32 立即执行（哪一笔由流程挑）
+    "scheduled_modify": ("schedule",),                                     # T33 改时间（新时间）
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
@@ -175,8 +177,13 @@ SYSTEM_PROMPT = (
     "payee_unblacklist（解除黑名单）的判定：「把王小明移出黑名单」「解除对X的拉黑」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_add 的区分：只是新增联系人不是它，"
     "要**恢复**一个被拉黑的人才是 payee_unblacklist。\n"
+    "transfer_scheduled 的 `repeat` 槽位：用户说「每个月/每月末/每周」这类**循环**时填原话"
+    "（例如「每个月月末给房东转 3000」→ repeat=「每个月月末」）；没说就不填（一次性预约）。\n"
     "scheduled_list（查预约）的判定：「我的预约」「那笔定时转账到时间了吗」「查一下预约记录」都判它；"
     "无槽位。与 transfer_scheduled 的区分：**新建**预约是 transfer_scheduled，**查看/查询**预约才是它。\n"
+    "scheduled_run（立即执行预约）的判定：「现在就把那笔预约转了」「立即执行我的预约」都判它；"
+    "无槽位（哪一笔由流程挑）。scheduled_modify（改预约时间）的判定：「把那笔预约改到明天」"
+    "「预约时间改成 2026-11-01 09:00」都判它；`schedule` 槽位填**新时间**。\n"
     "aa_collect（AA 收款）的判定：「向张三和李四 AA 收款 100 元」「大家 AA 一下」都判它；"
     "`payee_ids` 填名单，`amount` 填总额；若用户说「王五 100 元、赵六 200 元」这种**按人金额**，"
     "把整句原样放进 `amounts` 槽位，`amount` 可以不填（合计由系统算）。\n"

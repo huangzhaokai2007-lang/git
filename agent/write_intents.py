@@ -51,6 +51,23 @@ from agent._write_gift import (
     _prepare_gift,
     _shape_gift,
 )
+from agent._write_schedule_ops import (
+    _card_cancel,
+    _card_modify,
+    _card_run,
+    _execute_cancel,
+    _execute_modify,
+    _execute_run,
+    _plain_cancel,
+    _plain_modify,
+    _plain_run,
+    _prepare_cancel,
+    _prepare_modify,
+    _prepare_run,
+    _shape_cancel,
+    _shape_modify,
+    _shape_run,
+)
 from agent._write_payee import (
     _card_blacklist,
     _card_delete,
@@ -84,18 +101,13 @@ from agent._write_subscription import (
 )
 from agent._write_transfer import (
     _book_scheduled,
-    _card_cancel,
     _card_scheduled,
     _card_transfer,
-    _execute_cancel,
     _execute_transfer,
-    _plain_cancel,
     _plain_scheduled,
     _plain_transfer,
-    _prepare_cancel,
     _prepare_scheduled,
     _prepare_transfer,
-    _shape_cancel,
     _shape_scheduled,
     _shape_transfer,
 )
@@ -205,6 +217,25 @@ _SPECS["payee_delete"] = WriteSpec(
     target_key="payee_id",
     what="删除收款人", shape=_shape_delete, prepare=_prepare_delete,
     card=_card_delete, plain=_plain_delete, execute=_execute_delete)
+
+#: F16 追加（T32）：**立即执行**一条待执行预约。档位**沿用预约冻结值**（L1 免码 / L2 要码），
+#: 扣款由 T22 的硬约束重检 —— 不重新定档（Q5 同理）。
+_SPECS["scheduled_run"] = WriteSpec(
+    intent="scheduled_run", intent_cn="立即执行预约", title="立即执行预约确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("schedule_id",), tools=("list_scheduled",), execute_tool="run_scheduled_now",
+    target_key="schedule_id",
+    what="立即执行预约", shape=_shape_run, prepare=_prepare_run,
+    card=_card_run, plain=_plain_run, execute=_execute_run)
+
+#: F16 追加（T33）：**改预约时间** —— L1（只改未来某一笔的时间，不动钱）。
+_SPECS["scheduled_modify"] = WriteSpec(
+    intent="scheduled_modify", intent_cn="修改预约时间", title="修改预约时间确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("schedule_id", "schedule"), tools=("list_scheduled",),
+    execute_tool="reschedule_scheduled", target_key="schedule_id",
+    what="修改预约时间", shape=_shape_modify, prepare=_prepare_modify,
+    card=_card_modify, plain=_plain_modify, execute=_execute_modify)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)
