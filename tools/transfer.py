@@ -223,11 +223,9 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
             balance_after = updated["balance"]
             txn = dao.insert_txn(account_id, _now().isoformat(timespec="seconds"), -amount, "out",
                                  balance_after, counterparty=token["payee_name"], category="转账",
-                                 channel="转账", memo=f"转账给{token['payee_name']}",
-                                 payee_id=token["payee_id"])
-            if token.get("payee_id"):                          # 设计 §2：最近成功转账时间由执行时回填
-                conn.execute("UPDATE payee SET last_used_ts = ? WHERE id = ?",
-                             (_now().isoformat(timespec="seconds"), token["payee_id"]))
+                                 channel="转账", memo=f"转账给{token['payee_name']}", payee_id=token["payee_id"])
+            if token.get("payee_id"):    # 回填最近转账时间（设计 §2）
+                conn.execute("UPDATE payee SET last_used_ts = ? WHERE id = ?", (_now().isoformat(timespec="seconds"), token["payee_id"]))
             facts = {"txn_id": txn["id"], "payee_id": token["payee_id"], "payee_name": token["payee_name"],
                      "tier": token["tier"], "requires_otp": token["requires_otp"], "status": "executed",
                      **_money_facts(amount, "amount"), **_money_facts(token["fee"], "fee"),
