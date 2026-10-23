@@ -13,6 +13,7 @@
 | 下周一 / 这周三 / 本周日 | 对应那一天 |
 | 下个月 5 号 / 本月 20 日 | 指定月日（越界取月末） |
 | 月底 / 月末（本月已过则下月） | 当月最后一天 |
+| 年底 / 今年底 / 明年底 | 当年 12-31（已过则次年）/ 次年 12-31 |
 | 时刻：9 点 / 15:00 / 晚上 8 点 / 下午 3 点 / 上午 10 点 | 缺省 **09:00** |
 """
 
@@ -79,6 +80,12 @@ def parse(raw: object, now: datetime.datetime) -> str | None:
         year, month = _add_months(now.year, now.month, 1 if match.group(1).startswith("下") else 0)
         day = datetime.date(year, month,
                             min(int(match.group(2)), calendar.monthrange(year, month)[1]))
+    if day is None and "年底" in text:                          # 年底 / 今年底 / 明年底
+        year = now.year + (1 if text.startswith("明") else 0)
+        candidate = datetime.date(year, 12, 31)
+        if candidate <= now.date() and not text.startswith("明"):
+            candidate = datetime.date(year + 1, 12, 31)
+        day = candidate
     if day is None and ("月底" in text or "月末" in text):        # 月底 / 月末
         last = calendar.monthrange(now.year, now.month)[1]
         candidate = datetime.date(now.year, now.month, last)

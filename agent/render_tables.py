@@ -87,7 +87,7 @@ T_SCHEDULE_TABLE_SEP = "| --- | --- | --- | --- |"
 
 T_GIFT_ORDER_EMPTY = "您还没有送礼订单。说清送给谁、什么场合、预算多少，我就帮您挑礼物下单。"
 
-T_AA_EMPTY = "您还没有 AA 收款记录。可以说「向王五和赵六 AA 收款 300 元」来发起。"
+T_AA_EMPTY = "您还没有 AA 收款记录。说清「跟谁、收多少」，我就帮您发起。"
 T_AA_HEAD = "您共有 {total_count} 笔 AA 收款："
 T_AA_TABLE_HEAD = "| 事由 | 合计（元） | 已付 | 状态 | 截止 |"
 T_AA_TABLE_SEP = "| --- | --- | --- | --- | --- |"
