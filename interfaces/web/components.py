@@ -200,7 +200,7 @@ def otp_card(confirmation: Any) -> tuple[str, str] | None:
     return None
 
 
-def payee_form(defaults: dict | None = None) -> tuple[str, str, bool] | None:
+def payee_form(defaults: dict | None = None) -> dict | None:
     """卡 20：添加收款人的表单（姓名 + 手机号 + **是否加入白名单**）。
 
     只**收集**输入并原样返回 `(name, phone, whitelist)`；未提交 → `None`。校验 / 脱敏 / 落库 /
@@ -220,11 +220,23 @@ def payee_form(defaults: dict | None = None) -> tuple[str, str, bool] | None:
                                  value=str(defaults.get("name") or ""))
             phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678",
                                   value=str(defaults.get("phone") or ""))
+            note = st.text_input("备注（可空）", key="payee-note",
+                                 placeholder="例如：老同学 / 房东 / 别转错",
+                                 value=str(defaults.get("note") or ""))
             whitelist = st.checkbox("同时加入白名单（之后转账免验证码，需再输一次验证码）",
                                     key="payee-whitelist")
+            quota = ""
+            expire = ""
+            if whitelist:                                    # 2026-10-24：加白要设额度与有效期
+                col_a, col_b = st.columns(2)
+                quota = col_a.text_input("专属额度（元）", key="payee-quota",
+                                         placeholder="例如 5000（不填 = 一律要验证码）")
+                expire = col_b.text_input("有效期至", key="payee-expire",
+                                          placeholder="例如 2026-12-31 或 月底（不填 = 长期）")
             submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
         if submitted:
-            return (name, phone, bool(whitelist))
+            return {"name": name, "phone": phone, "whitelist": bool(whitelist),
+                    "note": note, "quota": quota, "expire": expire}
     return None
 
 

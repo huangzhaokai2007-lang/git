@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 import threading
 import uuid
 
@@ -263,6 +264,15 @@ def unset_payee_blacklist(payee_id: str, confirm_ref: str) -> ToolResult:
 
 NOTE_TOOL, QUOTA_TOOL = "set_payee_note", "set_whitelist_quota"
 
+#: 备注/自由文本里的完整手机号（11 位数字）→ 脱敏（铁律 8：完整号码绝不入库、绝不回显）
+_PHONE_LIKE = re.compile(r"\d{11}")
+
+
+def _mask_phones(text: str) -> str:
+    """把 11 位连续数字按 `138****5678` 脱敏（只保留前 3 后 4）。"""
+    return _PHONE_LIKE.sub(lambda m: f"{m.group()[:3]}****{m.group()[-4:]}", text)
+
+
 
 def _owned_payee(payee_id: str, *, tool: str) -> dict:
     """取本人收款人（越权 fail-closed）；找不到 → NOT_FOUND。"""
@@ -282,7 +292,7 @@ def set_payee_note(payee_id: str, note: str) -> ToolResult:
 
     空串 = 清除备注。`data` = `{payee_id, note}`。
     """
-    text = str(note or "").strip()[:60]                      # 备注只做提示，长文本无意义
+    text = _mask_phones(str(note or "").strip())[:60]        # 备注只做提示；**完整手机号一律脱敏**（铁律 8）
     try:
         row = _owned_payee(payee_id, tool=NOTE_TOOL)
         payee_dao.update_payee(payee_id, current_user_id(), note=text or None)

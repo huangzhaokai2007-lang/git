@@ -58,6 +58,15 @@ def test_note_set_and_clear(wired) -> None:
     assert raw(wired, "SELECT note FROM payee WHERE id = ?", (pid,))[0]["note"] is None
 
 
+def test_note_masks_full_phone(wired) -> None:
+    """备注里写完整手机号 → 入库前**脱敏**（铁律 8：完整号码绝不入库）。"""
+    from tools import payee
+    pid = _pid(wired, WANGWU)
+    assert payee.set_payee_note(pid, "他电话 13812345678，别转错").ok is True
+    stored = raw(wired, "SELECT note FROM payee WHERE id = ?", (pid,))[0]["note"]
+    assert "138****5678" in stored and "13812345678" not in stored
+
+
 def test_add_whitelist_with_quota_and_expire(wired, monkeypatch) -> None:
     """「把张小美加入白名单，额度 5000 元，有效期到 2026-12-31」→ L2 卡 → 123456 → 两项都落库。"""
     _fake(monkeypatch, "payee_whitelist",

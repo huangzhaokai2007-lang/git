@@ -81,7 +81,8 @@ def _reply(result: ToolResult) -> tuple[str, bool, str | None]:
     return text, False, None
 
 
-def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = False) -> "Turn":
+def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = False,
+                 note: str = "", quota: str = "", expire: str = "") -> "Turn":
     """表单提交入口（界面只调这一个函数）：PRECHECK（guard 定档）→ EXECUTE → 校验回执 → AUDIT。
 
     `whitelist=True`（表单里勾了「同时加入白名单」）时，**加完人立刻接上白名单确认卡** ——
@@ -99,10 +100,17 @@ def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = Fa
            "success" if result.ok else "error", error_code,
            {"name": str(result.data["name"]) if result.ok else name,
             "masked_phone": str(result.data["masked_phone"]) if result.ok else ""})
+    if result.ok and str(note or "").strip():            # 2026-10-24：添加时可一并写备注（T45）
+        payee_tool.set_payee_note(str(result.data["payee_id"]), str(note))
     if result.ok and whitelist:                          # 勾了复选框 → 接着走 L2 确认卡
         from agent import orchestrator, write_flow
         ctx = orchestrator._Ctx(trace_id, session_id, 0)
-        card = orchestrator._apply(ctx, write_flow.start("payee_whitelist", {"payee": name}, session_id))
+        slots = {"payee": name}
+        if str(quota or "").strip():                     # 加白时一并设专属额度 / 有效期（人类原文）
+            slots["quota"] = quota
+        if str(expire or "").strip():
+            slots["expire"] = expire
+        card = orchestrator._apply(ctx, write_flow.start("payee_whitelist", slots, session_id))
         card.reply = f"{reply}\n\n要把他加入白名单吗？加入后在专属额度内给他转账免验证码（超额度仍需验证码）。\n{card.reply}"
         return card
     return Turn(trace_id=trace_id, intent=INTENT, confidence=1.0, states=states,

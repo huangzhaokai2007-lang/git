@@ -143,7 +143,7 @@ from concurrent.futures import ThreadPoolExecutor
 import datetime
 import streamlit as st
 
-from agent import confirm_card, payee_resolve, write_flow
+from agent import confirm_card, payee_resolve, payee_risk, write_flow
 
 #: 三类人员的中文标签（面向用户只说大白话；与 `render_lists` 的措辞同口径）
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
@@ -182,15 +182,38 @@ def _dispatch_start(executor: ThreadPoolExecutor, session_id: str, intent: str,
     state["clarify_round"] = state.get("clarify_round", 0) + (1 if step.missing else 0)
 
 
-def render(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """渲染收款人列表卡；每行给「转账 / 加白 / 拉黑或解除 / 删除」按钮（紧凑排版）。
+#: 2026-10-24（人类规格「查询卡支持全部/白名单/黑名单/已过期白名单筛选」）
+_FILTERS = ("全部", "白名单", "黑名单", "已过期白名单")
 
-    列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签一并带回）。
+
+def _is_expired(person: dict) -> bool:
+    """白名单是否已过期 —— 口径**只有一处**（`agent.payee_risk.is_expired`），界面不重写。"""
+    return bool(person.get("is_whitelist")) and payee_risk.is_expired(person)
+
+
+def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+    """渲染收款人查询卡：筛选 + 统计 + 每行备注 + 「转账/加白/移出白名单/拉黑/解除/删除」+ 改备注表单。
+
+    列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签、备注、有效期一并带回）。
     """
-    people = executor.submit(payee_resolve.list_people).result()
-    if not people:
+    all_people = executor.submit(payee_resolve.list_people).result()
+    if not all_people:
         return
     st.markdown("##### 👥 收款人")
+    st.caption(f"共 {len(all_people)} 人 · 白名单 "
+               f"{sum(1 for p in all_people if p['is_whitelist'])} 人 · 黑名单 "
+               f"{sum(1 for p in all_people if p['blacklist'])} 人 · 已过期白名单 "
+               f"{sum(1 for p in all_people if _is_expired(p))} 人")
+    picked = st.radio("筛选", _FILTERS, horizontal=True, key="payee-filter",
+                      label_visibility="collapsed")
+    people = [p for p in all_people
+              if picked == "全部"
+              or (picked == "白名单" and p["is_whitelist"] and not _is_expired(p))
+              or (picked == "黑名单" and p["blacklist"])
+              or (picked == "已过期白名单" and _is_expired(p))]
+    if not people:
+        st.caption("这一筛选下没有收款人。")
+        return
     for person in people:
         kind = ("whitelist" if person["is_whitelist"]
                 else "blacklist" if person["blacklist"] else "normal")
@@ -201,8 +224,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                "masked_phone": person["masked_phone"]}
         left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
             [3.4, 0.75, 0.75, 0.75, 0.75], vertical_alignment="center")
+        note = f" · 备注 {person['note']}" if person.get("note") else ""
         left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
-                      f"{tags}{_expire_note(person)}")
+                      f"{tags}{_expire_note(person)}{note}")
         if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
                                help=f"给 {person['name']} 转账"):
             _dispatch_start(executor, session_id, "transfer_single", who,
@@ -213,6 +237,12 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                                     help=f"把 {person['name']} 加入白名单（需验证码）"):
                 _dispatch_start(executor, session_id, "payee_whitelist", who,
                                 f"（按钮）把{person['name']}加入白名单")
+                st.rerun()
+        elif person["is_whitelist"]:
+            if whitelist_btn.button("移出白名单", key=f"wlrm-{person['payee_id']}", width="content",
+                                    help=f"把 {person['name']} 移出白名单（之后转账需要验证码）"):
+                _dispatch_start(executor, session_id, "payee_whitelist_remove", who,
+                                f"（按钮）把{person['name']}移出白名单")
                 st.rerun()
         if kind == "normal":                              # 只有**普通**收款人能拉黑（白名单先移出）
             if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}", width="content",
@@ -230,4 +260,15 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                              help=f"删除收款人 {person['name']}（需确认）"):
             _dispatch_start(executor, session_id, "payee_delete", who,
                             f"（按钮）删除收款人{person['name']}")
+            st.rerun()
+    with st.container(border=True):                        # 2026-10-24：查询卡上直接改备注
+        st.markdown("###### ✏️ 改某位收款人的备注")
+        names = {f"{p['name']}（{p['masked_phone']}）": p["payee_id"] for p in all_people}
+        target = st.selectbox("改谁的备注", list(names), key="payee-note-pick")
+        text = st.text_input("备注", key="payee-note-text", value="",
+                             placeholder="例如：老同学 / 别转错（留空 = 清除）")
+        if st.button("保存备注", key="payee-note-ok", type="primary"):
+            _dispatch_start(executor, session_id, "payee_note",
+                            {"payee_id": names[target], "note": text.strip()},
+                            f"（按钮）改备注：{target}")
             st.rerun()
