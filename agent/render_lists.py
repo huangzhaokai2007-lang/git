@@ -22,8 +22,8 @@ from tools.subscription import (
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "TemplateError",
            "anomaly_line", "card_line", "payee_row", "render_all_products", "render_anomalies",
-           "render_cards", "render_holdings", "render_payees", "render_subscriptions",
-           "render_wealth", "subscription_line", "wealth_line"]
+           "render_cards", "render_holdings", "render_payees", "render_schedules",
+           "render_subscriptions", "render_wealth", "subscription_line", "wealth_line"]
 
 # ---------------- 异常检测（F03） ----------------
 #: facts 键见 `tools/query.py` T4（`scanned_count` / `anomaly_count` / `items[]`）。
@@ -305,6 +305,33 @@ def render_payees(facts: Mapping) -> str:
     rows = [T_PAYEE_TABLE_HEAD, T_PAYEE_TABLE_SEP,
             *(payee_row(item) for item in facts["items"])]
     return "\n".join([head, "", *rows, "", T_PAYEE_LEGEND])
+
+
+# ---------------- 预约列表（F16 追加：查预约 · T24 只读） ----------------
+
+T_SCHEDULE_EMPTY = "您还没有待执行的预约。可以说「明天九点给王五转 100 元」来预约。"
+T_SCHEDULE_HEAD = "您共有 {total_count} 条预约："
+T_SCHEDULE_TABLE_HEAD = "| 预约时间 | 收款人 | 金额（元） | 状态 |"
+T_SCHEDULE_TABLE_SEP = "| --- | --- | --- | --- |"
+#: 状态中文（纯文案，不含数字；未知状态原样透传，不猜）
+_SCHEDULE_STATUS_CN = {"pending": "待执行", "success": "已执行",
+                       "failed": "执行失败", "cancelled": "已取消"}
+
+
+def render_schedules(facts: Mapping) -> str:
+    """`scheduled_list` 回执（T24）：汇总句 + **一张预约表格**（时间 / 收款人 / 金额 / 状态）。
+
+    行序照抄 facts 的 `items`（工具层已按执行时间排序）；金额取 `amount_yuan` 展示串，
+    时间把 ISO 的 `T` 换成空格（纯排版，不改值）。
+    """
+    count = int(facts["total_count"])
+    if count == 0:
+        return T_SCHEDULE_EMPTY
+    rows = [f"| {str(item['execute_at']).replace('T', ' ')} | {item['payee_name']} | "
+            f"{item['amount_yuan']} | {_SCHEDULE_STATUS_CN.get(str(item['status']), item['status'])} |"
+            for item in facts["items"]]
+    return "\n".join([T_SCHEDULE_HEAD.format(total_count=count), "",
+                      T_SCHEDULE_TABLE_HEAD, T_SCHEDULE_TABLE_SEP, *rows])
 
 
 # ---------------- 理财持仓（T21）+ 全部产品（T22） ----------------

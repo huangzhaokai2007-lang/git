@@ -25,8 +25,8 @@ from agent.render_lists import (          # noqa: F401 —— 列表类回执按
     T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
     T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, T_WEALTH, T_WEALTH_CLEAN, T_WEALTH_EMPTY,
     TemplateError, anomaly_line, card_line, payee_row, render_all_products,
-    render_anomalies, render_cards, render_holdings, render_payees, render_subscriptions,
-    render_wealth, subscription_line, term_cn, wealth_line,
+    render_anomalies, render_cards, render_holdings, render_payees, render_schedules,
+    render_subscriptions, render_wealth, subscription_line, term_cn, wealth_line,
 )
 from guard import facts_check, injection
 from tools.schemas import ToolResult
@@ -149,6 +149,8 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_holdings(facts)
     if intent == "wealth_all_products":                      # T22：全部产品，按等级分组
         return render_all_products(facts)
+    if intent == "scheduled_list":                           # F16 追加：预约列表（时间/收款人/金额/状态）
+        return render_schedules(facts)
     if intent == "risk_assess":                              # F10：总分/满分/等级/有效期（不走单行 format）
         try:
             return T_RISK_RESULT.format(**facts)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Callable
 
+from tools import _transfer_schedule as scheduled
 from tools import payee, query, subscription, wealth
 from tools.card_query import list_cards
 from tools.schemas import ToolResult
@@ -47,4 +48,7 @@ TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
     "wealth_holdings": ("list_holdings", lambda s: wealth.list_holdings()),
     #: 用户需求「看到其他风险等级之外的产品，但不做推荐」：T27 `list_all_products`，L0 只读。
     "wealth_all_products": ("list_all_products", lambda s: wealth.list_all_products()),
+    #: F16 追加（用户需求「查一下我的预约」）：T24 `list_scheduled`，L0 只读、无槽位
+    #: （不传 = 全部状态）。预约表的渲染在 `render_lists.render_schedules`。
+    "scheduled_list": ("list_scheduled", lambda s: scheduled.list_scheduled()),
 }

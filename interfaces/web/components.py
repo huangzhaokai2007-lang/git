@@ -116,6 +116,26 @@ _MONEY_INTENTS = frozenset({"transfer_single", "transfer_scheduled", "subscripti
                             "aa_collect", "gift_plan", "wealth_buy", "wealth_redeem"})
 
 
+def _aa_table(confirmation: Any) -> None:
+    """AA 收款：主卡面就列**每人应收金额**的表格（一键均摊时每人相同、标注均摊）。
+
+    数据全部来自确认卡快照（`filled`）—— 界面只渲染，不重算、不补数（铁律 2）。
+    """
+    filled = dict(getattr(confirmation, "filled", {}) or {})
+    names = [str(name) for name in (filled.get("aa_names") or [])]
+    if not names:
+        return
+    per = [int(cents) for cents in (filled.get("per_person_cents") or [])]
+    if len(per) != len(names):                            # 一键均摊
+        total = int(getattr(confirmation, "amount_cents", 0) or 0)
+        per = [total // len(names)] * len(names)
+        mode = "一键均摊"
+    else:
+        mode = "按人金额"
+    rows = "\n".join(f"| {_esc(name)} | {cents / 100:.2f} |" for name, cents in zip(names, per))
+    st.markdown(f"**每人应收（{mode}）**\n\n| 收款人 | 应收金额（元） |\n| --- | --- |\n{rows}")
+
+
 def confirm_card(confirmation: Any) -> str | None:
     """确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。
 
@@ -143,6 +163,8 @@ def confirm_card(confirmation: Any) -> str | None:
         if money:                                         # 「预计到账」是转账专用截
             parts.append(f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
         st.caption(" · ".join(parts))
+        if intent == "aa_collect":                        # AA：主卡面就列**每人应收**表格
+            _aa_table(confirmation)
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")
         left, right, _rest = st.columns([1, 1, 3])
