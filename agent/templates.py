@@ -95,6 +95,10 @@ T_UNSUPPORTED = "「{intent_cn}」这个功能还没接通，本版本暂时只�
 
 #: 工具失败：只报错误码与工具自己的解释（工具消息里的数字本就来自 facts），不润色、不补数字
 T_TOOL_ERROR = "这次没能查到您要的信息（{error_code}）：{detail}"
+#: **业务拒绝**（黑名单 / 状态不允许 / 越权）不是「查不到」，措辞必须分开 ——
+#: 实测缺陷：黑名单送礼被回成「这次没能查到您要的信息（FORBIDDEN）」，用户会以为系统坏了。
+T_TOOL_REFUSED = "这笔操作不能办理（{error_code}）：{detail}"
+_REFUSED_CODES = frozenset({"FORBIDDEN", "INVALID_STATE", "INSUFFICIENT_FUNDS"})
 
 #: 数字校验未通过时的降级提示（与卡 13 的口径一致：降级为模板回执 + audit 记 HALLUCINATION_BLOCKED）
 T_DEGRADED_NOTE = "（以下为系统直接给出的结果）"
@@ -202,6 +206,8 @@ T_NEED_RISK = ("您还没有完成风险测评，暂时不能买理财。\n\n"
 def tool_error(error_code: str | None, detail: str) -> str:
     if error_code == "INVALID_STATE" and ("风险测评" in detail or "风险评估" in detail):
         return T_NEED_RISK
+    if error_code in _REFUSED_CODES:                     # 业务拒绝：换成「不能办理」
+        return T_TOOL_REFUSED.format(error_code=error_code, detail=detail)
     return T_TOOL_ERROR.format(error_code=error_code or "ERROR", detail=detail)
 
 
