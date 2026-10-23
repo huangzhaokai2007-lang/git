@@ -81,3 +81,40 @@ def test_pick_unknown_candidate_returns_none(wired, monkeypatch) -> None:
     orchestrator.handle(f"给{DUPLICATE}转 100 元", session_id=SESSION)
     assert payee_picker.pick(SESSION, "payee_ghost") is None
     assert payee_picker.pending(SESSION) is not None                   # 没选成功，待选还在
+
+
+# ---------------- 2026-10-24 人类规格：候选排序 / 5 分钟过期 ----------------
+
+def test_candidates_are_ordered_by_recency_then_whitelist(wired) -> None:
+    """解析卡候选顺序：**最近转账优先 → 白名单优先**（只影响卡面，不改追问文案）。"""
+    from agent import payee_picker as picker
+    from agent.payee_resolve import order_candidates
+    _fake_candidates = [
+        {"id": "p_old", "name": "李四", "phone": "139****1001",
+         "last_used_ts": "2026-01-01T09:00", "is_whitelist": True},
+        {"id": "p_new", "name": "李四", "phone": "139****1002",
+         "last_used_ts": "2026-09-01T09:00", "is_whitelist": False},
+    ]
+    ordered = order_candidates(_fake_candidates)
+    assert [c["id"] for c in ordered] == ["p_new", "p_old"]        # 最近转账的排前面
+    picker.clear(SESSION)
+    picker.capture(SESSION, "transfer_single", {"payee": "李四"}, _fake_candidates)
+    pending = picker.pending(SESSION)
+    assert [c["id"] for c in pending["candidates"]] == ["p_new", "p_old"]
+    picker.clear(SESSION)
+
+
+def test_picker_expires_after_five_minutes(wired, monkeypatch) -> None:
+    """解析卡 5 分钟未选择 → 自动作废（回到空闲态）。"""
+    from agent import payee_picker as picker
+    picker.clear(SESSION)
+    now = 1_000.0
+    monkeypatch.setattr(picker.time, "monotonic", lambda: now)      # 先钉住时钟，再捕获
+    picker.capture(SESSION, "transfer_single", {"payee": "李四"},
+                   [{"id": "p1", "name": "李四", "phone": "139****1001"}])
+    assert picker.pending(SESSION) is not None                     # 刚捕获：还在
+    monkeypatch.setattr(picker.time, "monotonic", lambda: now + 299)
+    assert picker.pending(SESSION) is not None                     # 4 分 59 秒：还在
+    monkeypatch.setattr(picker.time, "monotonic", lambda: now + 301)
+    assert picker.pending(SESSION) is None                          # 超过 5 分钟：作废
+    assert picker.pending(SESSION) is None                          # 且已被清掉

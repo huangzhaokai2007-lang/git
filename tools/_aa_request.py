@@ -229,3 +229,42 @@ def cancel_aa_request(request_id: str) -> ToolResult:
                {"request_id": request_id, "paid_count": len(paid),
                 **_money_facts(row["total"], "total")},
                f"AA 请求 {request_id} 已撤销（已登记的 {len(paid)} 人付款记录保留）")
+
+
+# ---------------- T48 提醒未付（2026-10-24 人类规格「支持提醒未付人员」） ----------------
+
+REMIND_TOOL = "remind_aa_share"
+
+
+def remind_aa_share(request_id: str, payee_id: str) -> ToolResult:
+    """T48 **提醒某人付款**（L1）。`data` = `{request_id, payee_id, reminded}`。
+
+    demo 期没有真实的推送通道：只**写一条审计**（谁被提醒、对应哪笔 AA），
+    回执里说清「已提醒（模拟）」——不伪造送达状态。
+    """
+    try:
+        row = _owned_request(request_id, tool=REMIND_TOOL)
+        real = _effective(row)
+        if real == "expired":
+            return _fail(ErrorCode.INVALID_STATE, "这笔 AA 已超过 24 小时，不用再提醒了")
+        if real != "active":
+            return _fail(ErrorCode.INVALID_STATE, f"这笔 AA 已是{STATUS_CN[real]}状态")
+        share = dao.connection().execute(
+            "SELECT * FROM aa_share WHERE request_id = ? AND payee_id = ?",
+            (request_id, payee_id)).fetchone()
+        if share is None:
+            return _fail(ErrorCode.NOT_FOUND, "这笔 AA 里没有该收款人")
+        if share["status"] == "paid":
+            return _fail(ErrorCode.INVALID_STATE, f"{share['payee_name']} 已经付过了，无需提醒")
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="aa_remind", tool=REMIND_TOOL,
+                         params_json={"request_id": request_id, "payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    facts = {"request_id": request_id, "payee_name": share["payee_name"],
+             "expire_at": str(row["expire_at"]).replace("T", " "),
+             **_money_facts(share["amount"], "amount")}
+    return _ok({"request_id": request_id, "payee_id": payee_id, "reminded": True}, facts,
+               f"已提醒 {share['payee_name']} 支付 {facts['amount_yuan']} 元"
+               f"（截止 {facts['expire_at']}；demo 期为模拟提醒，只留痕不真推送）")

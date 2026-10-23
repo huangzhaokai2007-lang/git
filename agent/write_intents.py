@@ -75,12 +75,17 @@ from agent._write_payee_ops import (
 )
 from agent._write_aa_ops import (
     _card as _card_aa_op,
+    _card_remind as _card_aa_remind,
     _execute_cancel as _execute_aa_cancel,
+    _execute_remind as _execute_aa_remind,
     _execute_mark_paid as _execute_aa_mark_paid,
     _plain as _plain_aa_op,
+    _plain_remind as _plain_aa_remind,
     _prepare_cancel as _prepare_aa_cancel,
+    _prepare_remind as _prepare_aa_remind,
     _prepare_mark_paid as _prepare_aa_mark_paid,
     _shape_cancel as _shape_aa_cancel,
+    _shape_remind as _shape_aa_remind,
     _shape_mark_paid as _shape_aa_mark_paid,
 )
 from agent._write_gift_ops import (
@@ -313,6 +318,15 @@ _SPECS["aa_cancel"] = WriteSpec(
     target_key="request_id",
     what="撤销 AA", shape=_shape_aa_cancel, prepare=_prepare_aa_cancel,
     card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_cancel)
+
+#: 2026-10-24（人类规格「支持提醒未付人员」）→ L1：只留痕，不真推送。
+_SPECS["aa_remind"] = WriteSpec(
+    intent="aa_remind", intent_cn="提醒付款", title="提醒付款确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_aa_requests",), execute_tool="remind_aa_share",
+    target_key="request_id",
+    what="提醒付款", shape=_shape_aa_remind, prepare=_prepare_aa_remind,
+    card=_card_aa_remind, plain=_plain_aa_remind, execute=_execute_aa_remind)
 
 #: 2026-10-24（人类原文「修改白名单信息需要验证码」→ L2）。
 _SPECS["payee_whitelist_edit"] = WriteSpec(

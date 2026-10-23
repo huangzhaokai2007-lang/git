@@ -12,18 +12,35 @@
 
 from __future__ import annotations
 
+import time
+
+#: 解析卡有效期（人类规格：「解析卡片 5 分钟未选择自动过期，回到空闲态」）
+TTL_SECONDS = 300
+
 _PENDING: dict[str, dict] = {}
 
 
 def capture(session_id: str, intent: str, slots: dict, candidates: list[dict]) -> None:
-    """记下「等用户在解析卡里挑一位」的现场。"""
+    """记下「等用户在解析卡里挑一位」的现场（带时间戳，超过 5 分钟自动作废）。
+
+    候选在这里按人类规格排序（**最近转账 → 白名单 → 姓名**）—— 只影响**卡面顺序**，
+    不改追问文案（那一份由 `payee_clarify` 按工具事实包原序给出）。
+    """
+    from agent.payee_resolve import order_candidates      # 延迟 import：避免顶层相互引用
+    ordered = order_candidates([dict(item) for item in candidates])
     _PENDING[session_id] = {"intent": intent, "slots": dict(slots),
-                            "candidates": [dict(item) for item in candidates]}
+                            "candidates": ordered, "at": time.monotonic()}
 
 
 def pending(session_id: str) -> dict | None:
-    """取待选现场（无 → None）。界面每次渲染取一次，不消费。"""
-    return _PENDING.get(session_id)
+    """取待选现场（无 / 已超 5 分钟 → None，并顺手清掉）。界面每次渲染取一次，不消费。"""
+    state = _PENDING.get(session_id)
+    if state is None:
+        return None
+    if time.monotonic() - float(state.get("at") or 0) > TTL_SECONDS:
+        _PENDING.pop(session_id, None)                 # 过期即作废：回到空闲态
+        return None
+    return state
 
 
 def clear(session_id: str) -> None:

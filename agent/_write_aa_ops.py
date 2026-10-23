@@ -156,3 +156,70 @@ def _execute_cancel(confirmation: confirm_card.Confirmation, otp: str | None) ->
     del otp
     from tools import _aa_request
     return _aa_request.cancel_aa_request(str(confirmation.filled["request_id"]))
+
+
+# ---------------- 提醒未付（T48，L1）（2026-10-24 人类规格「支持提醒未付人员」） ----------------
+
+REMIND_TIER = "L1"
+
+
+def _shape_remind(slots: Mapping) -> ShapeResult:
+    """SLOT_FILL：哪一笔 AA + 提醒谁（那个人必须还没付）。"""
+    filled = dict(slots)
+    items, code = _active()
+    if code is not None:
+        return ShapeResult(filled=filled, error_code=code, message="取不到您的 AA 请求")
+    if not items:
+        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 AA 收款")
+    if filled.get("request_id"):
+        chosen = next((it for it in items if it["request_id"] == filled["request_id"]), None)
+        if chosen is None:
+            return ShapeResult(filled=filled, error_code="NOT_FOUND", message="这笔 AA 已不在进行中")
+    elif len(items) == 1:
+        chosen = items[0]
+    else:
+        return ShapeResult(filled=filled, missing=["request_id"], clarify=PICK_AMBIGUOUS)
+    filled["request_id"] = chosen["request_id"]
+    pending = [s for s in chosen["shares"] if s["status"] != "paid"]
+    if not pending:
+        return ShapeResult(filled=filled, error_code="INVALID_STATE", message="这笔 AA 已经全部付清了")
+    if filled.get("payee") and not filled.get("payee_id"):
+        person, pcode, _facts = payee_resolve.resolve_or_explain(str(filled["payee"]))
+        if pcode:
+            return ShapeResult(filled=filled, error_code=pcode, message="该收款人不能用于这笔 AA")
+        filled["payee_id"] = person["payee_id"] if person else None
+    share = next((s for s in pending if s["payee_id"] == filled.get("payee_id")), None)
+    if share is None:
+        if filled.get("payee_id"):
+            return ShapeResult(filled=filled, error_code="NOT_FOUND",
+                               message="这个人不在这一笔 AA 里，或已经付过了")
+        return ShapeResult(filled=filled, missing=["payee"],
+                           clarify="请说明要提醒谁（例如「提醒赵六付款」）。")
+    filled["payer_name"] = share["payee_name"]
+    return ShapeResult(filled=filled)
+
+
+def _prepare_remind(filled: dict) -> Prepared:
+    return _prepare(filled, REMIND_TIER)
+
+
+def _card_remind(intent: str, filled: dict, facts: Mapping, tier: str,
+                 requires_otp: bool) -> confirm_card.CardInput:
+    return confirm_card.CardInput(
+        title="提醒付款确认卡", intent_cn="提醒付款",
+        rows=[("事由", str(facts["title"])), ("提醒谁", str(filled.get("payer_name") or "")),
+              ("应收", f"{facts['total_yuan']} 元（合计）"),
+              ("说明", "demo 期为模拟提醒：只留痕，不真的推送")],
+        tier=tier, requires_otp=requires_otp, risk_note=confirm_card.risk_note([], "提醒付款"))
+
+
+def _plain_remind(filled: dict, facts: Mapping, tier: str) -> str:
+    return (f"请确认：提醒 {filled.get('payer_name')} 支付「{facts.get('title')}」这笔 AA，"
+            f"权限档 {tier}。")
+
+
+def _execute_remind(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
+    del otp
+    from tools import _aa_request
+    return _aa_request.remind_aa_share(str(confirmation.filled["request_id"]),
+                                       str(confirmation.filled["payee_id"]))

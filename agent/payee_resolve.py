@@ -236,6 +236,20 @@ def list_people() -> list[dict]:
     return _people()
 
 
+def order_candidates(payees: list[dict]) -> list[dict]:
+    """候选排序（人类规格「最近转账优先、常用优先、白名单优先」）。
+
+    实现：先按姓名升序做**稳定基线**，再按（最近转账时间, 是否白名单）降序排；
+    从未转账的人 `last_used_ts` 为空 → 自然沉到最后。「常用」目前没有独立的次数数据，
+    用「最近转账」近似（仓内唯一可得的活跃度信号），不新造字段。
+    """
+    by_name = sorted(payees, key=lambda p: str(p.get("name") or ""))
+    return sorted(by_name,
+                  key=lambda p: (str(p.get("last_used_ts") or ""),
+                                 bool(p.get("is_whitelist"))),
+                  reverse=True)
+
+
 def _decide(hits: list[dict], how: str, query: str) -> ResolveResult:
     """按命中结果给结论：黑名单优先于一切（命中黑名单不当候选，直接拒）。"""
     if not hits:

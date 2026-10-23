@@ -32,7 +32,7 @@ INTENT_LABELS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "payee_whitelist_edit", "payee_whitelist_remove",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "aa_remind", "payee_whitelist_edit", "payee_whitelist_remove",
     "payee_note", "payee_tags", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
@@ -43,7 +43,7 @@ IntentLabel = Literal[
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "payee_whitelist_edit", "payee_whitelist_remove",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "aa_remind", "payee_whitelist_edit", "payee_whitelist_remove",
     "payee_note", "payee_tags", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
@@ -92,6 +92,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "aa_list": ("status",),                                                # T42 查 AA（可选状态）
     "aa_mark_paid": ("payee",),                                            # T43 登记某人已付
     "aa_cancel": (),                                                       # T44 撤销 AA
+    "aa_remind": ("request_id", "payee"),                                  # T48 提醒未付
     "payee_whitelist_edit": ("payee", "quota", "expire"),                  # 修改白名单信息
     "payee_whitelist_remove": ("payee",),                                  # 移出白名单
     "payee_note": ("payee", "note"),                                       # 修改备注
@@ -198,6 +199,7 @@ SYSTEM_PROMPT = (
     "`quota` 填元、`expire` 填日期原话。payee_whitelist_remove（移出白名单）：「把王五移出白名单」。\n"
     "payee_note（改备注）：「给王五加个备注」「把李四的备注改成老同学」。\n"
     "aa_list（查 AA）的判定：「我的 AA」「AA 收款进行中」「谁还没付」都判它；`status` 说了才填。"
+    "aa_remind（提醒未付）：「提醒赵六付款」「催一下没付的人」；`payee` 填那个人。\n"
     "aa_mark_paid（登记已付）：「赵六付了」「把张三标成已付」；`payee` 填那个人。"
     "aa_cancel（撤销 AA）：「把那个 AA 撤了」；与 aa_collect（新建）划清。\n"
     "gift_order_cancel / gift_order_pay（订单状态流转）的判定：「取消那个礼物订单」→"

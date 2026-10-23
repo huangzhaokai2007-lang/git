@@ -138,3 +138,44 @@ def test_orchestration_aa_lifecycle(wired, monkeypatch) -> None:
     assert listed.intent == "aa_list" and "list_aa_requests" in listed.tool_calls
     assert "| 事由 | 合计（元） | 已付 | 状态 | 截止 |" in listed.reply
     assert "1/2 人" in listed.reply and "进行中" in listed.reply
+
+
+# ---------------- 2026-10-24 人类规格：提醒未付人员 ----------------
+
+def test_remind_pending_person(wired) -> None:
+    """T48：提醒未付的人 → 留痕（审计），已付/全部付清则拒绝。"""
+    ids = _payee_ids(wired, ["王五", "赵六"])
+    rid = aa.open_aa_request(ids, [15_000, 15_000], 30_000, "equal", TITLE).data["request_id"]
+    result = aa.remind_aa_share(rid, ids[1])
+    assert result.ok is True and result.data["reminded"] is True
+    assert "已提醒" in result.message and "模拟提醒" in result.message
+    assert raw(wired, "SELECT 1 FROM audit_log WHERE tool = 'remind_aa_share'")
+    assert aa.mark_aa_share_paid(rid, ids[1]).ok is True
+    again = aa.remind_aa_share(rid, ids[1])
+    assert again.ok is False and "已经付过" in again.message
+
+
+def test_remind_rejected_when_all_paid(wired) -> None:
+    ids = _payee_ids(wired, ["王五"])
+    rid = aa.open_aa_request(ids, [10_000], 10_000, "equal", TITLE).data["request_id"]
+    assert aa.mark_aa_share_paid(rid, ids[0]).ok is True          # 全部付清 → done
+    assert aa.remind_aa_share(rid, ids[0]).ok is False
+
+
+def test_orchestration_remind(wired, monkeypatch) -> None:
+    """「提醒赵六付款」→ L1 卡 → 确认 → 留痕。"""
+    ids = _payee_ids(wired, ["王五", "赵六"])
+    aa.open_aa_request(ids, [15_000, 15_000], 30_000, "equal", TITLE)
+
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": "aa_remind", "confidence": 0.95,
+                                          "slots": {"payee": "赵六"}, "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    card = orchestrator.handle("提醒赵六付款", session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states and card.tier == "L1"
+    assert "提醒付款确认卡" in card.reply and "赵六" in card.reply
+    done = orchestrator.handle("确认", session_id=SESSION)
+    assert done.executed is True and done.tool_calls == ["remind_aa_share"]
