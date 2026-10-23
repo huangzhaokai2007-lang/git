@@ -107,7 +107,18 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 _CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡",
                "gift_plan": "送礼计划确认卡", "payee_whitelist": "白名单确认卡",
                "payee_blacklist": "黑名单确认卡", "payee_unblacklist": "解除黑名单确认卡",
-               "payee_delete": "删除收款人确认卡"}
+               "payee_delete": "删除收款人确认卡",
+               #: 2026-10-24 补齐：此前 `transfer_scheduled` 等新意图都落回默认的「转账确认卡」
+               "transfer_scheduled": "定时转账确认卡",
+               "scheduled_cancel": "取消预约确认卡", "scheduled_run": "立即执行预约确认卡",
+               "scheduled_modify": "修改预约确认卡",
+               "gift_order_cancel": "取消订单确认卡", "gift_order_pay": "支付订单确认卡",
+               "gift_order_advance": "订单状态确认卡",
+               "aa_mark_paid": "登记已付确认卡", "aa_cancel": "撤销 AA 确认卡",
+               "aa_remind": "提醒付款确认卡",
+               "payee_whitelist_edit": "修改白名单信息确认卡",
+               "payee_whitelist_remove": "移出白名单确认卡",
+               "payee_note": "修改备注确认卡", "payee_tags": "修改标签确认卡"}
 _CARD_TARGET = {"subscription_cancel": "商户", "gift_plan": "联系人",
                 "wealth_buy": "产品", "wealth_redeem": "产品"}
 #: **只有这些意图**的卡有「金额」「预计到账」两截 —— 联系人状态类操作（加白/拉黑/删除）没有金额，
@@ -222,10 +233,10 @@ def payee_form(defaults: dict | None = None) -> dict | None:
                                   value=str(defaults.get("phone") or ""))
             card_no = st.text_input("银行卡号（可空）", key="payee-card-no",
                                     placeholder="只保存脱敏形态（**** **** **** 8888）")
-            tags = st.text_input("标签（可空，多个用、分隔）", key="payee-tags",
-                                 placeholder="例如：妈妈、家人（之后可以说「给我妈转 200」）")
-            note = st.text_input("备注（可空）", key="payee-note",
-                                 placeholder="例如：老同学 / 房东 / 别转错",
+            tags = st.text_input("标签（可空，多个用、分隔；**能用来指代这个人**）", key="payee-tags",
+                                 placeholder="例如：妈妈、房东（之后可以说「给我妈转 200」）")
+            note = st.text_input("备注（可空；**只给自己看，不参与识别**）", key="payee-note",
+                                 placeholder="例如：老同学，别转错",
                                  value=str(defaults.get("note") or ""))
             whitelist = st.checkbox("同时加入白名单（之后转账免验证码，需再输一次验证码）",
                                     key="payee-whitelist")

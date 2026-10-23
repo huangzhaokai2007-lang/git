@@ -14,6 +14,7 @@ F16 的关键差异只有两处：① PRECHECK 时把 `schedule` 一起传给 T7
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
@@ -63,11 +64,35 @@ def _schedule_guard(when: str) -> str:
     return ""
 
 
+#: 「每月 15 日」「每个月 15 号」里的日号（1..31）
+_MONTH_DAY_HINT = re.compile(r"(\d{1,2})\s*[日号]")
+
+
+def _day_of_month(hint: object) -> int | None:
+    """从循环原话里抠出「每月 N 日」的 N；抠不到或越界 → None（不猜）。"""
+    match = _MONTH_DAY_HINT.search(str(hint or ""))
+    if match is None:
+        return None
+    day = int(match.group(1))
+    return day if 1 <= day <= 31 else None
+
+
 def _first_occurrence(cycle: str, hint: object) -> str:
-    """循环预约**没给日期**时推导首期：先看原话（「每个月月末」→ 最近月末），再按周期取缺省。"""
+    """循环预约**没给日期**时推导首期：先看原话，再按周期取缺省。
+
+    2026-10-24 修（实测）：「每月 15 日给房东转 30」被算成**月末**（10-31）。
+    原因是原话里只有「15 日」，`_relative_time` 的「N 号」规则要求带「本月/下个月」前缀。
+    现在补一条：**monthly + 原话里带 N 日/号** → 本月 N 日（还没到）否则次月 N 日。
+    """
     from_hint = _relative_time.parse(hint, transfer._now())
     if from_hint:
         return from_hint
+    if cycle == "monthly" and (day_of_month := _day_of_month(hint)):
+        today = transfer._now()
+        first = _relative_time.month_day(today, day_of_month)
+        if first <= today.date():                       # 本月这天已过 → 排到下月同日
+            first = _relative_time.month_day(today, day_of_month, month_shift=1)
+        return first.isoformat() + "T09:00"
     if cycle == "monthly":
         day = _relative_time.next_month_end(transfer._now())
     else:                                                    # weekly：从今天起 +7 天

@@ -84,12 +84,14 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
     filled, missing = dict(slots), []
     picked: dict[str, str] = {}                     # id → name，顺带完成去重（T9 对重复收款人直接拒）
     clarify, unresolved = "", False
+    candidates: list[dict] = []                     # 同名候选 → 交给解析卡
     for query in _as_list(filled.get("payee_ids")):
         person, code, facts = payee_resolve.resolve_or_explain(normalize_query(query))
         if code:                                        # 黑名单：整笔 AA 直接拒（不当候选）
             return ShapeResult(filled=filled, error_code=code, message=str(facts.get("message") or ""))
         if person is None:
             unresolved = True
+            candidates.extend(facts.get("candidates") or [])   # 供界面出**解析卡**
             clarify = clarify or payee_clarify.ask_for(facts)
         else:
             picked.setdefault(person["payee_id"], person["name"])
@@ -118,7 +120,8 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
             return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
                                message=f"每人金额合计 {total / 100:.2f} 元，与总金额 "
                                        f"{filled['amount_cents'] / 100:.2f} 元不符，请改一个")
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify,
+                       candidates=candidates)
 
 
 def _prepare_aa(filled: dict) -> Prepared:

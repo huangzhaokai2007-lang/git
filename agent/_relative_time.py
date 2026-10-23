@@ -102,3 +102,10 @@ def parse(raw: object, now: datetime.datetime) -> str | None:
             hour += 12
         hour, minute = hour % 24, minute
     return datetime.datetime(day.year, day.month, day.day, hour, minute).isoformat(timespec="minutes")
+
+
+def month_day(now: datetime.datetime, day: int, *, month_shift: int = 0) -> datetime.date:
+    """取「本月（或后 N 月）的第 `day` 天」；该月没有这一天 → **取月末**（2 月 30 → 28/29）。"""
+    year, month = _add_months(now.year, now.month, month_shift)
+    last = calendar.monthrange(year, month)[1]
+    return datetime.date(year, month, min(int(day), last))

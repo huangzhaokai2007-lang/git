@@ -276,7 +276,10 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
                     reply=templates.tool_error(shaped.error_code, shaped.message))
     if shaped.missing:                                                 # 缺槽 → 追问，不猜
         if shaped.candidates:                                          # 同名多命中 → 界面出**解析卡**
-            payee_picker.capture(session_id, intent, dict(slots), shaped.candidates)
+            slot = ("payee_ids" if isinstance(slots.get("payee_ids"), (list, tuple))
+                    else "payee")
+            payee_picker.capture(session_id, intent, dict(slots), shaped.candidates,
+                                 slot=slot)
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=shaped.clarify or None)      # F17：描述符给了更具体的追问就用它
     filled = shaped.filled

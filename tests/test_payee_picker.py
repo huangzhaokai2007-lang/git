@@ -118,3 +118,38 @@ def test_picker_expires_after_five_minutes(wired, monkeypatch) -> None:
     monkeypatch.setattr(picker.time, "monotonic", lambda: now + 301)
     assert picker.pending(SESSION) is None                          # 超过 5 分钟：作废
     assert picker.pending(SESSION) is None                          # 且已被清掉
+
+
+def test_aa_same_name_offers_the_picker(wired, monkeypatch) -> None:
+    """AA 里出现同名（两个李四）→ 也要出**解析卡**，选中后替换名单里那一个人。"""
+    from agent import confirm_card, llm, payee_picker as picker, session_memory, write_flow
+
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["李四", "王五"], "amount": "500"},
+                                          "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    confirm_card.reset_state()
+    session_memory.reset("aa-pick")
+    picker.clear("aa-pick")
+    orchestrator.handle("向李四和王五 AA 收款 500 元", session_id="aa-pick")
+    pending = picker.pending("aa-pick")
+    assert pending is not None and len(pending["candidates"]) == 2
+    assert pending["slot"] == "payee_ids"
+    chosen = pending["candidates"][0]
+    intent, slots = picker.pick("aa-pick", chosen["id"])
+    assert slots["payee_ids"][0] == chosen["phone"]          # 名单里那一个换成唯一手机号
+    assert slots["payee_ids"][1] == "王五"                    # 另一个不受影响
+    step = write_flow.start(intent, slots, "aa-pick")
+    assert "CONFIRM_CARD" in step.states and "AA 收款确认卡" in step.reply
+
+
+def test_monthly_on_a_specific_day_lands_on_that_day(wired) -> None:
+    """「每月 15 日」→ 首期是 15 号，**不是月末**（实测 bug）。"""
+    from agent._write_transfer import _first_occurrence
+    when = _first_occurrence("monthly", "每月15日")
+    assert when.endswith("T09:00") and when[8:10] == "15"
+    assert _first_occurrence("monthly", "每个月月末").endswith("T09:00")

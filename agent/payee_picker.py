@@ -20,7 +20,8 @@ TTL_SECONDS = 300
 _PENDING: dict[str, dict] = {}
 
 
-def capture(session_id: str, intent: str, slots: dict, candidates: list[dict]) -> None:
+def capture(session_id: str, intent: str, slots: dict, candidates: list[dict],
+            *, slot: str = "payee") -> None:
     """记下「等用户在解析卡里挑一位」的现场（带时间戳，超过 5 分钟自动作废）。
 
     候选在这里按人类规格排序（**最近转账 → 白名单 → 姓名**）—— 只影响**卡面顺序**，
@@ -28,7 +29,7 @@ def capture(session_id: str, intent: str, slots: dict, candidates: list[dict]) -
     """
     from agent.payee_resolve import order_candidates      # 延迟 import：避免顶层相互引用
     ordered = order_candidates([dict(item) for item in candidates])
-    _PENDING[session_id] = {"intent": intent, "slots": dict(slots),
+    _PENDING[session_id] = {"intent": intent, "slots": dict(slots), "slot": slot,
                             "candidates": ordered, "at": time.monotonic()}
 
 
@@ -57,7 +58,18 @@ def pick(session_id: str, payee_id: str) -> tuple[str, dict] | None:
     if chosen is None:
         return None
     slots = dict(state["slots"])
-    slots["payee_id"] = chosen["id"]
-    slots["masked_phone"] = chosen.get("phone") or ""
+    slot = str(state.get("slot") or "payee")
+    if slot == "payee_ids":                            # AA：把名单里第一个同名项换成唯一手机号
+        name = str(chosen.get("name") or "")
+        phone = str(chosen.get("phone") or "")
+        items = [str(x) for x in (slots.get("payee_ids") or [])]
+        for index, item in enumerate(items):
+            if item == name and phone:
+                items[index] = phone                   # 脱敏手机号在解析关卡里唯一可辨
+                break
+        slots["payee_ids"] = items
+    else:
+        slots["payee_id"] = chosen["id"]
+        slots["masked_phone"] = chosen.get("phone") or ""
     _PENDING.pop(session_id, None)
     return state["intent"], slots
