@@ -215,7 +215,8 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
     **追问续接的上下文在这里统一给**（`agent/session_memory.py`）：四个入口
     （web / api / im / cli）不必各自传 `history`，也就不会再出现「新入口忘了传」这类断链。
     """
-    notices, sid = scheduled_runner.settle_due(), session_id or current_session_id()
+    sid = session_id or current_session_id()
+    notices = [*scheduled_runner.settle_due(), *scheduled_runner.due_soon_notices(sid)]
     turn = _handle(text, history=session_memory.recent(sid, history), clarify_round=clarify_round,
                    session_id=sid, card_reader=card_reader, intent_resolver=intent_resolver)
     session_memory.remember(sid, text, turn.reply)     # 先记（不含结算告知），再做前缀

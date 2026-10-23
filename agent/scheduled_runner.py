@@ -20,6 +20,7 @@ Streamlit / FastAPI / CLI 三种入口各起一套，而 CLI 是**一次性进�
 
 from __future__ import annotations
 
+import datetime
 import logging
 
 from data import dao
@@ -64,4 +65,55 @@ def settle_due() -> list[str]:
                     notices.append(f"【下一期已排期】{nxt.message}")
             except Exception:                              # noqa: BLE001
                 logger.exception("惰性结算：续期 %s 失败", schedule_id)
+    return notices
+
+
+# ---------------- 执行前提醒（T-24h · 人类规格「支持执行前提醒」） ----------------
+
+#: 提前多久提醒（小时）
+REMIND_WINDOW_HOURS = 24
+#: 会话 → 已提醒过的预约 id（同一笔只提醒一次，避免每轮都刷）
+_REMINDED: dict[str, set[str]] = {}
+
+
+def reset_reminders(session_id: str | None = None) -> None:
+    """清掉提醒记录（测试隔离 / 界面「重置会话态」用）。"""
+    if session_id is None:
+        _REMINDED.clear()
+    else:
+        _REMINDED.pop(session_id, None)
+
+
+def due_soon_notices(session_id: str) -> list[str]:
+    """**执行前提醒**：24 小时内要执行的预约，每笔只提醒一次。无 → 空列表（不写任何表）。
+
+    依据人类规格「支持执行前提醒，例如 T-24 小时提醒『明天将向小红转账 100 元』，可一键取消」。
+    这里是**惰性**实现（与结算口径一致）：不启后台进程，随用户下一次交互带出。
+    """
+    from tools import _transfer_schedule
+    try:
+        listed = _transfer_schedule.list_scheduled("pending")
+    except Exception:                                     # noqa: BLE001 —— 提醒故障不拖垮请求
+        logger.exception("执行前提醒：取待执行预约失败，本轮跳过")
+        return []
+    if not listed.ok:
+        return []
+    seen = _REMINDED.setdefault(session_id, set())
+    deadline = transfer._now() + datetime.timedelta(hours=REMIND_WINDOW_HOURS)
+    notices: list[str] = []
+    for item in listed.facts.get("items") or []:
+        schedule_id = str(item["schedule_id"])
+        if schedule_id in seen:
+            continue
+        try:
+            when = datetime.datetime.fromisoformat(str(item["execute_at"]))
+        except ValueError:
+            continue
+        if when > deadline or when <= transfer._now():
+            continue
+        seen.add(schedule_id)
+        cycle = "（循环）" if item.get("repeat_cycle") else ""
+        notices.append(f"【执行前提醒】{when.isoformat(timespec='minutes').replace('T', ' ')} "
+                       f"将向 {item['payee_name']} 转账 {item['amount_yuan']} 元{cycle}；"
+                       f"想改或取消可以说「取消预约」/「把那笔预约改到…」。")
     return notices
