@@ -46,7 +46,7 @@ OTP = "123456"                        # demo 固定验证码（工具层 OTP_COD
 
 
 def execute_aa(session_id: str):
-    """**F22f 口径**：AA 是**收款**方向 → L1 免码。确认 → 直接执行，返回最终 Turn。"""
+    """确认 → 执行（全白名单 L1 直接执行；含非白名单 L2 会先要验证码，这里一并走通）。"""
     stage = orchestrator.handle("确认", session_id=session_id)
     if stage.executed:
         return stage
@@ -95,7 +95,8 @@ def test_confirm_card_issues_no_request_before_confirmation(wired, monkeypatch) 
     """出确认卡这一步**T9 一次都没被调用**：审计里没有 `create_aa_request`。"""
     card = turn(monkeypatch, f"向{WANGWU}和{ZHAOLIU} AA 收款 300 元",
                 [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    assert card.executed is False and card.tier == "L1"       # F22f：收款方向免验证码
+    assert card.executed is False and card.tier == "L2"       # 含非白名单（赵六）→ 要验证码
+    assert "验证码原因" in card.reply and "非白名单" in card.reply
     assert "一键均摊" in card.reply
     assert "CONFIRM_CARD" in card.states and "【AA 收款确认卡】" in card.reply
     assert "每人" in card.reply and "余数" in card.reply
@@ -185,7 +186,7 @@ def test_wording_never_claims_money_received(wired, monkeypatch) -> None:
 # ---------------- ⑥ v2：成员全白名单 → 免码 ----------------
 
 def test_all_whitelist_members_need_no_otp(wired, monkeypatch) -> None:
-    """**F22f 口径**：AA 是收款方向 → 一律 L1 免验证码（白名单成员如此，非白名单也如此）。"""
+    """**2026-10-24 口径**：AA 里**全是有效白名单** → L1 免码（含非白名单才要码）。"""
     from data import payee_dao
     from tools import payee
     pid = payee.add_payee("白名单同事", "13800007777").data["payee_id"]
@@ -203,7 +204,7 @@ def test_per_person_amounts_card_and_execute(wired, monkeypatch) -> None:
     script = [aa_intent([WANGWU, ZHAOLIU], "300.00", amounts=f"{WANGWU} 100 元、{ZHAOLIU} 200 元"),
               {"intent": "aa_collect", "confidence": 0.9, "slots": {}, "missing_slots": []}]
     card = turn(monkeypatch, "AA 收款，王五 100 元、赵六 200 元", script)
-    assert "CONFIRM_CARD" in card.states and card.tier == "L1"
+    assert "CONFIRM_CARD" in card.states and card.tier == "L2"    # 含非白名单 → 要码
     assert "按人金额" in card.reply and "100.00" in card.reply and "200.00" in card.reply
     done = execute_aa(SESSION)
     assert done.executed is True and "按人金额" in done.reply

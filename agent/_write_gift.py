@@ -33,6 +33,18 @@ from tools.schemas import ToolResult
 GIFT_CN = "送礼计划"
 
 
+def _blacklist_reason(contact: str) -> str:
+    """收货人若命中**黑名单** → 返回拒绝文案（否则空串）。只按姓名/标签解析，不猜。"""
+    if not contact:
+        return ""
+    person, _code, _facts = payee_resolve.resolve_or_explain(contact, allow_blacklisted=True)
+    if person is None or not person.get("blacklist"):
+        return ""
+    reason = str(person.get("blacklist_reason") or "")
+    text = f"{person['name']} 已在黑名单，不能送礼。"
+    return text + (f"原因：{reason}。" if reason else "")
+
+
 def _shape_gift(slots: Mapping) -> ShapeResult:
     """SLOT_FILL：`contact` 原样用；`date` 归一到 `YYYY-MM-DD`；`budget`（元）→ 整数分。
 
@@ -45,7 +57,13 @@ def _shape_gift(slots: Mapping) -> ShapeResult:
     不复制这类业务口径 —— 复制就是第二份实现，迟早与工具层分叉。
     """
     filled, missing = dict(slots), []
-    if not str(filled.get("contact") or "").strip():
+    contact = str(filled.get("contact") or "").strip()
+    #: 2026-10-24 口径（人类原文）：「黑名单无法进行转账、定时转账、送礼，直接拒绝，无需验证码」。
+    #: 只按**收款人姓名/标签**解析（收货人可能不在收款人里 → 不拦），不猜。
+    blocked = _blacklist_reason(contact)
+    if blocked:
+        return ShapeResult(filled=filled, error_code="FORBIDDEN", message=blocked)
+    if not contact:
         missing.append("contact")
     day = period.resolve_day(filled.get("date"), edge="start") if filled.get("date") else None
     if day is None:

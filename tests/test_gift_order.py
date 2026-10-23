@@ -94,3 +94,21 @@ def test_render_gift_orders() -> None:
          "amount_yuan": "300.00", "status": "created", "status_cn": "已下单"}]})
     assert "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |" in text
     assert "ord_abc" in text and "已下单" in text and "300.00" in text
+
+
+# ---------------- 2026-10-24 口径：黑名单不能送礼（直接拒、无需验证码） ----------------
+
+def test_gift_rejects_blacklisted_contact(wired, monkeypatch) -> None:
+    """黑名单收款人 → 送礼**直接拒绝**（不出卡、不锁款），文案带原因。"""
+    from tools import payee
+    pid = payee.add_payee("拉黑的朋友", "13800008888").data["payee_id"]
+    assert payee.set_payee_blacklist(pid, "总是赖账").ok is True
+    before = count(wired, "gift_order")
+    _fake(monkeypatch, "gift_plan",
+          {"contact": "拉黑的朋友", "date": "2026-10-30", "budget": "500"})
+    result = orchestrator.handle("给拉黑的朋友送个生日礼物，2026-10-30 送达，预算 500 元",
+                                 session_id=SESSION)
+    assert result.executed is False and "CONFIRM_CARD" not in result.states
+    assert "黑名单" in result.reply and "总是赖账" in result.reply
+    assert count(wired, "gift_order") == before                  # 没有落单
+    assert raw(wired, "SELECT COUNT(*) AS n FROM gift_order")[0]["n"] == before

@@ -23,7 +23,7 @@ from __future__ import annotations
 import re
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify, payee_resolve
+from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
 from agent._write_common import Prepared, ShapeResult, normalize_query, yuan_to_cents
 from tools import _aa_split, transfer
 from tools.schemas import ToolResult
@@ -136,7 +136,19 @@ def _prepare_aa(filled: dict) -> Prepared:
     facts = _aa_split.aa_facts(payees, int(filled["amount_cents"]),
                                per_person=filled.get("per_person_cents"))
     facts["target_name"] = filled["aa_target"]
+    #: 2026-10-24 口径（人类原文）：「AA 中只要含有非白名单收款人就要验证码」——
+    #: 全是**有效**白名单 → L1 免码；含非白名单或白名单已过期 → L2；黑名单已在 `_shape_aa` 直接拒。
+    non_exempt = [name for pid, name in zip(ids, names) if not _exempt(pid)]
+    facts["tier"] = payee_risk.TIER_L2 if non_exempt else payee_risk.TIER_L1
+    if non_exempt:
+        facts["aa_otp_reason"] = "含非白名单收款人：" + "、".join(non_exempt)
     return Prepared(ok=True, facts=facts, credential="")
+
+
+def _exempt(payee_id: str) -> bool:
+    """这个收款人在 AA 里免验证码吗：**白名单且未过期**（黑名单更早被拒，不走这里）。"""
+    person = payee_resolve.profile_of(payee_id) or {}
+    return bool(person.get("is_whitelist")) and not payee_risk.is_expired(person)
 
 
 def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
@@ -153,6 +165,8 @@ def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
                 ("总金额", f"{facts['amount_yuan']} 元"),
                 ("每人", f"{facts['per_person_amount_yuan']} 元（一键均摊）"),
                 ("余数（由你承担）", f"{facts['initiator_share_yuan']} 元")]
+    if facts.get("aa_otp_reason"):                      # 为什么要验证码，卡面说清楚
+        rows.append(("验证码原因", str(facts["aa_otp_reason"])))
     return confirm_card.CardInput(
         title="AA 收款确认卡", intent_cn=AA_CN, rows=rows,
         tier=tier, requires_otp=requires_otp,

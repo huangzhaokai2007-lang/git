@@ -76,12 +76,15 @@ def test_whitelist_with_expire_lands_on_row(wired, monkeypatch) -> None:
     assert row["is_whitelist"] == 1 and row["whitelist_expire"] == "2027-01-31"
 
 
-def test_expire_does_not_affect_risk_gate(wired) -> None:
-    """**仅展示**：把有效期设在过去，额度内仍然是 L1 免码（风控不读有效期）。"""
+def test_expired_whitelist_falls_back_to_otp(wired) -> None:
+    """**2026-10-24 口径**：白名单过期 → **降级为普通收款人**（要验证码）。"""
     from agent import payee_resolve
     pid = raw(wired, "SELECT id FROM payee WHERE name = ?", (WANGWU,))[0]["id"]
     payee_dao.update_payee(pid, "u_zhangsan_0001", whitelist_expire="2020-01-01")   # 早就过期
     person = payee_resolve.profile_of(pid)
     assert person["whitelist_expire"] == "2020-01-01"
     month = "2026-08"
-    assert payee_risk.assess(person, 10_000, month=month).decision == payee_risk.DECISION_ALLOW
+    verdict = payee_risk.assess(person, 10_000, month=month)
+    assert verdict.decision == payee_risk.DECISION_NEED_OTP
+    assert verdict.reason == payee_risk.REASON_EXPIRED
+    assert "已过期" in verdict.message and verdict.tier == "L2"

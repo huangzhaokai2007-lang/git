@@ -16,7 +16,9 @@
 超单笔/今日限额           → need_otp（既有档位自己会升）
 ```
 
-**不判白名单有效期**（人类明确：有效期只做展示，不参与风控）。
+**白名单有效期（2026-10-24 口径变更，人类原文）**：「白名单设置有效时间」「到期自动降级为普通收款人」
+—— 所以**过期即按普通收款人处理（要验证码）**。旧口径「有效期只做展示、不参与风控」已废止，
+改由本模块统一判（只此一份实现，别处不要再判）。
 """
 
 from __future__ import annotations
@@ -38,9 +40,25 @@ REASON_WITHIN_QUOTA = "whitelist_within_quota"
 REASON_QUOTA_EXCEEDED = "whitelist_quota_exceeded"
 REASON_NO_QUOTA = "whitelist_without_quota"
 REASON_NON_WHITELIST = "non_whitelist"
+REASON_EXPIRED = "whitelist_expired"
 REASON_PREVIEW_FAILED = "preview_failed"
 
 TIER_L1, TIER_L2, TIER_L3 = "L1", "L2", "L3"
+
+
+def is_expired(payee: Mapping, today: datetime.date | None = None) -> bool:
+    """白名单是否**已过期**（`whitelist_expire` 是 ISO 结束日期；空 = 长期有效）。
+
+    结束日期当天仍有效（`today > 结束日` 才算过期）。
+    """
+    text = str(payee.get("whitelist_expire") or "").strip()
+    if not text:
+        return False
+    try:
+        deadline = datetime.date.fromisoformat(text[:10])
+    except ValueError:                                   # 格式坏 → 不据此降级（不猜）
+        return False
+    return (today or datetime.date.today()) > deadline
 
 
 def month_prefix(now: datetime.datetime | None = None) -> str:
@@ -93,6 +111,8 @@ def apply_quota(payee: Mapping, amount_cents: int, base_tier: str, *,
     """
     if not payee or not payee.get("is_whitelist"):
         return base_tier, ""
+    if is_expired(payee):                               # 过期 = 按普通处理（不享受免码覆盖）
+        return base_tier, "白名单已过期，按普通收款人处理，需要验证码"
     quota = payee.get("whitelist_quota")
     if quota is None:
         return _higher_tier(base_tier, TIER_L2), "该白名单收款人未设专属额度，转账需要验证码"
@@ -137,9 +157,15 @@ def assess(payee: Mapping, amount_cents: int, *, month: str | None = None) -> Ri
         return RiskDecision(decision=DECISION_NEED_OTP, tier=tier, reason=REASON_NON_WHITELIST,
                             facts=base_facts)
 
+    facts = {**base_facts, "whitelist_expire": payee.get("whitelist_expire")}
+    if is_expired(payee):                               # 过期 → 降级为普通收款人（要验证码）
+        return RiskDecision(decision=DECISION_NEED_OTP, tier=_higher_tier(tier, TIER_L2),
+                            reason=REASON_EXPIRED, facts=facts,
+                            message="白名单已过期，按普通收款人处理，需要验证码")
+
     remaining = payee_dao.remaining_quota_cents(dict(payee), month or month_prefix())
     quota = payee.get("whitelist_quota")
-    facts = {**base_facts, "whitelist_quota": quota, "quota_remaining": remaining}
+    facts = {**facts, "whitelist_quota": quota, "quota_remaining": remaining}
     if quota is None:
         return RiskDecision(decision=DECISION_NEED_OTP, tier=tier, reason=REASON_NO_QUOTA,
                             facts=facts)
