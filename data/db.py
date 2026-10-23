@@ -48,6 +48,7 @@ TABLES: tuple[str, ...] = (
     "idempotency",
     "rate_limit",
     "scheduled_transfer",                     # F16：定时转账预约（惰性结算，见 data/schema.sql）
+    "gift_order",                             # F20 追加：送礼订单（T38 落 / T37 查）
 )
 
 

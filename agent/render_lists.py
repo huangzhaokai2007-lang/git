@@ -22,7 +22,7 @@ from tools.subscription import (
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "TemplateError",
            "anomaly_line", "card_line", "payee_row", "render_all_products", "render_anomalies",
-           "render_cards", "render_holdings", "render_payees", "render_schedules",
+           "render_cards", "render_gift_orders", "render_holdings", "render_payees", "render_schedules",
            "render_subscriptions", "render_wealth", "subscription_line", "wealth_line"]
 
 # ---------------- 异常检测（F03） ----------------
@@ -309,10 +309,26 @@ def render_payees(facts: Mapping) -> str:
 
 # ---------------- 预约列表（F16 追加：查预约 · T24 只读） ----------------
 
-T_SCHEDULE_EMPTY = "您还没有待执行的预约。可以说「明天九点给王五转 100 元」来预约。"
+T_SCHEDULE_EMPTY = "您还没有待执行的预约。说清「哪天、给谁、转多少」，我就帮您预约。"
 T_SCHEDULE_HEAD = "您共有 {total_count} 条预约："
 T_SCHEDULE_TABLE_HEAD = "| 预约时间 | 收款人 | 金额（元） | 状态 |"
 T_SCHEDULE_TABLE_SEP = "| --- | --- | --- | --- |"
+
+T_GIFT_ORDER_EMPTY = "您还没有送礼订单。说清送给谁、什么场合、预算多少，我就帮您挑礼物下单。"
+T_GIFT_ORDER_HEAD = "您共有 {total_count} 笔送礼订单："
+T_GIFT_ORDER_TABLE_HEAD = "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |"
+T_GIFT_ORDER_TABLE_SEP = "| --- | --- | --- | --- | --- |"
+
+
+def render_gift_orders(facts: Mapping) -> str:
+    """`gift_order_list` 回执（T37）：汇总句 + 订单表格（订单号/收货人/日期/金额/状态）。"""
+    count = int(facts["total_count"])
+    if count == 0:
+        return T_GIFT_ORDER_EMPTY
+    rows = [f"| {item['order_id']} | {item['contact']} | {item['gift_date']} | "
+            f"{item['amount_yuan']} | {item['status_cn']} |" for item in facts["items"]]
+    return "\n".join([T_GIFT_ORDER_HEAD.format(total_count=count), "",
+                      T_GIFT_ORDER_TABLE_HEAD, T_GIFT_ORDER_TABLE_SEP, *rows])
 #: 状态中文（纯文案，不含数字；未知状态原样透传，不猜）
 _SCHEDULE_STATUS_CN = {"pending": "待执行", "success": "已执行",
                        "failed": "执行失败", "cancelled": "已取消"}

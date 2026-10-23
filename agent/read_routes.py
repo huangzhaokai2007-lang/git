@@ -15,6 +15,7 @@ from __future__ import annotations
 from typing import Callable
 
 from tools import _transfer_schedule as scheduled
+from tools import _gift_order as gift_order
 from tools import payee, query, subscription, wealth
 from tools.card_query import list_cards
 from tools.schemas import ToolResult
@@ -51,4 +52,6 @@ TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
     #: F16 追加（用户需求「查一下我的预约」）：T24 `list_scheduled`，L0 只读、无槽位
     #: （不传 = 全部状态）。预约表的渲染在 `render_lists.render_schedules`。
     "scheduled_list": ("list_scheduled", lambda s: scheduled.list_scheduled()),
+    #: F20 追加（用户需求「我的送礼订单」）：T37 `list_gift_orders`，L0 只读、槽位只有 status（可选）。
+    "gift_order_list": ("list_gift_orders", lambda s: gift_order.list_gift_orders(s.get("status"))),
 }

@@ -1,0 +1,96 @@
+"""F20 追加：**送礼订单号 + 状态**（T38 落订单 / T37 查订单）。
+
+| 验收点 | 用例 |
+|---|---|
+| T38：锁款成功后落 `created` 订单，返回订单号 | `test_record_order_after_plan` |
+| T37：列出本人订单；状态取值非法 → 拒绝 | `test_list_orders_and_bad_status` |
+| 编排层：送礼计划确认后回执带订单号，且能查到 | `test_orchestration_gift_creates_queryable_order` |
+| 订单列表渲染：空 → 引导句；有 → 表格五列 | `test_render_gift_orders` |
+"""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from agent import confirm_card, llm, orchestrator, render_lists, session_memory
+from tests.conftest import count, raw
+from tools import _gift_order as orders
+
+SESSION = "sess-giftorder"
+CONTACT = "王五"
+
+
+@pytest.fixture()
+def wired(seeded, monkeypatch, clock):
+    monkeypatch.setattr(confirm_card, "_now", clock)
+    confirm_card.reset_state()
+    session_memory.reset()
+    yield seeded
+    confirm_card.reset_state()
+    session_memory.reset()
+
+
+def _fake(monkeypatch, intent: str, slots: dict | None = None) -> None:
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": intent, "confidence": 0.95,
+                                          "slots": slots or {}, "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+
+
+def test_record_order_after_plan(wired) -> None:
+    """T38：只落快照（不重复锁款），状态 created。"""
+    before = raw(wired, "SELECT available FROM account WHERE type = 'savings'")[0]["available"]
+    result = orders.record_gift_order("plan_1", "lock_1", CONTACT, "2026-10-30",
+                                      50_000, 30_000,
+                                      [{"item_id": "g_1", "name": "鲜花", "price": 30_000}])
+    assert result.ok is True and result.data["status"] == "created"
+    assert result.data["order_id"].startswith("ord_")
+    assert raw(wired, "SELECT available FROM account WHERE type = 'savings'")[0]["available"] == before
+    row = raw(wired, "SELECT * FROM gift_order WHERE id = ?", (result.data["order_id"],))[0]
+    assert row["contact"] == CONTACT and row["total"] == 30_000 and row["status"] == "created"
+    assert json.loads(row["items_json"])[0]["item_id"] == "g_1"
+
+
+def test_list_orders_and_bad_status(wired) -> None:
+    assert orders.list_gift_orders().facts["total_count"] == 0
+    orders.record_gift_order("plan_2", "lock_2", CONTACT, "2026-11-01", 50_000, 20_000,
+                             [{"item_id": "g_2", "name": "蛋糕", "price": 20_000}])
+    listed = orders.list_gift_orders()
+    assert listed.facts["total_count"] == 1
+    assert listed.facts["items"][0]["status_cn"] == "已下单"
+    assert orders.list_gift_orders("paid").facts["total_count"] == 0     # 状态筛选
+    assert orders.list_gift_orders("bogus").ok is False                  # 非法状态
+
+
+def test_orchestration_gift_creates_queryable_order(wired, monkeypatch) -> None:
+    """送礼计划确认后：回执带订单号，且能被「查订单」查回来。"""
+    _fake(monkeypatch, "gift_plan", {"contact": CONTACT, "date": "2026-10-30", "budget": "500"})
+    card = orchestrator.handle("给王五送个生日礼物，预算 500 元", session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states and card.tier == "L2"
+    otp_stage = orchestrator.handle("确认", session_id=SESSION)
+    assert "验证码" in otp_stage.reply
+    done = orchestrator.handle("123456", session_id=SESSION)
+    assert done.executed is True and "订单号 ord_" in done.reply
+    assert count(wired, "gift_order") == 1
+
+    _fake(monkeypatch, "gift_order_list")
+    listed = orchestrator.handle("我的送礼订单", session_id=SESSION)
+    assert listed.intent == "gift_order_list" and "list_gift_orders" in listed.tool_calls
+    assert "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |" in listed.reply
+    assert CONTACT in listed.reply and "已下单" in listed.reply
+
+
+def test_render_gift_orders() -> None:
+    """空 → 引导句（不印空表）；有 → 五列表格。"""
+    empty = render_lists.render_gift_orders({"total_count": 0, "items": []})
+    assert "还没有送礼订单" in empty and "|" not in empty
+    text = render_lists.render_gift_orders({"total_count": 1, "items": [
+        {"order_id": "ord_abc", "contact": "王五", "gift_date": "2026-10-30",
+         "amount_yuan": "300.00", "status": "created", "status_cn": "已下单"}]})
+    assert "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |" in text
+    assert "ord_abc" in text and "已下单" in text and "300.00" in text

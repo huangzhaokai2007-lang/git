@@ -119,6 +119,18 @@ def _execute_gift(confirmation: confirm_card.Confirmation, otp: str | None) -> T
     这也是 F20 设计 Q4 要改写路径签名的原因。
     """
     del otp
-    return cross_scene.plan_gift(str(confirmation.filled["contact"]),
+    result = cross_scene.plan_gift(str(confirmation.filled["contact"]),
                                  str(confirmation.filled["date"]),
                                  int(confirmation.amount_cents))
+    if result.ok:                                        # F20 追加（T38）：落一条可查的订单
+        from tools import _gift_order
+        facts = result.facts or {}
+        order = _gift_order.record_gift_order(
+            str(facts.get("plan_id") or ""), str(facts.get("lock_id") or ""),
+            str(facts.get("contact") or ""), str(facts.get("date") or ""),
+            int(facts.get("budget") or 0), int(facts.get("total") or 0),
+            list(facts.get("items") or []))
+        if order.ok:
+            result = result.model_copy(update={
+                "message": f"{result.message} 订单号 {order.data['order_id']}。"})
+    return result

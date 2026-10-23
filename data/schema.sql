@@ -85,3 +85,15 @@ CREATE TABLE scheduled_transfer (                 -- F16：定时转账预约（
   fail_reason TEXT,                               -- 失败原因码（INSUFFICIENT_FUNDS 等）
   repeat_cycle TEXT                               -- 循环预约：weekly | monthly；NULL = 一次性（T34 设/T35 续期）
 );
+CREATE TABLE gift_order (                         -- F20 追加：送礼订单（T16 锁款成功后由 T38 落一条）
+  id TEXT PRIMARY KEY,                            -- ord_<uuid12>
+  user_id TEXT NOT NULL,
+  contact TEXT NOT NULL,                          -- 收货人
+  gift_date TEXT NOT NULL,                        -- 送达日期（ISO 日期）
+  budget INTEGER NOT NULL,                        -- 预算，单位分
+  total INTEGER NOT NULL,                         -- 实际合计，单位分
+  items_json TEXT NOT NULL,                       -- 清单快照 [{item_id,name,price}]
+  status TEXT NOT NULL,                           -- created | paid | cancelled | failed
+  plan_id TEXT, lock_id TEXT,                     -- T16 的 plan/lock（追溯用）
+  created_at TEXT NOT NULL
+);
