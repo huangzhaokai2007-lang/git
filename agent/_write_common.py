@@ -65,6 +65,9 @@ class ShapeResult:
     error_code: str | None = None
     message: str = ""
     clarify: str = ""                 # 缺槽时的具体追问（F17：收款人候选）；空 = 用通用模板追问
+    #: 收款人**同名多命中**时的候选（`[{id,name,phone}]`）—— 界面据此出「解析卡」让人挑
+    #: （设计 §3 关卡 1：「命中多个 → 出解析卡」）。空 = 无需选择。
+    candidates: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)

@@ -97,7 +97,8 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
         else:
             filled["amount_cents"] = cents
     clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify,
+                       candidates=list(payee_facts.get("candidates") or []))
 
 
 def _prepare_transfer(filled: dict) -> Prepared:

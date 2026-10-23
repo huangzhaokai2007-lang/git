@@ -26,7 +26,7 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
     `allow_blacklisted` 供「加黑/解除黑名单」这类**管理状态**的意图用：黑名单的人也要
     能被解析出来（转账路径里黑名单是 FORBIDDEN，这里不是）。
     """
-    filled, missing, clarify = dict(slots), [], ""
+    filled, missing, clarify, candidates = dict(slots), [], "", []
     if not filled.get("payee_id"):
         query = _payee_query(filled.get("payee"))
         person, code, facts = payee_resolve.resolve_or_explain(
@@ -36,11 +36,12 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
                                message=str(facts.get("message") or ""))
         if person is None:
             missing.append("payee")
+            candidates = list(facts.get("candidates") or [])      # 同名多命中 → 界面出解析卡
             clarify = payee_clarify.ask_for(facts, ["payee"])
         else:
             filled["payee_id"] = person["payee_id"]
             filled["masked_phone"] = person["masked_phone"]
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify, candidates=candidates)
 
 
 def _shape_whitelist(slots: Mapping) -> ShapeResult:

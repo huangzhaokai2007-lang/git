@@ -1,0 +1,47 @@
+"""收款人**解析卡**（web）：同名多命中时列出候选，点一位就带着 id 继续。
+
+设计 §3 关卡 1：「命中多个 → 出解析卡」。本层只渲染 `agent/payee_picker` 的待选快照，
+选完交回 `write_flow.start`（**不再二次解析** —— 人已经由用户点明）。
+
+分层：只调 `agent/`，不碰 `tools/`/`data/`、不写业务。
+"""
+
+from __future__ import annotations
+
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import streamlit as st
+
+from agent import payee_picker, write_flow
+
+
+def _record(step: write_flow.Step, summary: str) -> None:
+    """把选择后的回执记进会话（与 app._ask 同口径）。"""
+    state = st.session_state
+    text = step.reply or step.ask or ""
+    state["messages"].append({"role": "assistant", "text": text, "turn": None})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+
+
+def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+    """有同名候选就渲染解析卡；没有则什么都不画。"""
+    pending = executor.submit(payee_picker.pending, session_id).result()
+    if not pending:
+        return
+    candidates = list(pending.get("candidates") or [])
+    if not candidates:
+        return
+    with st.container(border=True):
+        st.markdown(f"##### 🔍 找到 {len(candidates)} 个同名收款人，请选择")
+        st.caption("点「选这位」会带着这个人的 id 继续，不再二次解析。")
+        for item in candidates:
+            left, right = st.columns([3, 1], vertical_alignment="center")
+            left.markdown(f"**{item['name']}** · `{item['phone']}`")
+            if right.button("选这位", key=f"pick-{item['id']}", width="content"):
+                picked = executor.submit(payee_picker.pick, session_id, item["id"]).result()
+                if picked is not None:
+                    intent, slots = picked
+                    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+                    _record(step, f"（解析卡选择：{item['name']}）")
+                st.rerun()

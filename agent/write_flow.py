@@ -30,7 +30,7 @@ from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import card_draft, confirm_card, templates, write_intents
+from agent import card_draft, confirm_card, payee_picker, templates, write_intents
 from guard import permission
 
 logger = logging.getLogger(__name__)
@@ -269,11 +269,14 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
         return Step(states=["SLOT_FILL"], intent=intent)
     shaped = spec.shape(slots)
+    payee_picker.clear(session_id)                                     # 任何一次新解析都先清旧待选
     if shaped.error_code:                                              # 零命中 → 报错（不猜）
         return Step(states=["SLOT_FILL"], intent=intent, result="error",
                     error_code=shaped.error_code,
                     reply=templates.tool_error(shaped.error_code, shaped.message))
     if shaped.missing:                                                 # 缺槽 → 追问，不猜
+        if shaped.candidates:                                          # 同名多命中 → 界面出**解析卡**
+            payee_picker.capture(session_id, intent, dict(slots), shaped.candidates)
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=shaped.clarify or None)      # F17：描述符给了更具体的追问就用它
     filled = shaped.filled

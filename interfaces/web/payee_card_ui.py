@@ -174,35 +174,39 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         kind = ("whitelist" if person["is_whitelist"]
                 else "blacklist" if person["blacklist"] else "normal")
         tags = f" 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
+        #: 按钮**带 payee_id 直达**：同名收款人（种子里有两个李四）不该再触发解析追问 ——
+        #: 用户在看到卡片时已经知道是谁了（按键就是在这个人那一行）
+        who = {"payee_id": person["payee_id"], "payee": person["name"],
+               "masked_phone": person["masked_phone"]}
         left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
             [3.4, 0.75, 0.75, 0.75, 0.75], vertical_alignment="center")
         left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
                       f"{tags}")
         if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
                                help=f"给 {person['name']} 转账"):
-            _dispatch_start(executor, session_id, "transfer_single", {"payee": person["name"]},
+            _dispatch_start(executor, session_id, "transfer_single", who,
                             f"（按钮）给{person['name']}转账")
             st.rerun()
         if not person["is_whitelist"] and not person["blacklist"]:
             if whitelist_btn.button("加白", key=f"wl-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 加入白名单（需验证码）"):
-                _dispatch_start(executor, session_id, "payee_whitelist",
-                                {"payee": person["name"]}, f"（按钮）把{person['name']}加入白名单")
+                _dispatch_start(executor, session_id, "payee_whitelist", who,
+                                f"（按钮）把{person['name']}加入白名单")
                 st.rerun()
         if kind == "normal":                              # 只有**普通**收款人能拉黑（白名单先移出）
             if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 加入黑名单（之后转账/送礼被拒）"):
-                _dispatch_start(executor, session_id, "payee_blacklist",
-                                {"payee": person["name"]}, f"（按钮）把{person['name']}加入黑名单")
+                _dispatch_start(executor, session_id, "payee_blacklist", who,
+                                f"（按钮）把{person['name']}加入黑名单")
                 st.rerun()
         elif person["blacklist"]:
             if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}", width="content",
                                     help=f"把 {person['name']} 移出黑名单（需验证码）"):
-                _dispatch_start(executor, session_id, "payee_unblacklist",
-                                {"payee": person["name"]}, f"（按钮）把{person['name']}移出黑名单")
+                _dispatch_start(executor, session_id, "payee_unblacklist", who,
+                                f"（按钮）把{person['name']}移出黑名单")
                 st.rerun()
         if delete_btn.button("删除", key=f"del-{person['payee_id']}", width="content",
                              help=f"删除收款人 {person['name']}（需确认）"):
-            _dispatch_start(executor, session_id, "payee_delete",
-                            {"payee": person["name"]}, f"（按钮）删除收款人{person['name']}")
+            _dispatch_start(executor, session_id, "payee_delete", who,
+                            f"（按钮）删除收款人{person['name']}")
             st.rerun()
