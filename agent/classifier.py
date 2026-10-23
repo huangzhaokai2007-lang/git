@@ -75,7 +75,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "wealth_redeem": ("product", "amount"),
     "wealth_holdings": (),          # T26 list_holdings（无入参）
     "wealth_all_products": (),      # T27 list_all_products（无入参）                             # T15 trade_wealth
-    "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
+    "gift_plan": ("contact", "date", "budget", "platform", "address", "order_no"),  # T16 plan_gift（2026-10-24 补三项）
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
     "payee_whitelist": ("payee", "expire", "quota"),                                         # T25 set_payee_whitelist（L2）
@@ -195,6 +195,8 @@ SYSTEM_PROMPT = (
     "（仅展示、不参与风控）；没说就不填（长期有效）。\n"
     "transfer_scheduled 的 `repeat` 槽位：用户说「每个月/每月末/每周」这类**循环**时填原话"
     "（例如「每个月月末给房东转 3000」→ repeat=「每个月月末」）；没说就不填（一次性预约）。\n"
+    "gift_plan 的补充槽位：platform（平台，如「京东」）、ddress（收货地址）、"
+    "order_no（平台订单号，作幂等键）—— 用户说了才填，没说就留空。\n"
     "payee_tags（改标签）：「给王五加上标签房东」「李四的标签改成同事」。`tags` 填原话。\n"
     "payee_whitelist_edit（修改白名单信息）：「把王五的额度改成 5000」「白名单有效期改到 2026-12-31」；"
     "`quota` 填元、`expire` 填日期原话。payee_whitelist_remove（移出白名单）：「把王五移出白名单」。\n"

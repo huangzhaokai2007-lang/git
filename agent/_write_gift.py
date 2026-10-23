@@ -98,6 +98,11 @@ def _prepare_gift(filled: dict) -> Prepared:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     facts = dict(preview.facts)
     facts["target_name"] = str(filled["contact"])     # 卡面主对象（`Confirmation.target_name` 取它）
+    #: 2026-10-24：平台 / 收货地址 / 平台订单号进**事实包** —— 卡面要印它们，
+    #: 而数字护栏要求「卡面上的数字必须能在 facts 里找到」（订单号里全是数字）。
+    for key in ("platform", "address", "order_no"):
+        if filled.get(key):
+            facts[key] = str(filled[key])
     return Prepared(ok=True, facts=facts, credential="")     # T16 无凭证参数
 
 
@@ -117,6 +122,9 @@ def _card_gift(intent: str, filled: dict, facts: Mapping, tier: str,
               ("合计", f"{facts['total_yuan']} 元"),
               ("可用余额", f"{facts['available_yuan']} 元"),
               ("账户余额", f"{facts['balance_yuan']} 元"),
+              *([("平台", str(filled["platform"]))] if filled.get("platform") else []),
+              *([("收货地址", str(filled["address"]))] if filled.get("address") else []),
+              *([("平台订单号", str(filled["order_no"]))] if filled.get("order_no") else []),
               ("资金说明", "锁定只减可用余额，账户余额不变（不是支出）")],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], GIFT_CN))
@@ -147,7 +155,10 @@ def _execute_gift(confirmation: confirm_card.Confirmation, otp: str | None) -> T
             str(facts.get("plan_id") or ""), str(facts.get("lock_id") or ""),
             str(facts.get("contact") or ""), str(facts.get("date") or ""),
             int(facts.get("budget") or 0), int(facts.get("total") or 0),
-            list(facts.get("items") or []))
+            list(facts.get("items") or []),
+            platform=str(confirmation.filled.get("platform") or ""),
+            address=str(confirmation.filled.get("address") or ""),
+            platform_order_no=str(confirmation.filled.get("order_no") or ""))
         if order.ok:
             result = result.model_copy(update={
                 "message": f"{result.message} 订单号 {order.data['order_id']}。"})

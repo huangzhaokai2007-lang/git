@@ -112,3 +112,42 @@ def test_gift_rejects_blacklisted_contact(wired, monkeypatch) -> None:
     assert "黑名单" in result.reply and "总是赖账" in result.reply
     assert count(wired, "gift_order") == before                  # 没有落单
     assert raw(wired, "SELECT COUNT(*) AS n FROM gift_order")[0]["n"] == before
+
+
+# ---------------- 2026-10-24 人类规格：平台 / 收货地址 / 订单号幂等 ----------------
+
+def test_order_no_is_idempotent(wired) -> None:
+    """同一个平台订单号第二次下单 → 直接拒（幂等键）。"""
+    first = orders.record_gift_order("plan_a", "lock_a", CONTACT, "2026-10-30", 50_000, 30_000,
+                                     [{"item_id": "g1", "name": "香水", "price": 30_000}],
+                                     platform="京东", address="上海市****路 1 号",
+                                     platform_order_no="JD20261024001")
+    assert first.ok is True
+    dup = orders.record_gift_order("plan_b", "lock_b", CONTACT, "2026-10-31", 50_000, 20_000,
+                                   [{"item_id": "g2", "name": "蛋糕", "price": 20_000}],
+                                   platform="京东", platform_order_no="JD20261024001")
+    assert dup.ok is False and "已存在送礼计划" in dup.message
+    assert raw(wired, "SELECT COUNT(*) AS n FROM gift_order")[0]["n"] == 1
+
+
+def test_platform_and_address_are_kept(wired) -> None:
+    """平台/地址/订单号落库并能查回来。"""
+    orders.record_gift_order("plan_c", "lock_c", CONTACT, "2026-11-01", 50_000, 20_000,
+                             [{"item_id": "g3", "name": "鲜花", "price": 20_000}],
+                             platform="京东", address="北京市****街 8 号",
+                             platform_order_no="JD20261024002")
+    item = orders.list_gift_orders().facts["items"][0]
+    assert item["platform"] == "京东" and item["address"] == "北京市****街 8 号"
+    assert item["platform_order_no"] == "JD20261024002"
+
+
+def test_gift_card_shows_platform_and_order_no(wired, monkeypatch) -> None:
+    """卡面印「平台 / 收货地址 / 平台订单号」（说了才印）。"""
+    _fake(monkeypatch, "gift_plan",
+          {"contact": CONTACT, "date": "2026-10-30", "budget": "500",
+           "platform": "京东", "address": "上海市****路 1 号", "order_no": "JD20261024003"})
+    card = orchestrator.handle(
+        "我想 2026-10-30 在京东给王五买一瓶 399 的香水，送到上海市****路 1 号，订单号 JD20261024003",
+        session_id=SESSION)
+    assert "CONFIRM_CARD" in card.states
+    assert "平台：京东" in card.reply and "收货地址" in card.reply and "JD20261024003" in card.reply

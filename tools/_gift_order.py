@@ -41,7 +41,7 @@ class GiftOrderItem(BaseModel):
 
 
 class RecordGiftOrderReq(BaseModel):
-    """T38 入参（F20 追加）。"""
+    """T38 入参（F20 追加；2026-10-24 补平台/地址/订单号）。"""
 
     plan_id: str
     lock_id: str
@@ -50,6 +50,9 @@ class RecordGiftOrderReq(BaseModel):
     budget: int = Field(ge=0)
     total: int = Field(ge=0)
     items: list[GiftOrderItem]
+    platform: str = ""
+    address: str = ""
+    platform_order_no: str = ""
 
 LIST_TOOL, RECORD_TOOL = "list_gift_orders", "record_gift_order"
 #: 订单状态（与 `schema.sql` 的注释一致）
@@ -61,14 +64,26 @@ STATUS_CN = {"created": "待支付", "paid": "已支付", "shipped": "已发货"
 
 
 def record_gift_order(plan_id: str, lock_id: str, contact: str, gift_date: str,
-                      budget: int, total: int, items: list[dict]) -> ToolResult:
+                      budget: int, total: int, items: list[dict],
+                      platform: str = "", address: str = "",
+                      platform_order_no: str = "") -> ToolResult:
     """T38 落一条送礼订单（**T16 锁款成功后**由编排层调）。`data` = `{order_id, status, total}`。
 
     只落**快照**（清单/预算/合计），不重复锁款、不改余额 —— 钱在 T16 已锁。
     """
     if (bad := _invalid(RecordGiftOrderReq, plan_id=plan_id, lock_id=lock_id, contact=contact,
-                        gift_date=gift_date, budget=budget, total=total, items=items)) is not None:
+                        gift_date=gift_date, budget=budget, total=total, items=items,
+                        platform=platform, address=address,
+                        platform_order_no=platform_order_no)) is not None:
         return bad
+    order_no = str(platform_order_no or "").strip()
+    if order_no:                                       # 人类规格：订单号作**幂等键**，重复直接拒
+        dup = dao.connection().execute(
+            "SELECT id FROM gift_order WHERE user_id = ? AND platform_order_no = ?",
+            (current_user_id(), order_no)).fetchone()
+        if dup is not None:
+            return _fail(ErrorCode.INVALID_STATE,
+                         f"该订单已存在送礼计划（订单号 {order_no}），不能重复下单")
     user_id = current_user_id()
     try:
         require_owned("该用户的送礼订单", DEMO_USER_ID, user_id,
@@ -82,9 +97,12 @@ def record_gift_order(plan_id: str, lock_id: str, contact: str, gift_date: str,
     with transaction(conn):
         conn.execute(
             "INSERT INTO gift_order (id, user_id, contact, gift_date, budget, total, items_json,"
-            " status, plan_id, lock_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, ?)",
+            " status, plan_id, lock_id, created_at, platform, address, platform_order_no)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 'created', ?, ?, ?, ?, ?, ?)",
             (order_id, user_id, contact, gift_date, int(budget), int(total), payload,
-             plan_id, lock_id, datetime.datetime.now().isoformat(timespec="seconds")))
+             plan_id, lock_id, datetime.datetime.now().isoformat(timespec="seconds"),
+             str(platform or "").strip() or None, str(address or "").strip() or None,
+             order_no or None))
         dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
                          intent="gift_plan", tool=RECORD_TOOL,
                          params_json={"order_id": order_id, "contact": contact, "total": int(total)},
@@ -115,6 +133,8 @@ def list_gift_orders(status: str | None = None) -> ToolResult:
                                                           params)]
     items = [{"order_id": row["id"], "contact": row["contact"], "gift_date": row["gift_date"],
               "total": row["total"], "status": row["status"],
+              "platform": row["platform"] or "", "address": row["address"] or "",
+              "platform_order_no": row["platform_order_no"] or "",
               "status_cn": STATUS_CN.get(row["status"], row["status"]),
               "amount_yuan": f"{row['total'] / 100:.2f}"} for row in rows]
     return _ok({"items": items, "total_count": len(items)},
