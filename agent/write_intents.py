@@ -53,18 +53,23 @@ from agent._write_gift import (
 )
 from agent._write_payee import (
     _card_blacklist,
+    _card_delete,
     _card_unblacklist,
     _card_whitelist,
     _execute_blacklist,
+    _execute_delete,
     _execute_unblacklist,
     _execute_whitelist,
     _plain_blacklist,
+    _plain_delete,
     _plain_unblacklist,
     _plain_whitelist,
     _prepare_blacklist,
+    _prepare_delete,
     _prepare_unblacklist,
     _prepare_whitelist,
     _shape_blacklist,
+    _shape_delete,
     _shape_unblacklist,
     _shape_whitelist,
 )
@@ -191,6 +196,15 @@ _SPECS["payee_unblacklist"] = WriteSpec(
     target_key="payee_id",
     what="解除黑名单", shape=_shape_unblacklist, prepare=_prepare_unblacklist,
     card=_card_unblacklist, plain=_plain_unblacklist, execute=_execute_unblacklist)
+
+#: F22e（T30）：删除收款人 —— **L1、无 OTP**。删的是联系人、不动钱（与加黑同档）。
+_SPECS["payee_delete"] = WriteSpec(
+    intent="payee_delete", intent_cn="删除收款人", title="删除收款人确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_payees",), execute_tool="delete_payee",
+    target_key="payee_id",
+    what="删除收款人", shape=_shape_delete, prepare=_prepare_delete,
+    card=_card_delete, plain=_plain_delete, execute=_execute_delete)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

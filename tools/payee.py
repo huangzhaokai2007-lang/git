@@ -103,6 +103,40 @@ def add_payee(name: str, phone: str) -> ToolResult:
     return _ok(_payload(row), _facts(row), f"已添加 {clean_name}（{masked}）")
 
 
+# ---------------- T30 delete_payee（SPEC-CHANGE 新增 · L1） ----------------
+#
+# 档位口径：删除收款人 = 移走一位**联系人**，不动钱、不授特权 → L1 确认卡、无 OTP
+# （与加黑同档）。历史流水**不删**（审计可回溯），`txn.payee_id` 成为悬空引用、
+# 额度聚合按 id 自然匹配不到 —— 口径已写进 payee_dao 的注释。
+
+def delete_payee(payee_id: str) -> ToolResult:
+    """T30 删除收款人（L1）。`data` = `{payee_id, name, masked_phone, deleted}`。
+
+    归属 fail-closed；重复删除（已被删）→ `NOT_FOUND`；白名单/黑名单状态随行一并消失。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id, tool="delete_payee", intent="payee_delete")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    row = dict(row)
+    from data.db import transaction                    # 局部 import：与 payee_status 同口径
+    with transaction(dao.connection()):
+        dao.connection().execute("DELETE FROM payee WHERE id = ? AND user_id = ?",
+                                 (payee_id, user_id))
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_delete", tool="delete_payee",
+                         params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    data = {"payee_id": row["id"], "name": row["name"], "masked_phone": row["phone"],
+            "deleted": True}
+    return _ok(data, {"name": row["name"], "masked_phone": row["phone"]},
+               f"已删除收款人 {row['name']}（{row['phone']}）")
+
+
 # ---------------- T20 list_payees（查看白名单 · SPEC-CHANGE 新增，L0 只读） ----------------
 
 #: 归属过滤写在 SQL 里（fail-closed）；白名单优先 + 姓名/编号稳定排序，渲染层直接照抄顺序、不重排。

@@ -176,11 +176,10 @@ def get_product(product_id: str) -> dict | None:
 
 def insert_txn(account_id: str, ts: str, amount: int, direction: str, balance_after: int, *,
                counterparty: str | None = None, category: str | None = None,
-               channel: str | None = None, memo: str | None = None, id: str | None = None) -> dict:
+               channel: str | None = None, memo: str | None = None, id: str | None = None,
+               payee_id: str | None = None) -> dict:  # payee_id：v2 转账域回填，额度按 id 聚合
     """写一条流水（整数分；`in` 必须为正、`out` 必须为负），返回写入后整行。
-
-    `balance_after` 由**调用方**算好（DAO 不记账、不动 account 余额）；`memo` 是不可信文本，
-    原样入库、包裹在编排层（铁律 7）；`id` 缺省自动生成，传了即作为幂等键。
+    `balance_after` 由**调用方**算好；`memo` 是不可信文本、原样入库（铁律 7）；`id` 缺省自动生成、传了即作为幂等键。
     """
     cents = _cents(amount, "amount")
     if cents == 0:
@@ -193,7 +192,8 @@ def insert_txn(account_id: str, ts: str, amount: int, direction: str, balance_af
               _text(counterparty, "counterparty", allow_none=True),
               _text(category, "category", allow_none=True),
               _text(channel, "channel", allow_none=True),
-              _text(memo, "memo", allow_none=True), _cents(balance_after, "balance_after"))
+              _text(memo, "memo", allow_none=True), _cents(balance_after, "balance_after"),
+              _text(payee_id, "payee_id", allow_none=True))
     return _insert("txn", _TXN_COLUMNS, values, str(values[0]), skip_ts=ts is None)
 
 

@@ -32,7 +32,7 @@ INTENT_LABELS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -42,7 +42,7 @@ IntentLabel = Literal[
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -79,6 +79,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "payee_whitelist": ("payee",),                                         # T25 set_payee_whitelist（L2）
     "payee_blacklist": ("payee",),                                         # T28 set_payee_blacklist（L1）
     "payee_unblacklist": ("payee",),                                       # T29 unset_payee_blacklist（L2）
+    "payee_delete": ("payee",),                                            # T30 delete_payee（L1）
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
@@ -172,6 +173,9 @@ SYSTEM_PROMPT = (
     "payee_unblacklist（解除黑名单）的判定：「把王小明移出黑名单」「解除对X的拉黑」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_add 的区分：只是新增联系人不是它，"
     "要**恢复**一个被拉黑的人才是 payee_unblacklist。\n"
+    "payee_delete（删除收款人）的判定：「把王小明删掉」「删除收款人张三」都判它；"
+    "`payee` 槽位填收款人姓名或手机号。与 payee_blacklist 的区分：拉黑是禁止转账、"
+    "删除是把联系人整个移走（历史流水保留），要**移除联系人**才是 payee_delete。\n"
     "transfer_scheduled（定时/预约转账）的判定：**只要句子里出现任何未来时间就判它** —— "
     "「明天」「下周一」「2026-10-21」「2026-10-21 09:00」都算；"
     "**即使同时给了收款人和金额，也仍然判 transfer_scheduled**（这一点极易判错），"

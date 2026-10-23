@@ -187,3 +187,52 @@ def _execute_unblacklist(confirmation: confirm_card.Confirmation, otp: str | Non
     """EXECUTE：调 **T29**（OTP 已由 `write_flow` 校验；工具层只认 `confirm_ref`）。"""
     del otp
     return payee.unset_payee_blacklist(str(confirmation.target_id), confirmation.credential)
+
+
+# ---------------- 删除收款人（T30 · L1 确认卡、无 OTP） ----------------
+
+#: 档位：删除收款人 = 移走一位**联系人**，不动钱、不授特权 → L1、无 OTP（与加黑同档）
+DELETE_TIER = "L1"
+
+#: 同一套解析关卡；**允许解析已拉黑的人**（删除对谁都允许）
+_shape_delete = lambda slots: _resolve_shape(slots, allow_blacklisted=True)
+
+
+def _prepare_delete(filled: dict) -> Prepared:
+    """只读 T20 取那一笔（**不写库**）；白名单/黑名单现状要带进卡面讲清。"""
+    listed = payee.list_payees()
+    if not listed.ok:
+        return Prepared(ok=False, error_code=_code_of(listed), message=listed.message)
+    row = next((i for i in (listed.facts.get("items") or [])
+                if i.get("payee_id") == filled.get("payee_id")), None)
+    if row is None:
+        return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该收款人")
+    profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
+    kind = ("白名单" if profile.get("is_whitelist")
+            else "黑名单" if profile.get("blacklist") else "普通")
+    return Prepared(ok=True, facts={**row, "kind": kind, "tier": DELETE_TIER}, credential="")
+
+
+def _card_delete(intent: str, filled: dict, facts: Mapping, tier: str,
+                 requires_otp: bool) -> confirm_card.CardInput:
+    """删除确认卡：谁 + 现状 + **影响**（历史流水保留、需重新添加才能再转）。"""
+    return confirm_card.CardInput(
+        title="删除收款人确认卡", intent_cn="删除收款人",
+        rows=[("收款人", str(facts["name"])),
+              ("手机号", str(facts["masked_phone"])),
+              ("现状", str(facts["kind"])),
+              ("影响", "删除后无法再给他转账，需重新添加；历史流水保留、仍可查询")],
+        tier=tier, requires_otp=requires_otp,
+        risk_note=confirm_card.risk_note([], "删除收款人"))
+
+
+def _plain_delete(filled: dict, facts: Mapping, tier: str) -> str:
+    """纯事实版确认文本（降级回执）。"""
+    return (f"请确认：删除收款人 {facts.get('name')}（{facts.get('masked_phone')}，"
+            f"{facts.get('kind')}），权限档 {tier}。删除后需重新添加才能再给他转账。")
+
+
+def _execute_delete(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
+    """EXECUTE：调 **T30** 落库（只删联系人，不动历史流水）。"""
+    del otp
+    return payee.delete_payee(str(confirmation.target_id))

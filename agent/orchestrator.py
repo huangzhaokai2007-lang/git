@@ -242,7 +242,11 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         return _finish(ctx, templates.refuse(screen.reason), result="rejected")
     if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类
         ctx.intent = inflight
-        return _apply(ctx, write_flow.resume(ctx.session_id, text))
+        #: S5 可编辑卡片：非确认回复先当成「改卡」试一次（同意图才合并旧卡字段重走校验）
+        resolver = intent_resolver or classifier.classify
+        return _apply(ctx, write_flow.resume(
+            ctx.session_id, text,
+            classify=lambda t: resolver(_with_date_context(t), history)))
     ctx.enter("CLASSIFY")
     verdict = (intent_resolver or classifier.classify)(_with_date_context(text), history)
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence

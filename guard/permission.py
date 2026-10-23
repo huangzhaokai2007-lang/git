@@ -47,6 +47,7 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "payee_whitelist": "L2",          # F22b SPEC-CHANGE：白名单 = 转账免 OTP 的特权，授予它必须验身份
     "payee_blacklist": "L1",          # F22c SPEC-CHANGE：加黑是「阻断」不是「授权」，无 OTP
     "payee_unblacklist": "L2",      # F22d SPEC-CHANGE：解除黑名单必须验证码确认（人类需求原文）
+    "payee_delete": "L1",           # F22e SPEC-CHANGE：删除收款人只移联系人、不动钱（与加黑同档）
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）

@@ -36,6 +36,7 @@ import card_lock_ui as locks_ui                                  # noqa: E402
 import payee_card_ui                                             # noqa: E402  （S6：收款人卡）
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
+import card_edit_ui                                             # noqa: E402  （S5：可编辑卡片）
 
 load_dotenv(ROOT / ".env")
 
@@ -230,6 +231,7 @@ def _chat_page() -> None:
             ui.bill_panel(ui.bill_series(messages), latest)
     _render_pending()
     _render_confirm()
+    card_edit_ui.render(_agent_executor(), st.session_state["session_id"])   # S5：可编辑卡片面板
     #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
     #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
     _render_forms()
