@@ -174,9 +174,25 @@ def _plain_aa(filled: dict, facts: Mapping, tier: str) -> str:
 def _execute_aa(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
     """真发起：按人金额 → **T31**；一键均摊 → **T9**（签名冻结，按人金额走新工具）。"""
     del otp
-    per_person = confirmation.filled.get("per_person_cents")
+    filled = confirmation.filled
+    payee_ids = list(filled.get("payee_ids") or [])
+    per_person = list(filled.get("per_person_cents") or [])
     if per_person:
-        return _aa_split.create_aa_request_with_amounts(
-            list(confirmation.filled.get("payee_ids") or []), list(per_person))
-    return transfer.create_aa_request(list(confirmation.filled.get("payee_ids") or []),
-                                      int(confirmation.amount_cents))
+        result = _aa_split.create_aa_request_with_amounts(payee_ids, per_person)
+        amount_cents = per_person
+    else:
+        result = transfer.create_aa_request(payee_ids, int(confirmation.amount_cents))
+        total = int(confirmation.amount_cents)
+        base, rest = divmod(total, max(len(payee_ids), 1))
+        amount_cents = [base] * len(payee_ids)
+        if amount_cents:                       # 余数记到第一份（与 T9 的分摊口径一致）
+            amount_cents[0] += rest
+    if result.ok:                              # T41：把 AA 变成可跟踪的请求（24h 有效）
+        from tools import _aa_request
+        opened = _aa_request.open_aa_request(payee_ids, amount_cents, int(sum(amount_cents)),
+                                             "custom" if per_person else "equal",
+                                             str(filled.get("title") or "AA 收款"))
+        if opened.ok:
+            result = result.model_copy(update={
+                "message": f"{result.message}（AA 单号 {opened.data['request_id']}，24 小时内有效）"})
+    return result

@@ -97,3 +97,22 @@ CREATE TABLE gift_order (                         -- F20 追加：送礼订单�
   plan_id TEXT, lock_id TEXT,                     -- T16 的 plan/lock（追溯用）
   created_at TEXT NOT NULL
 );
+CREATE TABLE aa_request (                         -- F22 追加：AA 收款请求（T41 落 / T42 查 / T43 已付 / T44 撤销）
+  id TEXT PRIMARY KEY,                            -- aa_<uuid12>
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,                            -- 事由（如「周末聚餐」）
+  total INTEGER NOT NULL,                         -- 合计，单位分
+  split_mode TEXT NOT NULL,                       -- equal | custom
+  status TEXT NOT NULL,                           -- active | done | expired | cancelled
+  created_at TEXT NOT NULL,
+  expire_at TEXT NOT NULL                         -- 创建时刻 + 24h（ISO；到点惰性判 expired）
+);
+CREATE TABLE aa_share (                           -- AA 里每个收款人一份（每人已付状态）
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  payee_id TEXT NOT NULL,
+  payee_name TEXT NOT NULL,                       -- 快照（收款人改名/删除也能查）
+  amount INTEGER NOT NULL,                        -- 该人应收，单位分
+  status TEXT NOT NULL,                           -- pending | paid
+  paid_at TEXT
+);

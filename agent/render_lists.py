@@ -22,7 +22,8 @@ from tools.subscription import (
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "TemplateError",
            "anomaly_line", "card_line", "payee_row", "render_all_products", "render_anomalies",
-           "render_cards", "render_gift_orders", "render_holdings", "render_payees", "render_schedules",
+           "render_aa_requests", "render_cards", "render_gift_orders", "render_holdings", "render_payees",
+           "render_schedules",
            "render_subscriptions", "render_wealth", "subscription_line", "wealth_line"]
 
 # ---------------- 异常检测（F03） ----------------
@@ -315,6 +316,23 @@ T_SCHEDULE_TABLE_HEAD = "| 预约时间 | 收款人 | 金额（元） | 状态 |
 T_SCHEDULE_TABLE_SEP = "| --- | --- | --- | --- |"
 
 T_GIFT_ORDER_EMPTY = "您还没有送礼订单。说清送给谁、什么场合、预算多少，我就帮您挑礼物下单。"
+
+T_AA_EMPTY = "您还没有 AA 收款记录。可以说「向王五和赵六 AA 收款 300 元」来发起。"
+T_AA_HEAD = "您共有 {total_count} 笔 AA 收款："
+T_AA_TABLE_HEAD = "| 事由 | 合计（元） | 已付 | 状态 | 截止 |"
+T_AA_TABLE_SEP = "| --- | --- | --- | --- | --- |"
+
+
+def render_aa_requests(facts: Mapping) -> str:
+    """`aa_list` 回执（T42）：汇总句 + AA 表格（事由/合计/已付人数/状态/截止）。"""
+    count = int(facts["total_count"])
+    if count == 0:
+        return T_AA_EMPTY
+    rows = [f"| {item['title']} | {item['total_yuan']} | "
+            f"{item['paid_count']}/{item['share_count']} 人 | {item['status_cn']} | "
+            f"{item['expire_at']} |" for item in facts["items"]]
+    return "\n".join([T_AA_HEAD.format(total_count=count), "",
+                      T_AA_TABLE_HEAD, T_AA_TABLE_SEP, *rows])
 T_GIFT_ORDER_HEAD = "您共有 {total_count} 笔送礼订单："
 T_GIFT_ORDER_TABLE_HEAD = "| 订单号 | 收货人 | 送达日期 | 金额（元） | 状态 |"
 T_GIFT_ORDER_TABLE_SEP = "| --- | --- | --- | --- | --- |"

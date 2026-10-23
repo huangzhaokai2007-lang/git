@@ -32,7 +32,7 @@ INTENT_LABELS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -42,7 +42,7 @@ IntentLabel = Literal[
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "aa_list", "aa_mark_paid", "aa_cancel", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -87,6 +87,9 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "gift_order_list": ("status",),                                        # T37 查订单（可选状态筛选）
     "gift_order_cancel": ("order_id",),                                    # T39 取消订单
     "gift_order_pay": ("order_id",),                                       # T40 支付订单
+    "aa_list": ("status",),                                                # T42 查 AA（可选状态）
+    "aa_mark_paid": ("payee",),                                            # T43 登记某人已付
+    "aa_cancel": (),                                                       # T44 撤销 AA
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
@@ -184,6 +187,9 @@ SYSTEM_PROMPT = (
     "（仅展示、不参与风控）；没说就不填（长期有效）。\n"
     "transfer_scheduled 的 `repeat` 槽位：用户说「每个月/每月末/每周」这类**循环**时填原话"
     "（例如「每个月月末给房东转 3000」→ repeat=「每个月月末」）；没说就不填（一次性预约）。\n"
+    "aa_list（查 AA）的判定：「我的 AA」「AA 收款进行中」「谁还没付」都判它；`status` 说了才填。"
+    "aa_mark_paid（登记已付）：「赵六付了」「把张三标成已付」；`payee` 填那个人。"
+    "aa_cancel（撤销 AA）：「把那个 AA 撤了」；与 aa_collect（新建）划清。\n"
     "gift_order_cancel / gift_order_pay（订单状态流转）的判定：「取消那个礼物订单」→"
     "gift_order_cancel；「把礼物订单支付了」→ gift_order_pay；`order_id` 只在用户报了订单号时填。"
     "gift_order_list（查送礼订单）的判定：「我的送礼订单」「订单到哪了」「查一下订单」都判它；"

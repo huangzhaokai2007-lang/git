@@ -28,7 +28,7 @@ def test_connect_db_defaults_to_env_db_path(tmp_path: Path, monkeypatch: pytest.
     try:
         assert dao.connection().execute(
             "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        ).fetchone()["n"] == 14
+        ).fetchone()["n"] == 16
         assert dao.get_balance("savings") is None
     finally:
         dao.close()

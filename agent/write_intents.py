@@ -51,6 +51,16 @@ from agent._write_gift import (
     _prepare_gift,
     _shape_gift,
 )
+from agent._write_aa_ops import (
+    _card as _card_aa_op,
+    _execute_cancel as _execute_aa_cancel,
+    _execute_mark_paid as _execute_aa_mark_paid,
+    _plain as _plain_aa_op,
+    _prepare_cancel as _prepare_aa_cancel,
+    _prepare_mark_paid as _prepare_aa_mark_paid,
+    _shape_cancel as _shape_aa_cancel,
+    _shape_mark_paid as _shape_aa_mark_paid,
+)
 from agent._write_gift_ops import (
     _card as _card_gift_order,
     _execute_cancel as _execute_gift_cancel,
@@ -263,6 +273,24 @@ _SPECS["gift_order_pay"] = WriteSpec(
     target_key="order_id",
     what="支付订单", shape=_shape_gift_order, prepare=_prepare_gift_pay,
     card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_pay)
+
+#: F22 追加（T43）：**登记某人已付** —— L1（只改 AA 的份额状态，不动钱）。
+_SPECS["aa_mark_paid"] = WriteSpec(
+    intent="aa_mark_paid", intent_cn="登记已付", title="登记已付确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_aa_requests",), execute_tool="mark_aa_share_paid",
+    target_key="request_id",
+    what="登记已付", shape=_shape_aa_mark_paid, prepare=_prepare_aa_mark_paid,
+    card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_mark_paid)
+
+#: F22 追加（T44）：**撤销 AA** —— L1（已登记的付款记录保留）。
+_SPECS["aa_cancel"] = WriteSpec(
+    intent="aa_cancel", intent_cn="撤销 AA", title="撤销 AA 确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("request_id",), tools=("list_aa_requests",), execute_tool="cancel_aa_request",
+    target_key="request_id",
+    what="撤销 AA", shape=_shape_aa_cancel, prepare=_prepare_aa_cancel,
+    card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_cancel)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

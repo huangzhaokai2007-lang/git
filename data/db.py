@@ -49,6 +49,8 @@ TABLES: tuple[str, ...] = (
     "rate_limit",
     "scheduled_transfer",                     # F16：定时转账预约（惰性结算，见 data/schema.sql）
     "gift_order",                             # F20 追加：送礼订单（T38 落 / T37 查）
+    "aa_request",                             # F22 追加：AA 收款请求（T41 落 / T42 查 / T44 撤销）
+    "aa_share",                               # F22 追加：AA 每人的应收与已付状态（T43 标已付）
 )
 
 

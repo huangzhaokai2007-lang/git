@@ -97,7 +97,7 @@ def row_counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 def test_all_tables_exist_after_init(conn: sqlite3.Connection) -> None:
     assert table_names(conn) == set(TABLES)
-    assert len(TABLES) == 14                    # 卡 14b：+idempotency +rate_limit；F16：+scheduled_transfer；F20：+gift_order
+    assert len(TABLES) == 16                    # 卡 14b：+idempotency +rate_limit；F16：+scheduled_transfer；F20：+gift_order
 
 
 @pytest.mark.parametrize("table", sorted(EXPECTED_COLUMN_COUNTS))
