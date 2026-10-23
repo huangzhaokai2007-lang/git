@@ -21,10 +21,23 @@ from tools.subscription import (
 )
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "TemplateError",
-           "anomaly_line", "card_line", "payee_row", "render_all_products", "render_anomalies",
-           "render_aa_requests", "render_cards", "render_gift_orders", "render_holdings", "render_payees",
-           "render_schedules",
-           "render_subscriptions", "render_wealth", "subscription_line", "wealth_line"]
+           "anomaly_line", "badge", "card_line", "payee_row", "render_all_products",
+           "render_anomalies", "render_aa_requests", "render_cards", "render_gift_orders",
+           "render_holdings", "render_payees", "render_schedules", "render_subscriptions",
+           "render_wealth", "subscription_line", "wealth_line"]
+
+#: **状态徽章**（v3 清单「每张卡的状态徽章」）：状态码 → emoji。
+#: 覆盖仓内三套状态机的全部取值（AA 4 · 预约 4 · 送礼订单 4），共 9 个码；
+#: **只做视觉标记**，不改任何判定（中文仍由各渲染器自己的词表给）。
+_STATUS_EMOJI = {"active": "⏳", "done": "✅", "expired": "⌛", "cancelled": "⛔",
+                 "created": "🧾", "paid": "✅", "pending": "⏳", "success": "✅",
+                 "failed": "⚠️"}
+
+
+def badge(status: object, label: str) -> str:
+    """把「状态中文」包成带 emoji 的徽章；认不出的状态原样返回（不猜）。"""
+    emoji = _STATUS_EMOJI.get(str(status or ""), "")
+    return f"{emoji} {label}".strip()
 
 # ---------------- 异常检测（F03） ----------------
 #: facts 键见 `tools/query.py` T4（`scanned_count` / `anomaly_count` / `items[]`）。
@@ -329,7 +342,8 @@ def render_aa_requests(facts: Mapping) -> str:
     if count == 0:
         return T_AA_EMPTY
     rows = [f"| {item['title']} | {item['total_yuan']} | "
-            f"{item['paid_count']}/{item['share_count']} 人 | {item['status_cn']} | "
+            f"{item['paid_count']}/{item['share_count']} 人 | "
+            f"{badge(item['status'], item['status_cn'])} | "
             f"{item['expire_at']} |" for item in facts["items"]]
     return "\n".join([T_AA_HEAD.format(total_count=count), "",
                       T_AA_TABLE_HEAD, T_AA_TABLE_SEP, *rows])
@@ -344,7 +358,8 @@ def render_gift_orders(facts: Mapping) -> str:
     if count == 0:
         return T_GIFT_ORDER_EMPTY
     rows = [f"| {item['order_id']} | {item['contact']} | {item['gift_date']} | "
-            f"{item['amount_yuan']} | {item['status_cn']} |" for item in facts["items"]]
+            f"{item['amount_yuan']} | {badge(item['status'], item['status_cn'])} |"
+            for item in facts["items"]]
     return "\n".join([T_GIFT_ORDER_HEAD.format(total_count=count), "",
                       T_GIFT_ORDER_TABLE_HEAD, T_GIFT_ORDER_TABLE_SEP, *rows])
 #: 状态中文（纯文案，不含数字；未知状态原样透传，不猜）
@@ -362,7 +377,8 @@ def render_schedules(facts: Mapping) -> str:
     if count == 0:
         return T_SCHEDULE_EMPTY
     rows = [f"| {str(item['execute_at']).replace('T', ' ')} | {item['payee_name']} | "
-            f"{item['amount_yuan']} | {_SCHEDULE_STATUS_CN.get(str(item['status']), item['status'])} |"
+            f"{item['amount_yuan']} | "
+            f"{badge(item['status'], _SCHEDULE_STATUS_CN.get(str(item['status']), item['status']))} |"
             for item in facts["items"]]
     return "\n".join([T_SCHEDULE_HEAD.format(total_count=count), "",
                       T_SCHEDULE_TABLE_HEAD, T_SCHEDULE_TABLE_SEP, *rows])
