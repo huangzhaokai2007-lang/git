@@ -51,9 +51,13 @@ uv run streamlit run interfaces/web/app.py
 
 ```bash
 uv run python scripts/demo.py --quick
+uv run streamlit run interfaces/web/app_offline.py   # 网页聊天框的离线入口（无 key 时不会全答"没太理解"）
 uv run pytest -q
 bash scripts/verify.sh
 ```
+
+> 没配 `.env` 时直接跑 `interfaces/web/app.py`，分类器会一律回落 `out_of_scope`——功能齐全但**演不出来**。
+> 要看对话框请用 `app_offline.py`（同一套工具层，只把"理解意图"换成关键词替身）。
 
 Windows 的 `bash` 请使用 Git Bash。离线演示与测试使用模型替身；不等同于真实模型联调。
 
