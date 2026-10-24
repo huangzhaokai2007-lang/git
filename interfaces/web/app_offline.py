@@ -30,7 +30,7 @@ def dates_from_text(text: str) -> dict:
     """从话里抽 F02 的 `date_from` / `date_to`（离线演示用，**非**业务实现）。
 
     支持：「2026-08-01 到 2026-08-31」「8月1日到8月31日」「上个月」「本月」
-    「最近 N 天」「最近」。
+    「最近 N 天」「最近」。相对说法一律以**数据锚点**为今天（`agent.period.anchor_date`）。
     """
     iso = re.findall(r"(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})", text)
     if len(iso) >= 2:                                            # 一对完整日期 → 直接用
@@ -49,7 +49,13 @@ def dates_from_text(text: str) -> dict:
         return {"date_from": f"{y}-{m:02d}-01",
                 "date_to": f"{y}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}"}
 
-    today = date.today()
+    #: ⚠️ **不许用 `date.today()`**：真实时钟跑在 2026-10，而合成数据窗口的末月是 2026-08
+    #: （锚点 `AS_OF` = 2026-09-12）→ 「上个月」解析成 2026-09 → 一笔都没有，演示当场翻车。
+    #: 全系统的口径是「锚点即今天」（orchestrator 也是这么告诉模型的），这里必须同一个锚点。
+    #: 局部 import：本文件被 streamlit 直接加载，模块级 import 时 `sys.path` 还没配好。
+    from agent.period import anchor_date
+
+    today = anchor_date()
     if "上上个月" in text:
         y, m = (today.year, today.month - 2) if today.month > 2 else (today.year - 1, today.month + 10)
         return whole_month(y, m)

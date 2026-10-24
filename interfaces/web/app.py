@@ -17,6 +17,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any, Mapping
 
 import streamlit as st
 
@@ -34,6 +35,7 @@ import card_binding_ui as cards_ui                               # noqa: E402
 import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
 import payee_card_ui                                             # noqa: E402  （S6：收款人卡）
+import insight_card_ui                                          # noqa: E402  （卡 25：对话内图表 + 追问按钮）
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
 import card_edit_ui                                             # noqa: E402  （S5：可编辑卡片）
@@ -43,7 +45,13 @@ load_dotenv(ROOT / ".env")
 PAGES = ("💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡")
 PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = ("您好，我是**模拟银行**智能体（全部为合成数据）。试试：「上个月花了多少」「给王五转 100 元」"
-            "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景。")
+            "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景或**一键演示**。")
+
+#: 一键演示的话术顺序（= 本次提交要展示的五张任务卡，按"先看钱、再看流水、再看分析、再看风险、
+#: 最后出报告"的顺序排）。每句话都走**同一个** `orchestrator.handle` 入口，与手打输入完全同路；
+#: 措辞取离线替身也能命中的说法（见 `app/cli.py: OFFLINE_RULES`），没配模型 key 时照演。
+DEMO_SCRIPT = ("查一下余额", "上个月的流水", "上个月花了多少",
+               "上个月有没有异常交易", "上个月的账单总结")
 
 #: 追问续接要带多少条历史（用户话与助手回执交替）。**追问的上下文必须让分类器看到** ——
 #: 例如「列出两个李四」那一句，否则用户只回一个「1001」时会被判成 smalltalk。
@@ -133,6 +141,21 @@ def _ask(text: str, *, display: str | None = None) -> None:
         state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})
 
 
+def _follow_up(prompt: str) -> None:
+    """富卡片上的追问按钮：替用户把这句话**再问一遍**编排层（同一入口），然后 rerun。
+
+    不绕过任何一层：意图识别 → 槽位 → 权限 → 工具 → 数字校验 → 回执，与打字输入完全同路；
+    界面不知道自己在问什么业务，只知道"用户点了这个按钮"。
+    """
+    _ask(prompt)
+    st.rerun()
+
+
+def _insight_card(turn: Mapping[str, Any], key: str) -> bool:
+    """`ui.transcript` 的注入点：最后一条助手回执画富卡片（画不出来 → 纯文本照常）。"""
+    return insight_card_ui.render(turn, key=key, on_ask=_follow_up)
+
+
 def _cancel(confirmation) -> None:
     """取消这笔写操作：只清 agent 层的会话确认态 —— 不调工具、不执行（铁律 3）。"""
     confirm_card.clear(confirmation.session_id)
@@ -207,6 +230,12 @@ def _sidebar() -> str:
                 st.session_state["navigate-page"] = PAGES[0]
             _ask(prompt)
             st.rerun()
+        if st.button("🎬 一键演示（五连问 · 供录屏）", key="demo-run", width="stretch"):
+            st.session_state["demo-queue"] = list(DEMO_SCRIPT)
+            st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
+            st.session_state["navigate-page"] = PAGES[0]
+            st.rerun()
+        st.caption("一键演示会**清空当前对话**，再按顺序把上面五句话逐条问给编排层。")
         st.divider()
         st.caption(f"会话 `{st.session_state['session_id']}` · 已处理 {len(st.session_state['turns'])} 次请求")
         if st.button("🧹 重置会话态", key="reset-session", width="stretch"):
@@ -223,8 +252,15 @@ def _sidebar() -> str:
 
 
 def _chat_page() -> None:
+    #: 一键演示的推进：**每次 rerun 只问一句**。五句一起刷出来看着像预渲染好的截图，
+    #: 一条条自己冒出来才像真对话 —— 录屏要的就是这个"在跑"的观感。
+    queue = list(st.session_state.get("demo-queue") or ())
+    if queue:
+        st.session_state["demo-queue"] = queue[1:]
+        _ask(queue[0])
+        st.rerun()
     messages = st.session_state["messages"]
-    ui.transcript(messages, payee_card=payee_ui.render_payee_card)
+    ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card)
     latest = ui.latest_bill(messages)
     if latest.get("categories"):
         with st.expander("📊 这份账单的图表", expanded=True):

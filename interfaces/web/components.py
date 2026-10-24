@@ -61,15 +61,20 @@ def sim_banner() -> None:
 
 
 def transcript(messages: Sequence[Mapping[str, Any]],
-               *, payee_card: Callable[[str], bool] | None = None) -> None:
+               *, payee_card: Callable[[str], bool] | None = None,
+               insight_card: Callable[[Mapping[str, Any], str], bool] | None = None) -> None:
     """聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。
 
     `payee_card` 由 `app.py` 注入（`payee_card_ui.render_payee_card`）：「查看白名单」（T20）的
     回执优先画成卡片。**画不出来（返回 False）就回退纯文本** —— 美化不许把回执吞掉。
+    `insight_card`（`insight_card_ui.render`）同理：**只给最后一条**助手回执画富卡片
+    （图表 + 追问按钮）—— 历史消息每张都画会把对话撑爆，且每次 rerun 都要重画一遍图。
+
     用注入、而不是本模块顶层 import 同目录模块：本模块会被 `tests/test_web_layering.py`
     **按文件路径**加载，那时 `sys.path` 里没有 `interfaces/web`，顶层 import 会直接炸。
     """
-    for message in messages:
+    last = len(messages) - 1
+    for index, message in enumerate(messages):
         with st.chat_message(message["role"]):
             turn = message.get("turn")
             drawn = (payee_card is not None and message["role"] == "assistant"
@@ -80,6 +85,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
             if turn is not None:
                 st.caption(f"trace_id `{turn['trace_id']}` · 意图 `{turn['intent']}` · "
                            f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
+                if insight_card is not None and message["role"] == "assistant" and index == last:
+                    insight_card(turn, f"insight-{index}")
 
 
 def scenes() -> str | None:

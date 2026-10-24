@@ -35,7 +35,7 @@ import logging
 import uuid
 from typing import Callable, Mapping
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, session_memory, templates, write_flow
 from agent.period import anchor_period, resolve_day, resolve_period
@@ -98,6 +98,11 @@ class Turn(BaseModel):
     executed: bool = False             # 卡 10：**只有**工具层执行成功才为 True
     pending_id: str | None = None      # 卡 10：L3 待复核编号（可撤销）
     error_code: str | None = None
+    #: 只读回执的**事实包**（`ToolResult.facts` 原样透出）：界面要画图表、要给按钮带真实 id，
+    #: 不该再去正则反解回执文本（那三条正则绑死在文案上，改一句措辞就断链 —— 见
+    #: `interfaces/web/components.py` 的 `parse_bill`）。**只对只读路径填充**，写路径恒为空；
+    #: 它不是工具契约的一部分，HTTP API 的冻结 6 字段（`interfaces/api/app.py`）不含它。
+    facts: dict = Field(default_factory=dict)
 
 
 class _Ctx:
@@ -113,6 +118,10 @@ class _Ctx:
         self.tier: str | None = None                 # 卡 10：权限档（guard 判定）
         self.executed = False                        # 卡 10：工具层执行成功才置 True
         self.pending_id: str | None = None           # 卡 10：L3 待复核编号
+        #: 卡 25：只读路径的**事实包**（`ToolResult.facts` 原样透出），给界面画图表/挂按钮用。
+        #: 写路径与各种提前返回的路径恒为 `{}` —— 只有**工具真的执行成功**才填，避免界面拿
+        #: 到半成品数据画出空图。
+        self.facts: dict = {}
 
     def enter(self, state: str) -> None:
         """进入一个状态（规格 §4 的状态名；顺序在返回结果里可查，便于断言「不可跳步」）。"""
@@ -162,7 +171,7 @@ def _finish(ctx: _Ctx, reply: str, *, result: str, tool: str | None = None,
     return Turn(trace_id=ctx.trace_id, intent=ctx.intent, confidence=ctx.confidence, states=ctx.states,
                 tool_calls=ctx.tool_calls, missing_slots=ctx.missing, reply=reply, ask=ask,
                 degraded=degraded, to_human=to_human, error_code=error_code, tier=ctx.tier,
-                executed=ctx.executed, pending_id=ctx.pending_id)
+                executed=ctx.executed, pending_id=ctx.pending_id, facts=ctx.facts)
 
 
 def _write_audit(ctx: _Ctx, *, tool: str | None, result: str, error_code: str | None) -> None:
@@ -296,5 +305,9 @@ def _read_flow(ctx: _Ctx, *, card_reader: Callable[[dict], ToolResult] | None = 
                        tool=name, error_code=code)
     ctx.enter("VERIFY_NUMBERS")
     reply, degraded, _attempts = templates.compose_reply(ctx.intent, ctx.slots, result)
+    #: 卡 25：工具执行成功 → 事实包透出给界面（界面据此画图/挂按钮，不必正则反解回执文本）。
+    #: 放在 compose_reply **之后**：回执文案里的每一个数字都已由 facts_check 校验过，
+    #: 此刻 facts 与 reply 是同一份事实的两种表现，界面画出来的图必然与文字一致。
+    ctx.facts = dict(result.facts or {})
     return _finish(ctx, reply, result="success", tool=name,
                    error_code="HALLUCINATION_BLOCKED" if degraded else None, degraded=degraded)

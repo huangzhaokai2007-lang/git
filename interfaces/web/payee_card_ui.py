@@ -4,7 +4,9 @@ CLI / API / IM 拿到的仍是同一份**文本回执**（`agent/render_lists.re
 本模块只在 Streamlit 里把那张表画成卡片，不改 agent/ 的任何一行。
 
 **为什么解析回执、不重新取数**（分层 + 数字纪律）：
-- `interfaces/` 只能调 `agent/`，**不许**直接调 `tools/`；`orchestrator.Turn` 也不携带 facts；
+- `interfaces/` 只能调 `agent/`，**不许**直接调 `tools/`；白名单卡片是 T20 时写的，那时
+  `orchestrator.Turn` 还不携带 facts（卡 25 起只读路径带了 —— 新写的图表卡片走 facts，
+  见 `insight_card_ui`，本卡仍按老口径解析回执，两种都合法，先例不强制回改）；
 - 仓内先例：`components.parse_bill` 同样是「编排层回执文本 → 绘图坐标」的解析（见 components 的
   docstring 第 6–7 行）；
 - 卡片里的每个字都**从回执里照抄**（姓名 / 脱敏手机号 / 银行 / 是否白名单），不重算、不补数（铁律 2）。
