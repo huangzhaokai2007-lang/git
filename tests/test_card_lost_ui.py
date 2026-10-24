@@ -17,7 +17,7 @@ def test_ambiguous_loss_offers_both_paths(monkeypatch, seeded, text):
 
 def test_replacement_steps_disclose_scope_and_do_not_execute(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    click(at, '💳 管卡')
+    click(at, '管卡')
     bind(at)
     at.chat_input[0].set_value('确定被偷了，要补一张').run()
     assert not at.exception
@@ -41,7 +41,7 @@ def test_replacement_steps_disclose_scope_and_do_not_execute(monkeypatch, seeded
 
 def test_temporary_lock_has_detailed_notice(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    click(at, '💳 管卡')
+    click(at, '管卡')
     bind(at)
     click(at, '临时锁卡')
     click(at, '锁定 6222 **** **** 0001')
@@ -53,7 +53,7 @@ def test_temporary_lock_has_detailed_notice(monkeypatch, seeded):
 def test_verified_application_reaches_pending_then_success(monkeypatch, seeded):
     from tools import card_lost
     at = app(monkeypatch, seeded)
-    click(at, '💳 管卡')
+    click(at, '管卡')
     bind(at)
     click(at, '挂失并补卡')
     click(at, '办理 6222 **** **** 0001')

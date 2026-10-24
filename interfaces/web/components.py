@@ -16,7 +16,8 @@ from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
-from interfaces.web.scenes import SCENES    # 场景文案拆出（本文件已贴 300 行红线）
+from interfaces.web.scenes import SCENES, SCENE_ICONS    # 场景文案拆出（本文件已贴 300 行红线）
+from interfaces.web.theme import CSS
 
 #: 顶部合规标注（卡 16 第 5 条）
 SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银行，无真实用户 / 账户 / 资金 / 卡号。"
@@ -26,22 +27,6 @@ SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银�
 #: 分类器会填中文槽位（'储蓄卡'/'credit_card'），而工具层的 `account_type` 只认 savings|credit，
 #: 编排层没有这层归一化 → 工具直接 INVALID_ARGUMENT。这是 agent/ 层缺口，见交付说明「待拍板」。
 BALANCE_PROMPT = "查一下余额"
-
-CSS = """<style>
-.st-key-credit-limit-panel h3{font-size:1.2rem;padding:.15rem 0 .3rem}
-.sim-banner{background:#fff4e5;border:1px solid #ffd8a8;border-radius:10px;padding:8px 14px;
-            color:#8a5a00;font-size:13px;font-weight:700}
-ul.tl{list-style:none;margin:0;padding:0 0 0 4px}
-ul.tl li{border-left:2px solid #d7dbe0;padding:0 0 10px 16px;margin-left:6px;position:relative}
-ul.tl li:last-child{border-left-color:transparent;padding-bottom:0}
-ul.tl .dot{position:absolute;left:-7px;top:4px;width:12px;height:12px;border-radius:50%;background:#1a73e8}
-ul.tl .k{font-weight:700;color:#202124;font-size:13px}
-ul.tl .v{color:#3c4043;font-size:14px;word-break:break-word}
-.tl-meta{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#5f6368}
-.chip{display:inline-block;background:#e8f0fe;color:#1a73e8;border-radius:999px;
-      padding:0 8px;margin-right:4px;font-size:11px}
-</style>"""
-
 
 def _esc(value: object) -> str:
     """HTML 转义（用户输入与回执都可能带尖括号）。"""
@@ -70,7 +55,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
     **按文件路径**加载，那时 `sys.path` 里没有 `interfaces/web`，顶层 import 会直接炸。
     """
     for message in messages:
-        with st.chat_message(message["role"]):
+        with st.chat_message(message["role"], avatar=":material/person:" if message["role"] == "user" else ":material/auto_awesome:"):
             turn = message.get("turn")
             drawn = (payee_card is not None and message["role"] == "assistant"
                      and (turn or {}).get("intent") == "payee_list"
@@ -82,24 +67,30 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                            f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
 
 
+def _activate_scene(index: int) -> None:
+    st.session_state["active-scene"] = index
+
+
 def scenes() -> str | None:
     """快捷场景按钮：返回被点的那句话（没点 → None）。"""
     clicked: str | None = None
-    columns = st.columns(2)
     for index, (label, prompt) in enumerate(SCENES):
-        if columns[index % 2].button(label, key=f"scene-{index}", width="stretch"):
-            clicked = prompt
+        active = st.session_state.get("active-scene") == index
+        with st.container(key=f"scene-active-{index}" if active else f"scene-item-{index}"):
+            if st.button(label, icon=SCENE_ICONS[index], key=f"scene-{index}",
+                         width="stretch", on_click=_activate_scene, args=(index,)):
+                clicked = prompt
     return clicked
 
 
 def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
     """侧边栏账户余额：只回显 agent 给过的余额回执（数字来自事实包）。返回是否点了刷新。"""
     if not replies:
-        st.caption("还没有余额记录 —— 点下面的按钮让编排层去查（界面不直接读库）。")
+        st.caption("暂无余额记录，点击刷新查询。")
     for item in replies:
         st.markdown(f"- {item['text']}")
         st.caption(f"`{item['trace_id']}`")
-    return st.button("🔄 刷新余额（走编排层）", key="refresh-balance", width="stretch")
+    return st.button("刷新余额", icon=":material/refresh:", key="refresh-balance", width="stretch")
 
 
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。

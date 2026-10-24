@@ -7,12 +7,12 @@ from tests.test_card_binding_ui import app, click, fill
 from tests.conftest import raw
 
 
-@pytest.mark.parametrize("shortcut", [None, "🧾 看账单", "🧾 操作记录", "💳 管卡"])
+@pytest.mark.parametrize("shortcut", [None, "看账单", "操作记录", "管卡"])
 def test_sidebar_limit_shortcut_opens_inline_panel_after_other_shortcuts(monkeypatch, seeded, shortcut):
     at = app(monkeypatch, seeded)
     if shortcut:
         click(at, shortcut)
-    click(at, "💹 调整额度")
+    click(at, "调整额度")
     assert not at.exception
     assert not at.radio and at.chat_input
     assert any(item.value == "### 额度调整申请" for item in at.main.markdown)
@@ -25,12 +25,12 @@ def test_sidebar_limit_shortcut_opens_inline_panel_after_other_shortcuts(monkeyp
 
 def test_inline_limit_draft_allows_card_shortcut_and_operation_records(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    click(at, "💹 调整额度")
+    click(at, "调整额度")
     click(at, "固定授信额度")
-    click(at, "💳 管卡")
+    click(at, "管卡")
     assert not at.exception and at.chat_input
     assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
-    click(at, "🧾 操作记录")
+    click(at, "操作记录")
     assert any("操作记录" in item.value for item in at.main.markdown)
     assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
     click(at, "收起操作记录")
@@ -41,7 +41,7 @@ def test_inline_limit_draft_allows_card_shortcut_and_operation_records(monkeypat
 
 def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    click(at, "💳 管卡")
+    click(at, "管卡")
     assert any(tab.label == "额度调整记录" for tab in at.tabs)
     for digit in ("1", "2", "3"):
         click(at, "绑定银行卡")
@@ -50,7 +50,7 @@ def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
         click(at, "验证银行卡")
         click(at, "确认绑定")
     for digit in ("1", "2", "3"):
-        click(at, "💹 调整额度")
+        click(at, "调整额度")
         click(at, "固定授信额度")
         click(at, f"选择 {digit * 4} **** **** {digit * 4}")
         fill(at, "申请调整后的额度（元）", "30000")
@@ -67,7 +67,7 @@ def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
     future = date.fromisoformat(records[0]["created_at"][:10]) + timedelta(days=1)
     next(element for element in at.date_input if element.label == "申请日期范围").set_value((future, future)).run()
     assert not at.exception and len(at.dataframe[0].value) == 0
-    click(at, "🧹 重置会话态")
+    click(at, "重置会话")
     assert len(raw(seeded, "SELECT * FROM agent_card_limit_application")) == 3
     assert not at.exception
 
@@ -89,13 +89,13 @@ def test_chat_adjust_and_record_query_do_not_need_llm(monkeypatch, seeded, topic
 
 def test_temporary_form_wrong_otp_and_cancel_preserve_card(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    click(at, "💳 管卡")
+    click(at, "管卡")
     click(at, "绑定银行卡")
     fill(at, "模拟银行卡号", "2222222222222222")
     fill(at, "银行卡密码", "222222")
     click(at, "验证银行卡")
     click(at, "确认绑定")
-    click(at, "💹 调整额度")
+    click(at, "调整额度")
     click(at, "临时授信额度")
     click(at, "选择 2222 **** **** 2222")
     assert any(element.label == "临时额度有效天数" for element in at.number_input)

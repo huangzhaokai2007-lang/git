@@ -198,8 +198,8 @@ def _render_forms() -> None:
 def _sidebar() -> None:
     """侧边栏：账户余额 + 快捷场景 + 会话信息（页内动作全部回到编排层）。"""
     with st.sidebar:
-        st.markdown("### 🏦 AI Banking Agent")
-        st.caption("2026 FinTechathon · 自建模拟银行核心")
+        st.markdown('<div class="bank-brand"><span>◈</span><div>AI Banking Agent<small>智能银行工作台</small></div></div>', unsafe_allow_html=True)
+        st.caption("2026 FinTechathon · 模拟银行")
         st.divider()
         st.markdown("#### 账户余额")
         if ui.balance_box(st.session_state["balance"]):
@@ -214,7 +214,7 @@ def _sidebar() -> None:
                 _ask(prompt)
         st.divider()
         st.caption(f"会话 `{st.session_state['session_id']}` · 已处理 {len(st.session_state['turns'])} 次请求")
-        if st.button("🧹 重置会话态", key="reset-session", width="stretch"):
+        if st.button("重置会话", icon=":material/restart_alt:", key="reset-session", width="stretch"):
             confirm_card.reset_state()
             cards_ui.reset()
             limits_ui.reset()
@@ -281,6 +281,7 @@ def main() -> None:
         card_lost_flow.start_runner()
     _init_state()
     cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
+    st.markdown('<div class="workspace-heading"><span>个人银行 / 聊天</span><h1>银行助理</h1><p>从一句话开始，查询与办理都在这里完成。</p></div>', unsafe_allow_html=True)
     ui.sim_banner()
     _sidebar()
     _chat_page()
