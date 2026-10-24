@@ -36,20 +36,28 @@ def _row_of(payee_id: str) -> tuple[dict | None, str | None]:
     return {**row, **(profiles.get(payee_id) or {})}, None
 
 
-def _resolve(slots: Mapping) -> tuple[dict, str | None, str]:
-    """把「用户说的那个人」解析成 payee_id，并取回那一行。返回 `(filled, 错误码, 文案)`。"""
+def _resolve(slots: Mapping) -> tuple[dict, str | None, str, list[dict]]:
+    """把「用户说的那个人」解析成 payee_id。返回 `(filled, 错误码, 文案, 同名候选)`。
+
+    2026-10-24 修：同名时此前直接回「请补充收款人」，**丢了候选**（界面上没有解析卡可点）。
+    现在把候选带出来，调用方放进 `ShapeResult.candidates` → 界面出解析卡。
+    """
     filled = dict(slots)
     if not filled.get("payee_id"):
         query = _payee_query(filled.get("payee"))
         if not query:
-            return filled, None, ""
+            return filled, None, "", []
         person, code, facts = payee_resolve.resolve_or_explain(query, allow_blacklisted=True)
         if code and code != "INVALID_STATE":
-            return filled, code, str(facts.get("message") or "")
+            return filled, code, str(facts.get("message") or ""), []
         if person is None:
-            return filled, None, "找不到这位收款人"
+            candidates = [c for c in (facts.get("candidates") or []) if isinstance(c, dict)]
+            if candidates:                                 # 同名/同音多命中 → 交给解析卡
+                names = "、".join(f"{c['name']}（{c['phone']}）" for c in candidates)
+                return filled, None, f"找到 {len(candidates)} 个同名收款人，请确认是哪一位：{names}", candidates
+            return filled, None, "", []
         filled["payee_id"] = person["payee_id"]
-    return filled, None, ""
+    return filled, None, "", []
 
 
 def _iso_day(raw: object) -> str | None:
@@ -68,12 +76,13 @@ def _iso_day(raw: object) -> str | None:
 
 def _shape_edit(slots: Mapping) -> ShapeResult:
     """SLOT_FILL：谁 + **改什么**（额度 / 有效期至少一项）。"""
-    filled, code, text = _resolve(slots)
+    filled, code, text, candidates = _resolve(slots)
     if code:
         return ShapeResult(filled=filled, error_code=code, message=text)
     missing: list[str] = []
     if not filled.get("payee_id"):
         missing.append("payee")
+    picked = candidates if not filled.get("payee_id") else []
     row, row_code = _row_of(str(filled.get("payee_id") or ""))
     if row is not None and not row.get("is_whitelist"):
         return ShapeResult(filled=filled, error_code="INVALID_STATE",
@@ -86,7 +95,7 @@ def _shape_edit(slots: Mapping) -> ShapeResult:
     if "payee" not in missing and not (filled.get("quota_cents") is not None or expire):
         missing.append("quota")
     clarify = EDIT_CLARIFY if "quota" in missing else ""
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify, candidates=picked)
 
 
 def _prepare_edit(filled: dict) -> Prepared:
@@ -143,7 +152,7 @@ def _execute_edit(confirmation: confirm_card.Confirmation, otp: str | None) -> o
 # ---------------- 移除白名单（L1） ----------------
 
 def _shape_remove(slots: Mapping) -> ShapeResult:
-    filled, code, text = _resolve(slots)
+    filled, code, text, candidates = _resolve(slots)
     if code:
         return ShapeResult(filled=filled, error_code=code, message=text)
     if not filled.get("payee_id"):
@@ -190,14 +199,16 @@ def _execute_remove(confirmation: confirm_card.Confirmation, otp: str | None) ->
 # ---------------- 改备注（L1） ----------------
 
 def _shape_note(slots: Mapping) -> ShapeResult:
-    filled, code, text = _resolve(slots)
+    filled, code, text, candidates = _resolve(slots)
     if code:
         return ShapeResult(filled=filled, error_code=code, message=text)
     missing = [] if filled.get("payee_id") else ["payee"]
+    picked = [] if filled.get("payee_id") else candidates   # 同名 → 解析卡
     if "note" not in filled:
         missing.append("note")
-    return ShapeResult(filled=filled, missing=missing,
-                       clarify="请说明备注内容（例如「老同学，别转错」）。" if "note" in missing else "")
+    return ShapeResult(filled=filled, missing=missing, candidates=picked,
+                       clarify=text or ("请说明备注内容（例如「老同学，别转错」）。"
+                                        if "note" in missing else ""))
 
 
 def _prepare_note(filled: dict) -> Prepared:
@@ -252,17 +263,19 @@ def _split_tags(raw: object) -> list[str]:
 
 def _shape_tags(slots: Mapping) -> ShapeResult:
     """SLOT_FILL：谁 + 标签（说了就改，没说就问）。"""
-    filled, code, text = _resolve(slots)
+    filled, code, text, candidates = _resolve(slots)
     if code:
         return ShapeResult(filled=filled, error_code=code, message=text)
     missing = [] if filled.get("payee_id") else ["payee"]
+    picked = [] if filled.get("payee_id") else candidates   # 同名 → 解析卡
     if filled.get("tags") is None and filled.get("tag") is None:
         missing.append("tags")
     else:
         filled["tags"] = _split_tags(filled.get("tags") if filled.get("tags") is not None
                                      else filled.get("tag"))
-    return ShapeResult(filled=filled, missing=missing,
-                       clarify="请说明标签（例如「妈妈、家人」）。" if "tags" in missing else "")
+    return ShapeResult(filled=filled, missing=missing, candidates=picked,
+                       clarify=text or ("请说明标签（例如「妈妈、家人」）。"
+                                        if "tags" in missing else ""))
 
 
 def _prepare_tags(filled: dict) -> Prepared:
@@ -299,15 +312,16 @@ CARD_NO_TIER = "L1"
 
 
 def _shape_card_no(slots: Mapping) -> ShapeResult:
-    filled, code, text = _resolve(slots)
+    filled, code, text, candidates = _resolve(slots)
     if code:
         return ShapeResult(filled=filled, error_code=code, message=text)
     missing = [] if filled.get("payee_id") else ["payee"]
+    picked = [] if filled.get("payee_id") else candidates   # 同名 → 解析卡
     if not str(filled.get("card_no") or "").strip():
         missing.append("card_no")
-    return ShapeResult(filled=filled, missing=missing,
-                       clarify="请说明卡号（只保存脱敏形态，如 **** **** **** 8888）。"
-                       if "card_no" in missing else "")
+    return ShapeResult(filled=filled, missing=missing, candidates=picked,
+                       clarify=text or ("请说明卡号（只保存脱敏形态，如 **** **** **** 8888）。"
+                                        if "card_no" in missing else ""))
 
 
 def _prepare_card_no(filled: dict) -> Prepared:

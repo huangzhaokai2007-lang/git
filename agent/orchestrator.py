@@ -252,6 +252,9 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         return _apply(ctx, write_flow.resume(ctx.session_id, text, classify=lambda t: (intent_resolver or classifier.classify)(_with_date_context(t), history)))
     ctx.enter("CLASSIFY")
     verdict = (intent_resolver or classifier.classify)(_with_date_context(text), history)
+    corrected = classifier.correct_misroute(text, verdict.intent)   # 明显误判 → 纠正
+    if corrected is not None:
+        verdict = corrected
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence
     ctx.slots = dict(verdict.slots)
     if verdict.intent == "unsafe_request":

@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import re
+
 import logging
 from typing import Literal, Mapping
 
@@ -293,8 +295,100 @@ def check_structure(result: IntentOut) -> None:
         raise ClassifierOutputError(f"intent={result.intent} 出现未定义槽位：{sorted(unknown)}")
 
 
+#: 2026-10-24：**确定性快路** —— 这几类句式里有「额度/有效期」等词，容易被误判成
+#: `card_limit_adjust`（信用卡额度调整，同域不同意图）。凡明确说了「收款人/白名单/黑名单/标签
+#: /备注/卡号」的，直接判给收款人域，**不冒险交给模型**。
+_NOUNS = ("白名单", "黑名单", "专属额度", "标签", "备注", "卡号")
+#: 查询句式 —— 出现这些词就不是「改」，快路立刻放手（交给只读路径）
+_QUERY_MARKS = ("有哪些", "哪些", "多少人", "查一下", "查查", "看看", "列出", "谁", "多少")
+#: 信用卡/银行卡域 —— 别把「我的卡额度」抢过来
+_CARD_MARKS = ("信用卡", "银行卡", "我的卡", "刷卡")
+#: (名词, 必须出现的动词, 意图) —— **必须带动词**，单说「白名单」不抢
+_FAST_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("白名单", ("移出", "移除", "取消"), "payee_whitelist_remove"),
+    ("白名单", ("加入", "加进", "加白", "设为白名单"), "payee_whitelist"),
+    ("白名单", ("额度", "有效期", "改成", "修改"), "payee_whitelist_edit"),
+    ("专属额度", ("改", "修改", "调整", "设"), "payee_whitelist_edit"),
+    ("黑名单", ("移出", "移除", "解除"), "payee_unblacklist"),
+    ("拉黑", (), "payee_blacklist"),
+    ("加黑", (), "payee_blacklist"),
+    ("黑名单", ("加入", "设为"), "payee_blacklist"),
+    ("标签", ("设", "改", "加", "换"), "payee_tags"),
+    ("备注", ("加", "设", "改", "写"), "payee_note"),
+    ("卡号", ("记", "是", "设", "填"), "payee_card_no"),
+)
+
+#: 人名可能粘上的尾部动词（「王五移出」「张小美加入」「我妈加个」）——按长度倒序剥离
+_TAIL_VERBS = ("记一下", "记下", "加入", "加进", "加白", "移出", "移除", "拉黑", "加黑",
+               "设为", "改成", "改为", "加上", "加个", "设置", "记", "设")
+
+
+def _strip(text: str) -> str:
+    return str(text or "").strip(" ：:，,。 ")
+
+
+def _payee_of(text: str) -> str:
+    """人名 = 第一个「收款人域关键词」之前那一段（去掉把/给/将/的/收款人，再剥尾部动词）。"""
+    cuts = (*_NOUNS, "拉黑", "加黑")          # 拉黑/加黑也是人名后的切点
+    positions = [text.find(noun) for noun in cuts if noun in text]
+    head = text[: min(positions)] if positions else ""
+    for token in ("收款人", "把", "给", "将", "的", "，", ","):
+        head = head.replace(token, " ")
+    name = head.strip().split()[0] if head.strip() else ""
+    for verb in _TAIL_VERBS:
+        if name.endswith(verb) and len(name) > len(verb):
+            name = name[: -len(verb)]
+            break
+    return name
+
+
+def _fast_slots(intent: str, raw: str) -> dict:
+    """快路槽位：只填**能确定性给出**的（人名 / 标签 / 备注 / 卡号 / 额度 / 有效期）。"""
+    slots: dict = {}
+    payee = _payee_of(raw)
+    if payee:
+        slots["payee"] = payee
+    if intent == "payee_tags":
+        match = re.search(r"标签\s*(?:设为|改成|改为|为|=)?\s*([^，。]+)", raw)
+        slots["tags"] = _strip(match.group(1)) if match else ""
+    elif intent == "payee_note":
+        match = re.search(r"备注\s*[：:]?\s*([^。]+)", raw)
+        slots["note"] = _strip(match.group(1)) if match else ""
+    elif intent == "payee_card_no":
+        match = re.search(r"\d{12,19}", raw.replace(" ", ""))
+        slots["card_no"] = match.group() if match else ""
+    elif intent in ("payee_whitelist", "payee_whitelist_edit"):
+        quota = re.search(r"额度[^0-9]{0,6}([0-9.]+)\s*元?", raw)
+        if quota:
+            slots["quota"] = quota.group(1)
+        expire = re.search(r"有效期\s*(?:到|至|为)?\s*([^\s，。]+)", raw)
+        if expire:
+            slots["expire"] = _strip(expire.group(1))
+    return slots
+
+
+def fast_payee_intent(text: str) -> IntentOut | None:
+    """命中收款人域的确定性规则 → 直接给意图与槽位原话（不调模型）。认不出 → None。"""
+    raw = str(text or "").strip()
+    if not raw or any(mark in raw for mark in _QUERY_MARKS):
+        return None                                  # 查询类句子不进快路
+    if any(mark in raw for mark in _CARD_MARKS):
+        return None                                  # 信用卡/银行卡域不抢
+    for noun, verbs, intent in _FAST_RULES:
+        if noun not in raw:
+            continue
+        if verbs and not any(verb in raw for verb in verbs):
+            continue
+        return IntentOut(intent=intent, confidence=1.0, slots=_fast_slots(intent, raw),
+                         missing_slots=[])
+    return None
+
+
 def classify(text: str, history: list[str] | None = None) -> IntentOut:
     """意图识别 + 槽位抽取 + **槽位取值归一化**（编排层 API，非冻结工具契约）。
+
+    先走**确定性快路**（`fast_payee_intent`）：收款人域的白名单/黑名单/标签/备注/卡号
+    有明确句式时直接判，不调模型（防被误判成信用卡额度调整）。
 
     校验失败（Pydantic / 结构 / LLM 不可用）**重试一次**，再失败 → `out_of_scope`（卡 08 第 3 条）。
     本函数不判权限、不判业务、不改写 LLM 给出的 confidence；只把槽位取值归一到工具层认的枚举
@@ -309,3 +403,23 @@ def classify(text: str, history: list[str] | None = None) -> IntentOut:
         except (llm.LLMUnavailable, ValidationError, ClassifierOutputError) as exc:
             logger.warning("分类第 %s/2 次失败：%s", attempt, type(exc).__name__)
     return fallback_out_of_scope()
+
+
+#: 明显属于「信用卡/额度」域的意图 —— 只有当原话里出现收款人域动词时才纠正（防误伤）。
+_CARD_SIDE_INTENTS = frozenset({"card_limit_adjust", "card_apply", "card_query",
+                               "card_lock", "card_unlock", "card_report_lost"})
+
+
+def correct_misroute(text: str, intent: str) -> "IntentOut | None":
+    """模型把**收款人域的请求**判成了信用卡域 → 用确定性规则纠正（2026-10-24 实测踩到）。
+
+    只在「模型给了卡片域的意图 + 原话里有明确的收款人域动词」时动手；
+    其余情况一律不动（不覆盖模型的正常判断）。
+    """
+    if intent not in _CARD_SIDE_INTENTS:
+        return None
+    fast = fast_payee_intent(text)
+    if fast is None or fast.intent in _CARD_SIDE_INTENTS:
+        return None
+    logger.warning("意图纠正：%s → %s（原话含收款人域动作词）", intent, fast.intent)
+    return fast

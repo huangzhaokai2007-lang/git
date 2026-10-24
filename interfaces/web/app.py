@@ -242,7 +242,6 @@ def _chat_page() -> None:
             ui.bill_panel(ui.bill_series(messages), latest)
     audit_ui.render(_agent_executor())                            # 侧边栏：审计回放
     _render_pending()
-    _render_confirm()
     payee_picker_ui.render(_agent_executor(), st.session_state["session_id"])  # 解析卡（同名多命中）
     card_edit_ui.render(_agent_executor(), st.session_state["session_id"])   # S5：可编辑卡片面板
     #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
@@ -261,6 +260,9 @@ def _chat_page() -> None:
         aa_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-gift-query"):                  # F20：送礼查询卡 + 支付/取消
         gift_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
+    #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
+    _render_confirm()
     if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
         _ask(text)
         st.rerun()

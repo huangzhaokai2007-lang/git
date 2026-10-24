@@ -112,7 +112,7 @@ def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = Fa
     if result.ok and whitelist:                          # 勾了复选框 → 接着走 L2 确认卡
         from agent import orchestrator, write_flow
         ctx = orchestrator._Ctx(trace_id, session_id, 0)
-        slots = {"payee": name}
+        slots = {"payee_id": str(result.data["payee_id"]), "payee": name}   # 用 id 直达，不再解析
         if str(quota or "").strip():                     # 加白时一并设专属额度 / 有效期（人类原文）
             slots["quota"] = quota
         if str(expire or "").strip():
