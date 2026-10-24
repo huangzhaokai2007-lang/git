@@ -20,7 +20,8 @@ from agent._write_transfer import _payee_query
 from tools import payee, transfer
 
 EDIT_TIER, REMOVE_TIER, NOTE_TIER = "L2", "L1", "L1"
-EDIT_CLARIFY = "请说明要改什么：专属额度（例如「额度改成 5000 元」）或有效期（例如「有效期到 2026-12-31」）。"
+EDIT_CLARIFY = ("请说明要改什么：每月专属额度（例如「额度改成 5000 元」）"
+                "或有效期（例如「有效期到 2026-12-31」）。")
 
 
 def _row_of(payee_id: str) -> tuple[dict | None, str | None]:
@@ -110,10 +111,11 @@ def _prepare_edit(filled: dict) -> Prepared:
 
 def _card_edit(intent: str, filled: dict, facts: Mapping, tier: str,
                requires_otp: bool) -> confirm_card.CardInput:
-    rows = [("收款人", str(facts["name"])), ("当前专属额度", _money_label(facts.get("whitelist_quota"))),
+    rows = [("收款人", str(facts["name"])),
+            ("当前专属额度（元/月）", _money_label(facts.get("whitelist_quota"))),
             ("当前有效期", str(facts.get("whitelist_expire") or "长期有效"))]
     if facts.get("new_quota") is not None:
-        rows.append(("新的专属额度", _money_label(facts["new_quota"])))
+        rows.append(("新的专属额度（元/月）", _money_label(facts["new_quota"])))
     if facts.get("new_expire"):
         rows.append(("新的有效期", str(facts["new_expire"])))
     return confirm_card.CardInput(

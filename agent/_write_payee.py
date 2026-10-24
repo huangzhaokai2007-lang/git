@@ -118,8 +118,9 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
         rows=[("收款人", str(facts["name"])),
               ("手机号", str(facts["masked_phone"])),
               ("变更", "加入白名单"),
-              ("影响", "专属额度内转账免验证码（含深夜）；超额度仍需验证码"),
-              *([("专属额度", f"{facts['quota_cents'] / 100:.2f} 元（有效期内、额度内免验证码）")]
+              ("影响", "白名单专属额度（每月）内转账免验证码（含深夜）；超额度仍需验证码"),
+              *([("专属额度", f"{facts['quota_cents'] / 100:.2f} 元/月"
+                             "（每月重置；有效期内、额度内免验证码）")]
                 if facts.get("quota_cents") is not None else []),
               *([("有效期至", str(facts["expire"]))] if facts.get("expire") else [])],
         tier=tier, requires_otp=requires_otp,
@@ -129,7 +130,7 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
 def _plain_whitelist(filled: dict, facts: Mapping, tier: str) -> str:
     """纯事实版确认文本（降级回执）。措辞与卡面一致：额度内免码、超额度要码。"""
     return (f"请确认：把 {facts.get('name')}（{facts.get('masked_phone')}）加入白名单，"
-            f"权限档 {tier}。加入后在专属额度内给该收款人转账免验证码（超额度仍需验证码）。")
+            f"权限档 {tier}。加入后在每月专属额度内给该收款人转账免验证码（超额度仍需验证码）。")
 
 
 def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
@@ -146,7 +147,7 @@ def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None)
     if result.ok and quota is not None:                       # 专属额度（T46）
         marked = payee.set_whitelist_quota(str(confirmation.target_id), int(quota))
         if marked.ok:
-            notes.append(f"专属额度 {int(quota) / 100:.2f} 元")
+            notes.append(f"专属额度 {int(quota) / 100:.2f} 元/月（每月重置）")
     if result.ok and notes:
         result = result.model_copy(update={"message": f"{result.message}（{'，'.join(notes)}）"})
     return result

@@ -45,8 +45,9 @@ def _facts_line(executor: ThreadPoolExecutor, person: dict) -> str:
     left = executor.submit(payee_risk.remaining_quota, person).result()
     total = person["whitelist_quota"] / 100
     if left is None:
-        return f" · 专属额度 {total:,.2f} 元/月"
-    return f" · 专属额度 {total:,.2f} 元/月（剩余 {left / 100:,.2f} 元）"
+        return f" · 专属额度 {total:,.2f} 元/月（每月重置）"
+    return (f" · 专属额度 {total:,.2f} 元/月（本月已用 {total - left / 100:,.2f} 元，"
+            f"剩余 {left / 100:,.2f} 元；每月重置）")
 
 
 def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) -> None:
@@ -95,7 +96,8 @@ def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) ->
 
         if kind == "whitelist":                             # 改额度/有效期（L2 + 验证码）
             col_a, col_b, col_c = st.columns([1, 1, 0.6], vertical_alignment="bottom")
-            quota = col_a.text_input("新的专属额度（元，留空=不改）", key=f"d-q-{person['payee_id']}")
+            quota = col_a.text_input("新的专属额度（元/月，留空=不改）",
+                                     key=f"d-q-{person['payee_id']}")
             expire_new = col_b.text_input("新的有效期（留空=不改）", key=f"d-e-{person['payee_id']}",
                                           placeholder="2026-12-31 或 月底")
             if col_c.button("保存", key=f"d-q-ok-{person['payee_id']}", type="primary",

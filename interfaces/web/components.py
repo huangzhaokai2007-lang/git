@@ -244,7 +244,7 @@ def payee_form(defaults: dict | None = None) -> dict | None:
             expire = ""
             if whitelist:                                    # 2026-10-24：加白要设额度与有效期
                 col_a, col_b = st.columns(2)
-                quota = col_a.text_input("专属额度（元）", key="payee-quota",
+                quota = col_a.text_input("专属额度（元/月）", key="payee-quota",
                                          placeholder="例如 5000（不填 = 一律要验证码）")
                 expire = col_b.text_input("有效期至", key="payee-expire",
                                           placeholder="例如 2026-12-31 或 月底（不填 = 长期）")

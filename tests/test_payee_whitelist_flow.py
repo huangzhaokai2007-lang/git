@@ -114,7 +114,8 @@ def test_orchestration_needs_otp_before_writing(wired, monkeypatch) -> None:
     card = orchestrator.handle(f"把{ZHANG}加入白名单", session_id=SESSION)
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"
     # 影响必须事先说清（v2 SPEC-CHANGE 口径）：专属额度内免验证码（含深夜）、超额度要码。
-    assert "专属额度内转账免验证码" in card.reply
+    #: 2026-10-24：额度口径改成「每月」，卡面文案随之更新（人类要求明确写出每月）。
+    assert "白名单专属额度（每月）内转账免验证码" in card.reply
     assert "超额度仍需验证码" in card.reply
     assert _flag(wired, ZHANG) == 0                  # 出卡而已，没写库
 

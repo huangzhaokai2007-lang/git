@@ -46,7 +46,7 @@ CREATE TABLE payee (
   bank TEXT, is_whitelist INTEGER NOT NULL DEFAULT 0, last_used_ts TEXT,
   -- v2（转账域串联 · SPEC-CHANGE）：标签 / 白名单专属额度 / 黑名单
   tags TEXT,                                      -- 逗号分隔，可空（如 "妈妈,家人"）
-  whitelist_quota INTEGER,                        -- 白名单免验证码额度，单位分；NULL=无额度
+  whitelist_quota INTEGER       /* 白名单专属额度（每月重置，单位分） */,                        -- 白名单免验证码额度，单位分；NULL=无额度
   whitelist_expire TEXT,                          -- 白名单有效期（ISO 结束日期）；到期自动降级为普通收款人；NULL=长期
   note TEXT,                                      -- 备注（用户自己写的说明，可空；不是风控字段）
   card_no TEXT,                                  -- 银行卡号**脱敏形态**（如 **** **** **** 8888）；完整号绝不入库
