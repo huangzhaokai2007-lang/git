@@ -4,6 +4,23 @@ from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
 from agent import card_binding_flow, card_lock_flow as flow
 
+LOCK_NOTICE = '''**临时锁卡办理须知**
+
+1. 适用于暂时找不到银行卡、希望先暂停使用的情况；仅本人已绑定且状态正常的卡可以办理。
+2. 锁卡后该卡进入锁定状态，不能调整额度；不会冻结关联账户资金，不影响其他正常卡，也不自动取消已有订阅或独立账户转账。
+3. 找到卡后，本人通过模拟短信验证码可自助解锁。挂失卡、风控冻结卡或来源不明的锁定不能通过此入口恢复。
+4. 点击卡旁图标或选择银行卡仅打开预览；输入验证码并点击确认才会锁卡。关闭未提交的表单不改变卡状态。
+5. 临时锁卡不办理补卡。确认卡片遗失或被盗且需要更换，请选择挂失并补卡；挂失生效后原卡不可自助恢复。
+6. 此处只使用模拟卡片及模拟验证码，不发送真实短信，不收取真实费用。'''
+
+
+def _notice(*, inline: bool = False) -> None:
+    if inline:
+        with st.expander('临时锁卡办理须知与影响', expanded=True):
+            st.markdown(LOCK_NOTICE)
+    else:
+        st.markdown(LOCK_NOTICE)
+
 
 def reset() -> None:
     for key in list(st.session_state):
@@ -22,12 +39,19 @@ def _state(executor: ThreadPoolExecutor, session: str) -> dict:
 
 def accept_turn(executor: ThreadPoolExecutor, session: str, ask: str | None) -> None:
     state = _state(executor, session)
+    if ask == 'card_lock':
+        import card_binding_ui
+        _cancel_preview(executor, session, state)
+        card_binding_ui.reset()
+        st.session_state['bound-card-query'] = True
+        state.update(open=False, preview=None, result=None, error=None, mode='lock', inline=False)
+        return
     if ask in ('card_lock', 'card_missing', 'card_unlock'):
         _cancel_preview(executor, session, state)
         state.update(open=True, preview=None, result=None, error=None,
                      mode={'card_lock': 'lock', 'card_missing': 'choice', 'card_unlock': 'unlock'}[ask], inline=False)
     elif ask == 'lock_records':
-        st.session_state['navigate-page'] = '💳 我的银行卡'
+        st.session_state['bound-card-query'] = True
         st.session_state['limit-tab-request'] = '锁卡记录'
 
 
@@ -68,6 +92,12 @@ def row_confirmation(executor: ThreadPoolExecutor, session: str, card_id: str) -
             else:
                 state['error'] = result['message']
             st.rerun()
+        if st.button('取消解锁' if unlocking else '取消锁卡', key=f'lock-inline-cancel-{card_id}'):
+            _cancel_preview(executor, session, state)
+            state.update(open=False, preview=None, result=None, error=None)
+            st.rerun()
+        if not unlocking:
+            _notice(inline=True)
     if state['error']:
         st.caption(state['error'])
 
@@ -96,6 +126,8 @@ def _confirm(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
     unlocking = state['mode'] == 'unlock'
     st.write(f"{'即将解锁' if unlocking else '即将锁定'}：{preview['card_no_mask']}")
     st.warning(preview['impact'])
+    if not unlocking:
+        _notice()
     st.caption('本人临时锁定可验证后自助解锁，无需人工复核；挂失、风控冻结不适用。')
     with st.form('lock-confirm-form', clear_on_submit=True):
         otp = st.text_input('模拟短信验证码', type='password')
@@ -108,13 +140,16 @@ def _confirm(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
         st.rerun()
 
 
-def _missing(state: dict) -> None:
+def _missing(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
     st.write('先锁定保护卡片，找到后可验证身份自助解锁。')
     if st.button('临时锁定', type='primary'):
         state['mode'] = 'lock'
         st.rerun()
     if st.button('挂失说明'):
-        st.info('挂失办理尚未接通。确认遗失或被盗时，请通过发卡银行官方 App 或官方客服办理；这里不会执行挂失。')
+        import card_lost_ui
+        state['open'] = False
+        card_lost_ui.accept_turn(executor, session, 'card_lost')
+        st.rerun()
 
 
 def _panel(executor: ThreadPoolExecutor, session: str) -> None:
@@ -134,7 +169,7 @@ def _panel(executor: ThreadPoolExecutor, session: str) -> None:
     if state['error']:
         st.error(state['error'])
     if state['mode'] == 'choice':
-        _missing(state)
+        _missing(executor, session, state)
     elif state['preview']:
         _confirm(executor, session, state)
     else:

@@ -77,12 +77,15 @@ def seeded(tmp_path: Path, clock: Clock) -> Path:
     path = tmp_path / "bank.db"
     generate(path)
     dao.connect_db(path)
+    from agent import session_memory
+    session_memory.reset()
     query.set_current_user(None)
     transfer.set_session_id("session-test")
     transfer._TOKENS.clear()
     subscription._CONFIRM_REFS.clear()      # 卡 06：确认凭证是进程内状态，必须逐用例复位
     _wealth_risk._ASSESSMENTS.clear()       # 卡 07：风险测评结果同族（进程内），同样逐用例复位
     yield path
+    session_memory.reset()
     transfer._TOKENS.clear()
     subscription._CONFIRM_REFS.clear()
     _wealth_risk._ASSESSMENTS.clear()

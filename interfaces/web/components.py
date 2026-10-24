@@ -1,12 +1,4 @@
-"""卡 16：交互层组件（纯展示）—— 只渲染编排层给的东西，**不算任何业务数字**。
-
-本模块的边界（卡 16「禁止在界面里写业务逻辑」+ CLAUDE.md 铁律 1/2）：
-- 确认卡的金额、收款人、权限档、是否要 OTP 全部来自 `agent.confirm_card.Confirmation`
-  （工具层预览事实包的下游）；界面不判限额、不判权限、不改数字，也不自己比对验证码；
-- 图表数据来自**编排层回执文本**（`bill_report` 的 markdown 表 / `bill_analysis` 的一句话）：
-  这里只做「回执 → 坐标点」的解析与绘图，不重算、不补数、不猜测；
-- 需要更结构化的数据（例如直接拿 `ToolResult.facts`）应当由 agent/ 层开只读入口 —— 见交付说明「待拍板」。
-"""
+'卡 16：交互层组件（纯展示）—— 只渲染编排层给的东西，**不算任何业务数字**。'
 
 from __future__ import annotations
 
@@ -16,7 +8,9 @@ from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 
-from interfaces.web.scenes import SCENES    # 场景文案拆出（本文件已贴 300 行红线）
+from interfaces.web.scenes import SCENES, SCENE_ICONS    # 场景文案拆出（本文件已贴 300 行红线）
+from interfaces.web.theme import CSS, load_css
+from interfaces.web import reply_animation
 
 #: 顶部合规标注（卡 16 第 5 条）
 SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银行，无真实用户 / 账户 / 资金 / 卡号。"
@@ -26,22 +20,6 @@ SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银�
 #: 分类器会填中文槽位（'储蓄卡'/'credit_card'），而工具层的 `account_type` 只认 savings|credit，
 #: 编排层没有这层归一化 → 工具直接 INVALID_ARGUMENT。这是 agent/ 层缺口，见交付说明「待拍板」。
 BALANCE_PROMPT = "查一下余额"
-
-CSS = """<style>
-.st-key-credit-limit-panel h3{font-size:1.2rem;padding:.15rem 0 .3rem}
-.sim-banner{background:#fff4e5;border:1px solid #ffd8a8;border-radius:10px;padding:8px 14px;
-            color:#8a5a00;font-size:13px;font-weight:700}
-ul.tl{list-style:none;margin:0;padding:0 0 0 4px}
-ul.tl li{border-left:2px solid #d7dbe0;padding:0 0 10px 16px;margin-left:6px;position:relative}
-ul.tl li:last-child{border-left-color:transparent;padding-bottom:0}
-ul.tl .dot{position:absolute;left:-7px;top:4px;width:12px;height:12px;border-radius:50%;background:#1a73e8}
-ul.tl .k{font-weight:700;color:#202124;font-size:13px}
-ul.tl .v{color:#3c4043;font-size:14px;word-break:break-word}
-.tl-meta{font-family:ui-monospace,Consolas,monospace;font-size:12px;color:#5f6368}
-.chip{display:inline-block;background:#e8f0fe;color:#1a73e8;border-radius:999px;
-      padding:0 8px;margin-right:4px;font-size:11px}
-</style>"""
-
 
 def _esc(value: object) -> str:
     """HTML 转义（用户输入与回执都可能带尖括号）。"""
@@ -63,50 +41,51 @@ def sim_banner() -> None:
 def transcript(messages: Sequence[Mapping[str, Any]],
                *, payee_card: Callable[[str], bool] | None = None,
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None) -> None:
-    """聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。
-
-    `payee_card` 由 `app.py` 注入（`payee_card_ui.render_payee_card`）：「查看白名单」（T20）的
-    回执优先画成卡片。**画不出来（返回 False）就回退纯文本** —— 美化不许把回执吞掉。
-    `insight_card`（`insight_card_ui.render`）同理：**只给最后一条**助手回执画富卡片
-    （图表 + 追问按钮）—— 历史消息每张都画会把对话撑爆，且每次 rerun 都要重画一遍图。
-
-    用注入、而不是本模块顶层 import 同目录模块：本模块会被 `tests/test_web_layering.py`
-    **按文件路径**加载，那时 `sys.path` 里没有 `interfaces/web`，顶层 import 会直接炸。
-    """
-    last = len(messages) - 1
+    '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
     for index, message in enumerate(messages):
-        with st.chat_message(message["role"]):
+        with st.chat_message(message["role"], avatar=":material/person:" if message["role"] == "user" else ":material/auto_awesome:"):
             turn = message.get("turn")
             drawn = (payee_card is not None and message["role"] == "assistant"
                      and (turn or {}).get("intent") == "payee_list"
                      and payee_card(message["text"]))
             if not drawn:
-                st.markdown(message["text"])
+                if message["role"] == "assistant":
+                    reply_animation.render(message["text"], f"{index}:{(turn or {}).get('trace_id', 'greeting')}",
+                                           animate=index == len(messages) - 1)
+                else:
+                    st.markdown(message["text"])
             if turn is not None:
-                st.caption(f"trace_id `{turn['trace_id']}` · 意图 `{turn['intent']}` · "
-                           f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
-                if insight_card is not None and message["role"] == "assistant" and index == last:
+                with st.container(key=f"chat-audit-{index}"):
+                    st.caption(f"trace_id `{turn['trace_id']}` · 意图 `{turn['intent']}` · "
+                               f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
+                if insight_card is not None and message["role"] == "assistant" and index == len(messages) - 1:
                     insight_card(turn, f"insight-{index}")
+
+
+def _activate_scene(index: int) -> None:
+    st.session_state["active-scene"] = index
 
 
 def scenes() -> str | None:
     """快捷场景按钮：返回被点的那句话（没点 → None）。"""
     clicked: str | None = None
-    columns = st.columns(2)
     for index, (label, prompt) in enumerate(SCENES):
-        if columns[index % 2].button(label, key=f"scene-{index}", width="stretch"):
-            clicked = prompt
+        active = st.session_state.get("active-scene") == index
+        with st.container(key=f"scene-active-{index}" if active else f"scene-item-{index}"):
+            if st.button(label, icon=SCENE_ICONS[index], key=f"scene-{index}",
+                         width="stretch", on_click=_activate_scene, args=(index,)):
+                clicked = prompt
     return clicked
 
 
 def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
     """侧边栏账户余额：只回显 agent 给过的余额回执（数字来自事实包）。返回是否点了刷新。"""
     if not replies:
-        st.caption("还没有余额记录 —— 点下面的按钮让编排层去查（界面不直接读库）。")
+        st.caption("暂无余额记录，点击刷新查询。")
     for item in replies:
         st.markdown(f"- {item['text']}")
         st.caption(f"`{item['trace_id']}`")
-    return st.button("🔄 刷新余额（走编排层）", key="refresh-balance", width="stretch")
+    return st.button("刷新余额", icon=":material/refresh:", key="refresh-balance", width="stretch")
 
 
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
@@ -118,12 +97,7 @@ _CARD_TARGET = {"subscription_cancel": "商户", "gift_plan": "联系人",
 
 
 def confirm_card(confirmation: Any) -> str | None:
-    """确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。
-
-    字段全部来自 `agent.confirm_card.Confirmation`。注意该模型经 **card-24 泛化**后，主对象是通用的
-    `target_name`（转账=收款人、订阅取消=商户），**不再有转账专用的 `payee_name`**；标签按 `intent` 取。
-    `masked_phone` 是转账专用字段，其余写意图为空串 → 那一截不印。
-    """
+    '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
     target = _CARD_TARGET.get(intent, "收款人")
@@ -150,11 +124,7 @@ def confirm_card(confirmation: Any) -> str | None:
 
 
 def otp_card(confirmation: Any) -> tuple[str, str] | None:
-    """等 OTP：只收集验证码，交编排层 → 工具层校验（界面不比对、不知晓正确值）。
-
-    用 `st.form`：输入值随提交一起送到后端（裸 `text_input` 的值要按回车才提交，
-    演示时点「提交」会拿到空串 → 白白浪费一次尝试）。
-    """
+    '等 OTP：只收集验证码，交编排层 → 工具层校验（界面不比对、不知晓正确值）。'
     target = _CARD_TARGET.get(str(confirmation.intent), "收款人")
     with st.container(border=True):
         st.markdown("##### 🔐 请输入短信验证码")
@@ -175,15 +145,7 @@ def otp_card(confirmation: Any) -> tuple[str, str] | None:
 
 
 def payee_form() -> tuple[str, str, bool] | None:
-    """卡 20：添加收款人的表单（姓名 + 手机号 + **是否加入白名单**）。
-
-    只**收集**输入并原样返回 `(name, phone, whitelist)`；未提交 → `None`。校验 / 脱敏 / 落库 /
-    审计一律在 `agent/` → `tools/`（界面不写业务逻辑）。
-
-    ⚠️ 勾「同时加入白名单」**不等于**当场授予特权：界面只把意图传下去，真正的授予要走
-    **L2 确认卡 + 短信验证码**（`agent/payee_flow.py` → `write_flow` → T25）——
-    白名单 = 转账免验证码的特权，不能靠一次表单点击就拿到。
-    """
+    '卡 20：添加收款人的表单（姓名 + 手机号 + **是否加入白名单**）。'
     with st.container(border=True):
         st.markdown("##### ➕ 添加收款人")
         st.caption("填姓名和手机号即可（不收卡号）。手机号会脱敏保存，完整号码不入库、不回显。")
@@ -280,7 +242,7 @@ def bill_panel(series: Mapping[str, float], latest: Mapping[str, Any]) -> None:
 def timeline(records: Sequence[Mapping[str, Any]]) -> None:
     """审计时间轴（卡 16 第 4 条）：按 trace_id 展开「意图 → 工具 → 权限 → 结果」。"""
     if not records:
-        st.info("还没有请求。先到「💬 聊天」页说一句话或点一个快捷场景。")
+        st.info('还没有请求。直接聊天或点一个快捷场景即可开始。')
         return
     st.caption("每次请求编排层都写一条 audit_log（铁律 5）；下面按**同一条请求**的 trace_id "
                "展开编排层轨迹：意图 → 槽位 → 权限 → 工具 → 结果。")

@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from agent.write_intents import yuan_to_cents
+from agent import scene_context
 from guard import permission
 from tools import card_limit
 
@@ -45,7 +46,7 @@ def preview(card_id: str, kind: str, amount: str, days: int | None, session_id: 
 
 def submit(token: str, otp: str, session_id: str) -> dict:
     permission.assess_write("card_limit_adjust", tier="L2")
-    return card_limit.submit(token, otp, session_id).model_dump()
+    return scene_context.remember_tool_write(session_id, "card_limit_adjust", card_limit.submit(token, otp, session_id))
 
 
 def records() -> dict:

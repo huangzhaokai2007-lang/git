@@ -198,6 +198,8 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
         return _fail(ErrorCode.FORBIDDEN, "验证码不正确")
     if token["state"] == "executed":                            # 幂等：同 token 返回同一结果（重放不计数）
         return _ok(token["data"], token["facts"], token["message"])
+    if token['state'] != 'preview':
+        return _fail(ErrorCode.INVALID_STATE, '该预览已取消或已被新的草稿替代，请重新预览')
     if token["tier"] == "L3":
         return _fail(ErrorCode.INVALID_STATE, "该笔需人工复核，不能自动执行")
 

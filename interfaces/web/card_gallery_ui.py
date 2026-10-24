@@ -27,13 +27,13 @@ CSS = """<style>
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button {
  position:relative;display:flex;align-items:flex-end;justify-content:flex-start;
  width:100%;min-height:208px;padding:28px;border:1px solid #ffffff33;
- border-radius:20px;background:radial-gradient(ellipse at 100% 0%,#3f7189 0%,transparent 58%),
- linear-gradient(125deg,#102a43,#183c51);color:#fff;overflow:hidden;
- box-shadow:0 12px 26px -14px #102a4377;isolation:isolate;
+ border-radius:20px;background:radial-gradient(ellipse at 100% 0%,#343b48 0%,transparent 58%),
+ linear-gradient(125deg,#191c22,#262b33);color:#fff;overflow:hidden;
+ box-shadow:0 12px 26px -14px #191c2277;isolation:isolate;
  transition:transform .25s ease,box-shadow .25s ease,border-color .25s ease;
 }
 [class*="st-key-bank-tile-credit-"] [class*="st-key-detail-"] button {
- background:radial-gradient(ellipse at 100% 0%,#726b9c 0%,transparent 60%),linear-gradient(125deg,#292541,#4c4169);
+ background:radial-gradient(ellipse at 100% 0%,#474360 0%,transparent 60%),linear-gradient(125deg,#222130,#343147);
 }
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button p {
  color:#fff;font-family:ui-monospace,Consolas,monospace;font-size:clamp(17px,1.7vw,23px);
@@ -52,13 +52,13 @@ CSS = """<style>
 }
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button:hover {
  color:white;border-color:#ffffff88;transform:translateY(-4px);
- box-shadow:0 18px 30px -14px #102a4399;animation:bank-card-sway .72s ease-in-out 1;
+ box-shadow:0 18px 30px -14px #191c2299;animation:bank-card-sway .72s ease-in-out 1;
 }
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button:focus-visible {
- outline:3px solid #e58b48;outline-offset:4px;
+ outline:3px solid #a49ef2;outline-offset:4px;
 }
 [class*="st-key-bank-selected-"] [class*="st-key-detail-"] button {
- outline:2px solid #e5a25d;outline-offset:3px;
+ outline:2px solid #a49ef2;outline-offset:3px;
 }
 @keyframes bank-card-sway {
  0%,100%{transform:translateY(-4px) rotate(0deg)}
