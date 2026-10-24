@@ -35,7 +35,7 @@ def accept_turn(executor: ThreadPoolExecutor, session_id: str, text: str, ask: s
     if ask == "limit_adjust":
         open_request(executor, session_id, text)
     elif ask == "limit_records":
-        st.session_state["navigate-page"] = "💳 我的银行卡"
+        st.session_state['bound-card-query'] = True
         st.session_state["limit-tab-request"] = "额度调整记录"
 
 
@@ -125,7 +125,7 @@ def _result(state: dict) -> None:
     st.write(f"申请额度：{item['target_yuan']} 元；核准额度：{item['approved_limit_yuan']} 元")
     if st.button("查看申请记录", key="limit-view-records", type="primary"):
         state["open"] = False
-        st.session_state["navigate-page"] = "💳 我的银行卡"
+        st.session_state['bound-card-query'] = True
         st.session_state["limit-tab-request"] = "额度调整记录"
         st.rerun()
 

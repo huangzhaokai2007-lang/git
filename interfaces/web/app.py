@@ -36,10 +36,10 @@ import card_lock_ui as locks_ui                                  # noqa: E402
 import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
+import activity_ui                                              # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
-PAGES = ("💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡")
 PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = ("您好，我是**模拟银行**智能体（全部为合成数据）。试试：「上个月花了多少」「给王五转 100 元」"
             "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景。")
@@ -67,7 +67,9 @@ def _ensure_db() -> bool:
 def _init_state() -> None:
     """会话态：对话、轨迹、余额回显、追问轮次（跨 rerun 保留）。"""
     state = st.session_state
-    state["page"] = state.pop("navigate-page", state.get("page", PAGES[0]))
+    if state.pop('navigate-page', None) == '💳 我的银行卡':
+        state['bound-card-query'] = True
+    state.pop('page', None)
     state.setdefault("session_id", f"web-{uuid.uuid4().hex[:8]}")
     state.setdefault("messages", [{"role": "assistant", "text": GREETING, "turn": None}])
     state.setdefault("turns", [])
@@ -114,7 +116,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
                                           "`uv run python -m data.seed --reset` 重新生成合成数据后再试。"})
         return
     dump = turn.model_dump()
-    if turn.intent == "card_query":
+    if turn.intent == "card_query" and not state.get('cards-view', {}).get('form'):
         cards_ui.reset(turn)
     if turn.ask in ("card_lock", "card_missing", "card_unlock"): limits_ui.reset()
     if turn.ask == "limit_adjust": locks_ui.reset()
@@ -130,7 +132,8 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
-    state["bound-card-query"] = (turn.intent == "card_query" or turn.ask == 'card_lock') and turn.error_code is None
+    state['bound-card-query'] = state.get('bound-card-query', False) or (
+        (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [item for item in state["balance"] if item["text"] != turn.reply][-1:]
         state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})
@@ -192,12 +195,11 @@ def _render_forms() -> None:
 
 # ---------------- 侧边栏 ----------------
 
-def _sidebar() -> str:
+def _sidebar() -> None:
     """侧边栏：账户余额 + 快捷场景 + 会话信息（页内动作全部回到编排层）。"""
     with st.sidebar:
         st.markdown("### 🏦 AI Banking Agent")
         st.caption("2026 FinTechathon · 自建模拟银行核心")
-        page = st.radio("页面", PAGES, key="page", label_visibility="collapsed")
         st.divider()
         st.markdown("#### 账户余额")
         if ui.balance_box(st.session_state["balance"]):
@@ -206,10 +208,10 @@ def _sidebar() -> str:
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:
-            if prompt in ("卡片查询", "调整额度", "锁卡", "帮我挂失"):
-                st.session_state["navigate-page"] = PAGES[0]
-            _ask(prompt)
-            st.rerun()
+            if prompt == '查看操作记录':
+                st.session_state['operation-records-open'] = True
+            else:
+                _ask(prompt)
         st.divider()
         st.caption(f"会话 `{st.session_state['session_id']}` · 已处理 {len(st.session_state['turns'])} 次请求")
         if st.button("🧹 重置会话态", key="reset-session", width="stretch"):
@@ -219,20 +221,18 @@ def _sidebar() -> str:
             locks_ui.reset()
             lost_ui.reset()
             st.session_state["bound-card-query"] = False
+            st.session_state['operation-records-open'] = False
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0)):
                 st.session_state[key] = value
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
             st.rerun()
-    return page
 
 
 def _chat_page() -> None:
     messages = st.session_state["messages"]
     ui.transcript(messages, payee_card=payee_ui.render_payee_card)
-    latest = ui.latest_bill(messages)
-    if latest.get("categories"):
-        with st.expander("📊 这份账单的图表", expanded=True):
-            ui.bill_panel(ui.bill_series(messages), latest)
+    _bill_charts()
+    activity_ui.render(st.session_state['turns'])
     _render_pending()
     _render_confirm()
     #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
@@ -249,23 +249,26 @@ def _chat_page() -> None:
         st.rerun()
 
 
-def _bill_page() -> None:
-    st.markdown("### 📊 账单图表")
-    st.caption("图表数据全部解析自**编排层回执**（`bill_report` 的分类表 / `bill_analysis` 的支出合计）。")
+def _bill_charts() -> None:
+    latest = ui.latest_bill(st.session_state['messages'])
+    if not latest:
+        return
+    with st.expander('📊 这份账单的图表', expanded=True):
+        _bill_contents(latest)
+
+
+def _bill_contents(latest: dict) -> None:
+    st.caption('图表来自聊天中的账单查询结果。')
     messages = st.session_state["messages"]
-    series, latest = ui.bill_series(messages), ui.latest_bill(messages)
-    if st.button(f"⬇️ 拉取近 {len(PULL_PERIODS)} 期账单（逐期走编排层）", type="primary"):
-        bar = st.progress(0.0, text="正在逐期向编排层取账单…")
-        for index, period in enumerate(PULL_PERIODS, start=1):
-            _ask(f"出一份{period}的账单报告")
-            bar.progress(index / len(PULL_PERIODS), text=f"已取回「{period}」（{index}/{len(PULL_PERIODS)}）")
-        st.rerun()
+    series = ui.bill_series(messages)
+    st.button(f'⬇️ 拉取近 {len(PULL_PERIODS)} 期账单（逐期走编排层）',
+              type='primary', on_click=_pull_bills)
     ui.bill_panel(series, latest)
 
 
-def _audit_page() -> None:
-    st.markdown("### 🧾 审计时间轴")
-    ui.timeline(st.session_state["turns"])
+def _pull_bills() -> None:
+    for period in PULL_PERIODS:
+        _ask(f'出一份{period}的账单报告')
 
 
 def main() -> None:
@@ -279,15 +282,8 @@ def main() -> None:
     _init_state()
     cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
     ui.sim_banner()
-    page = _sidebar()
-    if page == PAGES[0]:
-        _chat_page()
-    elif page == PAGES[1]:
-        _bill_page()
-    elif page == PAGES[2]:
-        _audit_page()
-    else:
-        cards_ui.render(_agent_executor(), st.session_state["session_id"])
+    _sidebar()
+    _chat_page()
 
 
 main()

@@ -8,7 +8,7 @@ def marker(at, status):
 
 def test_chains_follow_successful_lock_and_unlock_only(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '💳 管卡')
     bind(at)
     assert marker(at, 'normal')
     next(button for button in at.button if button.key == f'lock-toggle-{CARD}').click().run()

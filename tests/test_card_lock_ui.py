@@ -5,7 +5,7 @@ from tests.conftest import raw
 
 def test_sidebar_lock_and_record_page(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '💳 管卡')
     bind(at)
     click(at, '🔒 锁卡')
     next(button for button in at.button if button.key == f'lock-toggle-{CARD}').click().run()
@@ -13,17 +13,16 @@ def test_sidebar_lock_and_record_page(monkeypatch, seeded):
     next(item for item in at.text_input if item.key == f'lock-inline-otp-{CARD}').set_value('123456')
     click(at, '确认锁定')
     assert raw(seeded, 'SELECT status FROM card WHERE id=?', (CARD,))[0]['status'] == 'locked'
-    at.radio[0].set_value('💳 我的银行卡').run()
-    assert at.radio[0].value == '💳 我的银行卡'
+    click(at, '💳 管卡')
+    assert not at.radio and at.chat_input
     assert any(tab.label == '锁卡记录' for tab in at.tabs)
     assert len(at.dataframe[-1].value) == 1
 
 
 def test_chat_cancel_does_not_lock(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '💳 管卡')
     bind(at)
-    at.radio[0].set_value('💬 聊天').run()
     at.chat_input[0].set_value('暂时锁定银行卡').run()
     next(button for button in at.button if button.key == f'lock-toggle-{CARD}').click().run()
     click(at, '取消锁卡')

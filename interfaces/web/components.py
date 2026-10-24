@@ -267,7 +267,7 @@ def bill_panel(series: Mapping[str, float], latest: Mapping[str, Any]) -> None:
 def timeline(records: Sequence[Mapping[str, Any]]) -> None:
     """审计时间轴（卡 16 第 4 条）：按 trace_id 展开「意图 → 工具 → 权限 → 结果」。"""
     if not records:
-        st.info("还没有请求。先到「💬 聊天」页说一句话或点一个快捷场景。")
+        st.info('还没有请求。直接聊天或点一个快捷场景即可开始。')
         return
     st.caption("每次请求编排层都写一条 audit_log（铁律 5）；下面按**同一条请求**的 trace_id "
                "展开编排层轨迹：意图 → 槽位 → 权限 → 工具 → 结果。")

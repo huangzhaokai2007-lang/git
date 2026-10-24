@@ -51,7 +51,7 @@ def accept_turn(executor: ThreadPoolExecutor, session: str, ask: str | None) -> 
         state.update(open=True, preview=None, result=None, error=None,
                      mode={'card_lock': 'lock', 'card_missing': 'choice', 'card_unlock': 'unlock'}[ask], inline=False)
     elif ask == 'lock_records':
-        st.session_state['navigate-page'] = '💳 我的银行卡'
+        st.session_state['bound-card-query'] = True
         st.session_state['limit-tab-request'] = '锁卡记录'
 
 

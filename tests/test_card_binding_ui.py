@@ -36,9 +36,12 @@ def bind(at):
     click(at, "确认绑定")
 
 
-def test_card_page_is_available(monkeypatch, seeded):
+def test_cards_available_from_single_chat_shortcut(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    assert "💳 我的银行卡" in at.radio[0].options
+    assert not at.radio
+    assert at.chat_input
+    click(at, "💳 管卡")
+    assert any(button.label == "绑定银行卡" for button in at.button)
 
 
 @pytest.mark.parametrize("user_text", ["卡片绑定", "银行卡绑定", "绑定银行卡", "我要绑卡", "我想绑定一张信用卡"])
@@ -75,8 +78,8 @@ def test_credit_application_explains_demo_scope_and_offers_binding(monkeypatch, 
     assert raw(seeded, "SELECT * FROM agent_card_binding") == []
 
 
-@pytest.mark.parametrize("page", ["💬 聊天", "📊 账单图表", "🧾 审计时间轴", "💳 我的银行卡"])
-def test_manage_cards_shortcut_opens_card_query_without_model(monkeypatch, seeded, page):
+@pytest.mark.parametrize("shortcut", [None, "🧾 看账单", "🧾 操作记录", "💳 管卡"])
+def test_manage_cards_shortcut_opens_card_query_without_model(monkeypatch, seeded, shortcut):
     from agent import llm
 
     def offline(*args, **kwargs):
@@ -84,9 +87,10 @@ def test_manage_cards_shortcut_opens_card_query_without_model(monkeypatch, seede
 
     monkeypatch.setattr(llm, "chat_json", offline)
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value(page).run()
+    if shortcut:
+        click(at, shortcut)
     click(at, "💳 管卡")
-    assert at.radio[0].value == "💬 聊天"
+    assert not at.radio and at.chat_input
     turn = at.session_state["turns"][-1]
     assert turn["text"] == "卡片查询"
     assert turn["turn"]["intent"] == "card_query"
@@ -96,7 +100,7 @@ def test_manage_cards_shortcut_opens_card_query_without_model(monkeypatch, seede
 
 def test_form_preview_confirmation_and_hidden_balance(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value("💳 我的银行卡").run()
+    click(at, "💳 管卡")
     click(at, "绑定银行卡")
     fill(at, "模拟银行卡号", NUMBER)
     fill(at, "银行卡密码", PIN)
@@ -116,7 +120,7 @@ def test_form_preview_confirmation_and_hidden_balance(monkeypatch, seeded):
 
 def test_wrong_password_and_cancellation_never_bind(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value("💳 我的银行卡").run()
+    click(at, "💳 管卡")
     click(at, "绑定银行卡")
     fill(at, "模拟银行卡号", NUMBER)
     fill(at, "银行卡密码", "999999")
@@ -129,7 +133,7 @@ def test_wrong_password_and_cancellation_never_bind(monkeypatch, seeded):
 
 def test_details_reveal_password_and_close(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value("💳 我的银行卡").run()
+    click(at, "💳 管卡")
     bind(at)
     click(at, "6222 **** **** 0001")
     assert any("银行卡详情" in element.value for element in at.markdown)
@@ -149,7 +153,7 @@ def test_details_reveal_password_and_close(monkeypatch, seeded):
 
 def test_reset_clears_sensitive_views_but_keeps_binding(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value("💳 我的银行卡").run()
+    click(at, "💳 管卡")
     bind(at)
     click(at, "6222 **** **** 0001")
     click(at, "查看完整卡号")
@@ -230,7 +234,7 @@ def test_switching_user_clears_card_chat_and_sensitive_ui(monkeypatch, foreign):
     from tools._query_common import set_current_user
 
     at = app(monkeypatch, foreign)
-    at.radio[0].set_value("💳 我的银行卡").run()
+    click(at, "💳 管卡")
     bind(at)
     click(at, "6222 **** **** 0001")
     at.session_state["messages"].append({"role": "assistant", "text": "旧查询 6222 **** **** 0001",
