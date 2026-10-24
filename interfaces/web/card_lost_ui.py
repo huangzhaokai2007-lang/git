@@ -40,7 +40,6 @@ def accept_turn(executor: ThreadPoolExecutor, session: str, ask: str | None) -> 
 
 def _choice(executor: ThreadPoolExecutor, session: str, state: dict) -> None:
     st.write('想先临时锁卡继续找，还是确认挂失并补卡？')
-    st.info('暂时找不到：推荐临时锁卡，找到后可验证解锁。确认遗失或被盗：选择挂失并补卡，原卡生效后不可恢复。')
     if st.button('临时锁卡，继续寻找', type='primary', key='lost-choice-lock'):
         import card_lock_ui
         reset()
@@ -191,13 +190,11 @@ def render(executor: ThreadPoolExecutor, session: str, *, show_button: bool = Tr
         st.rerun()
     if not state['open']:
         return
-    with st.container(border=True, width=720, key='lost-panel'):
+    with st.container(border=False, width=720, key='lost-panel'):
         st.markdown('### 挂失补卡')
-        st.caption('模拟银行 · 本人借记卡 · 仅卡片级限制')
         steps = {'select': '选择银行卡', 'choice': '选择办理方式', 'notice': '办理须知',
                  'details': '补卡信息', 'verify': '验证确认', 'records': '办理结果与申请记录'}
         st.write(f"**{steps[state['step']]}**")
-        st.caption('办理须知 → 补卡信息 → 验证确认 → 办理结果')
         if state['error']:
             st.error(state['error'])
         step = state['step']

@@ -31,7 +31,7 @@ def test_close_focus_restores_gallery_and_clears_sensitive_detail(monkeypatch, s
     assert any('data-selected=""' in item.value for item in at.markdown)
     assert not any(button.label == '查看完整卡号' for button in at.button)
     assert any(button.key == f'detail-{CARD}' for button in at.button)
-    assert '******' in [item.value for item in at.text]
+    assert '****** 元' in [item.value for item in at.text]
 
 
 def test_filter_change_leaves_focus_instead_of_showing_an_unlisted_card(monkeypatch, seeded):

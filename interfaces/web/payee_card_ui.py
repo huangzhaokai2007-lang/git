@@ -4,7 +4,9 @@ CLI / API / IM 拿到的仍是同一份**文本回执**（`agent/render_lists.re
 本模块只在 Streamlit 里把那张表画成卡片，不改 agent/ 的任何一行。
 
 **为什么解析回执、不重新取数**（分层 + 数字纪律）：
-- `interfaces/` 只能调 `agent/`，**不许**直接调 `tools/`；`orchestrator.Turn` 也不携带 facts；
+- `interfaces/` 只能调 `agent/`，**不许**直接调 `tools/`；白名单卡片是 T20 时写的，那时
+  `orchestrator.Turn` 还不携带 facts（卡 25 起只读路径带了 —— 新写的图表卡片走 facts，
+  见 `insight_card_ui`，本卡仍按老口径解析回执，两种都合法，先例不强制回改）；
 - 仓内先例：`components.parse_bill` 同样是「编排层回执文本 → 绘图坐标」的解析（见 components 的
   docstring 第 6–7 行）；
 - 卡片里的每个字都**从回执里照抄**（姓名 / 脱敏手机号 / 银行 / 是否白名单），不重算、不补数（铁律 2）。
@@ -129,3 +131,75 @@ def render_payee_card(reply: str) -> bool:
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown(_card_html(card), unsafe_allow_html=True)
     return True
+
+
+# ================= S6：行内操作按钮（与上方「只读卡片」并存，不互斥） =================
+#: 上方汤版只渲染回执表格；下面这组给每行加「转账 / 加白 / 拉黑」按钮，
+#: 按钮 = 替用户说一句完整的话、走同一条 orchestrator.handle 流水线。
+
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import streamlit as st
+
+from agent import orchestrator, payee_resolve
+
+#: 三类人员的中文标签（面向用户只说大白话；与 `render_lists` 的措辞同口径）
+KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
+
+
+def _dispatch(executor: ThreadPoolExecutor, session_id: str, display: str, text: str) -> None:
+    """替用户发一句话，并把回执记进会话（与 `app._ask` 同口径，不写业务）。"""
+    state = st.session_state
+    state["messages"].append({"role": "user", "text": display})
+    turn = executor.submit(orchestrator.handle, text, session_id=session_id).result()
+    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": turn.model_dump()})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": turn.model_dump()})
+    state["clarify_round"] = state.get("clarify_round", 0) + (1 if "CLARIFY" in turn.states else 0)
+
+
+def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+    """渲染收款人列表卡；每行给「转账 / 加白 / 拉黑或解除 / 删除」按钮。
+
+    列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签一并带回）。
+    """
+    people = executor.submit(payee_resolve.list_people).result()
+    if not people:
+        return
+    st.markdown("##### 👥 收款人")
+    for person in people:
+        kind = ("whitelist" if person["is_whitelist"]
+                else "blacklist" if person["blacklist"] else "normal")
+        tags = f" · 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
+        left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
+            [4, 1, 1, 1, 1], vertical_alignment="center")
+        left.markdown(f"**{person['name']}** · `{person['masked_phone']}`"
+                      f" · {KIND_CN[kind]}{tags}")
+        if transfer_btn.button("转账", key=f"tr-{person['payee_id']}",
+                               help=f"给 {person['name']} 转账"):
+            _dispatch(executor, session_id, f"（按钮）给{person['name']}转账",
+                      f"给{person['name']}转账")
+            st.rerun()
+        if not person["is_whitelist"] and not person["blacklist"]:
+            if whitelist_btn.button("加白", key=f"wl-{person['payee_id']}",
+                                    help=f"把 {person['name']} 加入白名单（需验证码）"):
+                _dispatch(executor, session_id, f"（按钮）把{person['name']}加入白名单",
+                          f"把{person['name']}加入白名单")
+                st.rerun()
+        if not person["blacklist"]:
+            if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}",
+                                    help=f"把 {person['name']} 加入黑名单（之后转账/送礼被拒）"):
+                _dispatch(executor, session_id, f"（按钮）把{person['name']}加入黑名单",
+                          f"把{person['name']}加入黑名单")
+                st.rerun()
+        else:
+            if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}",
+                                    help=f"把 {person['name']} 移出黑名单（需验证码）"):
+                _dispatch(executor, session_id, f"（按钮）把{person['name']}移出黑名单",
+                          f"把{person['name']}移出黑名单")
+                st.rerun()
+        if delete_btn.button("删除", key=f"del-{person['payee_id']}",
+                             help=f"删除收款人 {person['name']}（需确认）"):
+            _dispatch(executor, session_id, f"（按钮）删除收款人{person['name']}",
+                      f"删除收款人{person['name']}")
+            st.rerun()

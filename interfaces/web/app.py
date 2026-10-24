@@ -1,12 +1,4 @@
-"""卡 16：交互层聊天界面（Streamlit），业务一律在 agent/ 层。
-分层（CLAUDE.md 架构）：
-- 本层**只** `import agent.orchestrator` / `agent.confirm_card`（+ 同目录展示组件）；
-  **不 import `tools/`、不 import `data/`、不写 SQL、不算金额、不判权限档**；
-- 一句话交给 `orchestrator.handle(...)`，拿回 `Turn`（回执 + 状态轨迹 + 档位 + trace_id）后原样展示；
-- 合成库不存在时**只调用 data/ 层的 CLI**（`python -m data.seed` 子进程），既不 import 也不写 SQL。
-
-跑法：`uv run streamlit run interfaces/web/app.py`
-"""
+'卡 16：交互层聊天界面（Streamlit），业务一律在 agent/ 层。'
 
 from __future__ import annotations
 
@@ -36,16 +28,16 @@ import card_lock_ui as locks_ui                                  # noqa: E402
 import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
+import insight_card_ui
+import card_edit_ui
 import activity_ui                                              # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
+DEMO_SCRIPT = ("查一下余额", "上个月的流水", "上个月花了多少", "上个月有没有异常交易", "上个月的账单总结")
 PULL_PERIODS = ("本月", "上个月", "上上个月")
-GREETING = ("您好，我是**模拟银行**智能体（全部为合成数据）。试试：「上个月花了多少」「给王五转 100 元」"
-            "「我有哪些订阅」。转账会先出确认卡，确认后才执行；也可以点左侧的快捷场景。")
+GREETING = "您好 请问我能为您提供什么帮助"
 
-#: 追问续接要带多少条历史（用户话与助手回执交替）。**追问的上下文必须让分类器看到** ——
-#: 例如「列出两个李四」那一句，否则用户只回一个「1001」时会被判成 smalltalk。
 HISTORY_TURNS = 4
 # ---------------- 启动引导（只碰环境变量与 data/ 层自己的 CLI） ----------------
 
@@ -76,35 +68,20 @@ def _init_state() -> None:
     state.setdefault("balance", [])
     state.setdefault("pending_id", None)
     state.setdefault("clarify_round", 0)
+    state.setdefault("bound-payee-query", False)
 
 @st.cache_resource
 def _agent_executor() -> ThreadPoolExecutor:
-    """编排层调用统一跑在这条**常驻线程**上（进程级单例）。
-
-    为什么必须：Streamlit 每次 rerun 换一条线程，而 `data/` 的 SQLite 连接是进程级单例
-    （sqlite3 默认校验「同线程才能用」）→ 不同 rerun 直接复用会在第二次交互就报
-    `SQLite objects created in a thread can only be used in that same thread`。
-    界面层能做的正确处置就是**把 agent 调用串行到一条固定线程**（不越层去改 data/ 的连接策略）；
-    更彻底的修法（`check_same_thread=False` 或按线程建连接）属于 data/ 层，见交付说明「待拍板」。
-    """
+    '编排层调用统一跑在这条**常驻线程**上（进程级单例）。'
     return ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent")
 
 # ---------------- 与编排层的唯一入口 ----------------
 def _ask(text: str, *, display: str | None = None) -> None:
-    """把一句话交给编排层，记录回执与轨迹（界面不解释业务、不派生数字）。
-
-    `display`：界面上显示的措辞（验证码这类凭证按 `display` 脱敏，值不回显 —— 规格 §5 要求
-    验证码不进日志/回执；本页的轨迹与聊天记录同样不回显它的值）。
-    """
+    '把一句话交给编排层，记录回执与轨迹（界面不解释业务、不派生数字）。'
     state = st.session_state
     display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
     try:
-        #: 追问续接的上下文：把最近几轮**真实对话**（用户话 + 助手回执）交给分类器。
-        #: **修的问题**：此前传的是模块常量 `HISTORY`，而它**恒为 `None`**（全项目没有第二处赋值）。
-        #: 于是「给李四转100元 → 界面列出两个李四 → 用户回 1001」这一步，分类器只看到一个光秃秃的
-        #: 数字 → 判成 `smalltalk` → 收款人永远解析不出来（实机复现，用户已报）。实测把那一句
-        #: 候选列表作为 history 传进去后，`1001` 能被正确解析成 `payee='李四（139****1001）'`。
         history = [m["text"] for m in state["messages"][-(HISTORY_TURNS + 1):-1] if m.get("text")]
         turn = _agent_executor().submit(card_binding_flow.handle, text, history=history or None,
                                         clarify_round=state["clarify_round"],
@@ -128,15 +105,27 @@ def _ask(text: str, *, display: str | None = None) -> None:
     lost_ui.accept_turn(_agent_executor(), state['session_id'], turn.ask)
     limits_ui.accept_turn(_agent_executor(), state["session_id"], text, turn.ask)
     locks_ui.accept_turn(_agent_executor(), state["session_id"], turn.ask)
+    import scene_ui
+    scene_ui.accept(_agent_executor(), state["session_id"], turn)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
+    state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     state['bound-card-query'] = state.get('bound-card-query', False) or (
         (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [item for item in state["balance"] if item["text"] != turn.reply][-1:]
         state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})
+
+
+def _follow_up(prompt: str) -> None:
+    _ask(prompt)
+    st.rerun()
+
+
+def _insight_card(turn, key: str) -> bool:
+    return insight_card_ui.render(turn, key=key, on_ask=_follow_up)
 
 
 def _cancel(confirmation) -> None:
@@ -198,8 +187,7 @@ def _render_forms() -> None:
 def _sidebar() -> None:
     """侧边栏：账户余额 + 快捷场景 + 会话信息（页内动作全部回到编排层）。"""
     with st.sidebar:
-        st.markdown('<div class="bank-brand"><span>◈</span><div>AI Banking Agent<small>智能银行工作台</small></div></div>', unsafe_allow_html=True)
-        st.caption("2026 FinTechathon · 模拟银行")
+        st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="AI Banking Agent"><span aria-hidden="true">AI Banking</span><span aria-hidden="true">Agent</span></div>', unsafe_allow_html=True)
         st.divider()
         st.markdown("#### 账户余额")
         if ui.balance_box(st.session_state["balance"]):
@@ -213,8 +201,16 @@ def _sidebar() -> None:
             else:
                 _ask(prompt)
         st.divider()
-        st.caption(f"会话 `{st.session_state['session_id']}` · 已处理 {len(st.session_state['turns'])} 次请求")
+        if st.button("🎬 一键演示（五连问 · 供录屏）", key="demo-run", width="stretch"):
+            from agent import scene_flow
+            _agent_executor().submit(scene_flow.clear, st.session_state["session_id"]).result()
+            st.session_state["demo-queue"] = list(DEMO_SCRIPT)
+            st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
+            st.session_state['bound-card-query'] = False
+            st.rerun()
         if st.button("重置会话", icon=":material/restart_alt:", key="reset-session", width="stretch"):
+            from agent import scene_flow
+            _agent_executor().submit(scene_flow.clear, st.session_state["session_id"]).result()
             confirm_card.reset_state()
             cards_ui.reset()
             limits_ui.reset()
@@ -229,14 +225,20 @@ def _sidebar() -> None:
 
 
 def _chat_page() -> None:
+    queue = list(st.session_state.get("demo-queue") or ())
+    if queue:
+        st.session_state["demo-queue"] = queue[1:]
+        _ask(queue[0])
+        st.rerun()
     messages = st.session_state["messages"]
-    ui.transcript(messages, payee_card=payee_ui.render_payee_card)
+    ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card)
+    import scene_ui
+    scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
     _bill_charts()
     activity_ui.render(st.session_state['turns'])
     _render_pending()
     _render_confirm()
-    #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
-    #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
+    card_edit_ui.render(_agent_executor(), st.session_state["session_id"])
     _render_forms()
     if st.session_state.get("bound-card-query"):
         cards_ui.render(_agent_executor(), st.session_state["session_id"], show_limit_button=False)
@@ -244,7 +246,9 @@ def _chat_page() -> None:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         lost_ui.render(_agent_executor(), st.session_state['session_id'], show_button=False)
-    if (text := st.chat_input("说一句话，例如「上个月花了多少」")) and text.strip():
+    if st.session_state.get("bound-payee-query"):
+        payee_ui.render(_agent_executor(), st.session_state["session_id"])
+    if (text := st.chat_input("")) and text.strip():
         _ask(text)
         st.rerun()
 
@@ -273,7 +277,7 @@ def _pull_bills() -> None:
 
 def main() -> None:
     st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
-    st.markdown(ui.CSS, unsafe_allow_html=True)
+    st.markdown(ui.load_css(), unsafe_allow_html=True)
     if not _ensure_db():
         return
     if not st.get_option('global.appTest'):
@@ -281,8 +285,6 @@ def main() -> None:
         card_lost_flow.start_runner()
     _init_state()
     cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
-    st.markdown('<div class="workspace-heading"><span>个人银行 / 聊天</span><h1>银行助理</h1><p>从一句话开始，查询与办理都在这里完成。</p></div>', unsafe_allow_html=True)
-    ui.sim_banner()
     _sidebar()
     _chat_page()
 

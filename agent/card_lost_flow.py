@@ -1,4 +1,5 @@
 """F09 orchestration exposes private loss workflow without direct database access."""
+from agent import scene_context
 from guard import permission
 from tools import card_lost
 
@@ -14,7 +15,7 @@ def preview(card_id: str, session_id: str) -> dict:
 
 def submit(token: str, pin: str, otp: str, branch_id: str, session_id: str) -> dict:
     permission.assess_write('card_report_lost', tier='L3')
-    return card_lost.submit(token, pin, otp, branch_id, session_id).model_dump()
+    return scene_context.remember_tool_write(session_id, "card_report_lost", card_lost.submit(token, pin, otp, branch_id, session_id))
 
 
 def cancel(application_id: str, session_id: str) -> dict:

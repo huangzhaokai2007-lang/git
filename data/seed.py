@@ -43,13 +43,14 @@ CARD_ROWS = (
     ("card_credit_0002", CREDIT_ID, "6222 **** **** 0002", "credit", CREDIT_LIMIT, 1_000_000, 2_000_000, "normal"),
     ("card_savings_0003", SAVINGS_ID, "6222 **** **** 0003", "savings", None, 200_000, 500_000, "lost"),
 )
-#: 收款人：id, 姓名, 掩码手机号, 银行, 是否白名单；李四两位用于测试收款人歧义
+#: 收款人：id, 姓名, 掩码手机号, 银行, 是否白名单, 标签(逗号分隔), 白名单专属额度(分, None=无)
+#: 李四两位用于测试收款人歧义；v2 起带**标签**，演示可用「给我妈转 200」「给房东转 3000」指代。
 PAYEE_ROWS = (
-    ("payee_0001", "李四", "139****1001", "招商银行", 1),
-    ("payee_0002", "李四", "139****1002", "工商银行", 0),
-    ("payee_0003", "王五", "137****2003", "建设银行", 1),
-    ("payee_0004", "张小美", "136****3004", "中国银行", 0),
-    ("payee_0005", "赵六", "135****4005", "农业银行", 0),   # 从未转账 → last_used_ts 为 NULL
+    ("payee_0001", "李四", "139****1001", "招商银行", 1, "同事", 100_000),      # 1000 元
+    ("payee_0002", "李四", "139****1002", "工商银行", 0, "同学", None),
+    ("payee_0003", "王五", "137****2003", "建设银行", 1, "房东", 100_000),      # 1000 元
+    ("payee_0004", "张小美", "136****3004", "中国银行", 0, "妈妈,家人", None),
+    ("payee_0005", "赵六", "135****4005", "农业银行", 0, "朋友", None),          # 从未转账 → last_used_ts 为 NULL
 )
 TRANSFER_PAYEES = (("payee_0001", "李四"), ("payee_0002", "李四"), ("payee_0003", "王五"), ("payee_0004", "张小美"))
 #: 理财产品：id, 名称, 风险等级, 期限天, 预期年化（百分数数值，3.20 = 3.20%）, 起购金额（分）
@@ -221,8 +222,9 @@ def _write(conn: sqlite3.Connection, rows: list[tuple], balances: dict[str, int]
                                             "single_limit", "daily_limit", "status"),
                              tuple((c[0], USER_ID, *c[1:]) for c in CARD_ROWS))
     counts["payee"] = _insert(conn, "payee", ("id", "user_id", "name", "phone", "bank", "is_whitelist",
-                                              "last_used_ts"),
-                              tuple((p[0], USER_ID, *p[1:], payee_usage.get(p[0])) for p in PAYEE_ROWS))
+                                              "tags", "whitelist_quota", "last_used_ts"),
+                              tuple((p[0], USER_ID, p[1], p[2], p[3], p[4], p[5], p[6],
+                                     payee_usage.get(p[0])) for p in PAYEE_ROWS))
     counts["subscription"] = _insert(conn, "subscription", ("id", "user_id", "merchant", "amount", "cycle",
                                                             "next_charge_date", "source_txn_id", "status"),
                                      tuple((s.id, USER_ID, s.merchant, s.amount, s.cycle, s.next_charge_date,

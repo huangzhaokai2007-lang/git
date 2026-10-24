@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import calendar
 import re
+from datetime import date
 
 from data.seed import AS_OF
 
@@ -35,6 +36,18 @@ RELATIVE_PERIOD_OFFSETS: dict[str, int] = {"本月": 0, "上个月": -1, "上上
 
 #: 查表键归一化：小写、去首尾空白、空格/连字符 → 下划线（`last-2-months`、`Last Month` 也认）
 _PERIOD_KEY_SEPARATOR = re.compile(r"[\s\-]+")
+
+
+def anchor_date() -> date:
+    """数据集的「今天」（`data.seed.AS_OF`）本身 —— 界面做相对时间解析时用它，**不许读真实时钟**。
+
+    为什么需要：`interfaces/web/app_offline.py` 原先按 `date.today()` 解析「上个月」，
+    而真实时钟（2026-10）已跑出合成数据窗口（末月 2026-08）→「上个月的流水」恒为 0 笔，
+    演示第二句就翻车。全系统口径是「锚点即今天」（`_with_date_context` 也是这么告诉模型的），
+    界面沿用同一个锚点才算自洽。
+    """
+
+    return AS_OF
 
 
 def month_shift(offset: int) -> str:

@@ -198,6 +198,8 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
         return _fail(ErrorCode.FORBIDDEN, "验证码不正确")
     if token["state"] == "executed":                            # 幂等：同 token 返回同一结果（重放不计数）
         return _ok(token["data"], token["facts"], token["message"])
+    if token['state'] != 'preview':
+        return _fail(ErrorCode.INVALID_STATE, '该预览已取消或已被新的草稿替代，请重新预览')
     if token["tier"] == "L3":
         return _fail(ErrorCode.INVALID_STATE, "该笔需人工复核，不能自动执行")
 
@@ -223,7 +225,9 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
             balance_after = updated["balance"]
             txn = dao.insert_txn(account_id, _now().isoformat(timespec="seconds"), -amount, "out",
                                  balance_after, counterparty=token["payee_name"], category="转账",
-                                 channel="转账", memo=f"转账给{token['payee_name']}")
+                                 channel="转账", memo=f"转账给{token['payee_name']}", payee_id=token["payee_id"])
+            if token.get("payee_id"):    # 回填最近转账时间（设计 §2）
+                conn.execute("UPDATE payee SET last_used_ts = ? WHERE id = ?", (_now().isoformat(timespec="seconds"), token["payee_id"]))
             facts = {"txn_id": txn["id"], "payee_id": token["payee_id"], "payee_name": token["payee_name"],
                      "tier": token["tier"], "requires_otp": token["requires_otp"], "status": "executed",
                      **_money_facts(amount, "amount"), **_money_facts(token["fee"], "fee"),

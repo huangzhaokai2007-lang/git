@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import card_binding_flow as flow
+from agent import card_binding_flow as flow, scene_flow
 import card_limit_ui as limits_ui
 import card_lock_ui as locks_ui
 import card_gallery_ui as gallery_ui
@@ -80,7 +80,7 @@ def _form(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
 
 def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
     state['detail_revision'] = state.get('detail_revision', 0) + 1
-    result = executor.submit(flow.detail, card_id).result()
+    result = executor.submit(scene_flow.select_card, st.session_state["session_id"], card_id).result()
     if not result["ok"]:
         state["notice"] = (False, result["message"])
     else:
@@ -110,7 +110,7 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict)
     visible = state["visible"].get(card_id, False)
     with columns[1]:
         amount, button = st.columns([3, 2])
-        amount.text(f"{item['balance_yuan']} 元" if visible else "******")
+        amount.text(f"{item['balance_yuan']} 元" if visible else "****** 元")
         if button.button("隐藏" if visible else "显示", key=f"balance-{card_id}",
                          icon=":material/visibility:" if visible else ":material/visibility_off:",
                          help="隐藏余额" if visible else "显示余额"):
@@ -159,7 +159,7 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
     st.markdown(result["summary"])
     st.caption("此卡关联账户余额；信用卡余额与授信额度分别展示。")
     visible = state["detail_balance"]
-    st.text(f"{result['data']['balance_yuan']} 元" if visible else "******")
+    st.text(f"{result['data']['balance_yuan']} 元" if visible else "****** 元")
     if st.button("隐藏详情余额" if visible else "显示详情余额", key="detail-balance"):
         state["detail_balance"] = not visible
         st.rerun()

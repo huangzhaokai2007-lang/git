@@ -58,7 +58,7 @@ CARD_FIELDS = ("type", "credit_limit", "single_limit", "daily_limit", "status")
 SUBSCRIPTION_FIELDS = ("merchant", "amount", "cycle", "next_charge_date", "source_txn_id", "status")
 _UPDATABLE = {"card": CARD_FIELDS, "subscription": SUBSCRIPTION_FIELDS}   # update_* 字段白名单
 _TXN_COLUMNS = ("id", "account_id", "ts", "amount", "direction", "counterparty", "category",
-                "channel", "memo", "balance_after")
+                "channel", "memo", "balance_after", "payee_id")
 _AUDIT_COLUMNS = ("id", "trace_id", "session_id", "ts", "actor", "intent", "tool", "params_json",
                   "risk_level", "permission_tier", "result", "error_code")
 _RISK_COLUMNS = ("id", "trace_id", "ts", "user_id", "factor", "detail", "action_taken")

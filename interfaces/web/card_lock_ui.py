@@ -78,8 +78,6 @@ def row_confirmation(executor: ThreadPoolExecutor, session: str, card_id: str) -
         return
     if state['preview']:
         unlocking = state['mode'] == 'unlock'
-        if not unlocking:
-            _notice(inline=True)
         with st.form(f'lock-inline-form-{card_id}', clear_on_submit=True, border=False, width=220):
             with st.container(horizontal=True, gap='small'):
                 otp = st.text_input('模拟短信验证码', type='password', label_visibility='collapsed',
@@ -98,6 +96,8 @@ def row_confirmation(executor: ThreadPoolExecutor, session: str, card_id: str) -
             _cancel_preview(executor, session, state)
             state.update(open=False, preview=None, result=None, error=None)
             st.rerun()
+        if not unlocking:
+            _notice(inline=True)
     if state['error']:
         st.caption(state['error'])
 

@@ -61,11 +61,12 @@ def _reply(result: ToolResult) -> tuple[str, bool, str | None]:
     return text, False, None
 
 
-def submit_payee(name: str, phone: str, *, session_id: str) -> "Turn":
+def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = False) -> "Turn":
     """表单提交入口（界面只调这一个函数）：PRECHECK（guard 定档）→ EXECUTE → 校验回执 → AUDIT。
 
-    返回编排层的 `Turn`：`intent=payee_add` / `tool_calls=["add_payee"]` / `tier="L1"` /
-    `executed` 仅当工具成功落库才为 True。**不新增任何 Turn 字段**（界面靠 `intent` 与 `reply` 渲染）。
+    `whitelist=True`（表单里勾了「同时加入白名单」）时，**加完人立刻接上白名单确认卡** ——
+    复用 `write_flow.start("payee_whitelist", ...)` 的整套卡/OTP 机器，不另造一套交互。
+    注意：白名单那一步是 **L2 + 验证码**（`payee_add` 本身仍是 L1），两步档位不同、审计分开。
     """
     from agent.orchestrator import Turn                  # 局部 import：避免 orchestrator ↔ payee_flow 循环
 
@@ -78,6 +79,12 @@ def submit_payee(name: str, phone: str, *, session_id: str) -> "Turn":
            "success" if result.ok else "error", error_code,
            {"name": str(result.data["name"]) if result.ok else name,
             "masked_phone": str(result.data["masked_phone"]) if result.ok else ""})
+    if result.ok and whitelist:                          # 勾了复选框 → 接着走 L2 确认卡
+        from agent import orchestrator, write_flow
+        ctx = orchestrator._Ctx(trace_id, session_id, 0)
+        card = orchestrator._apply(ctx, write_flow.start("payee_whitelist", {"payee": name}, session_id))
+        card.reply = f"{reply}\n\n要把他加入白名单吗？加入后在专属额度内给他转账免验证码（超额度仍需验证码）。\n{card.reply}"
+        return card
     return Turn(trace_id=trace_id, intent=INTENT, confidence=1.0, states=states,
                 tool_calls=["add_payee"], reply=reply, degraded=degraded, error_code=error_code,
                 tier=verdict.tier, executed=result.ok)

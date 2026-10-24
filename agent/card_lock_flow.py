@@ -2,6 +2,7 @@
 import re
 import uuid
 
+from agent import scene_context
 from guard import permission, injection
 from tools import card_lock, card_unlock
 
@@ -49,7 +50,7 @@ def preview(card_id: str, session_id: str) -> dict:
 
 def submit(token: str, otp: str, session_id: str) -> dict:
     permission.assess_write('card_lock', tier='L2')
-    return card_lock.submit(token, otp, session_id).model_dump()
+    return scene_context.remember_tool_write(session_id, "card_lock", card_lock.submit(token, otp, session_id))
 
 
 def cancel(token: str, session_id: str) -> dict:
@@ -71,7 +72,7 @@ def unlock_preview(card_id: str, session_id: str) -> dict:
 
 def unlock_submit(token: str, otp: str, session_id: str) -> dict:
     permission.assess_write('card_temporary_unlock', tier='L2')
-    return card_unlock.submit(token, otp, session_id).model_dump()
+    return scene_context.remember_tool_write(session_id, "card_unlock", card_unlock.submit(token, otp, session_id))
 
 
 def unlock_cancel(token: str, session_id: str) -> dict:

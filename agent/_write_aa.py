@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify
+from agent import confirm_card, payee_clarify, payee_resolve
 from agent._write_common import Prepared, ShapeResult, normalize_query, yuan_to_cents
 from tools import _aa_split, transfer
 from tools.schemas import ToolResult
@@ -51,13 +51,15 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
     picked: dict[str, str] = {}                     # id → name，顺带完成去重（T9 对重复收款人直接拒）
     clarify, unresolved = "", False
     for query in _as_list(filled.get("payee_ids")):
-        found = transfer.resolve_payee(normalize_query(query))   # 防「回显卡面串」：见 _write_common
-        candidates = (found.facts.get("candidates") or []) if found.ok else []
-        if len(candidates) == 1:
-            picked.setdefault(candidates[0]["id"], candidates[0]["name"])
-        else:
+        # **与转账共用同一个解析关卡**（v2）：标签 / 同音 / 黑名单 / 同名追问一套口径。
+        person, code, facts = payee_resolve.resolve_or_explain(normalize_query(query))
+        if code:                                        # 黑名单：整笔 AA 直接拒（不当候选）
+            return ShapeResult(filled=filled, error_code=code, message=str(facts.get("message") or ""))
+        if person is None:
             unresolved = True
-            clarify = clarify or (payee_clarify.ask_for(found.facts) if found.ok else "")
+            clarify = clarify or payee_clarify.ask_for(facts)
+        else:
+            picked.setdefault(person["payee_id"], person["name"])
     if unresolved or not picked:
         missing.append("payee_ids")
     else:
@@ -84,6 +86,16 @@ def _prepare_aa(filled: dict) -> Prepared:
         return Prepared(ok=False, error_code="INVALID_ARGUMENT", message="收款人名单不完整，请重新提供")
     payees = [{"id": pid, "name": name} for pid, name in zip(ids, names)]
     facts = _aa_split.aa_facts(payees, int(filled["amount_cents"]))
+    #: v2 风控：AA **含非白名单人员 → 要验证码**（发起人验一次，不是每人一次）。
+    #: 黑名单已在 `_shape_aa` 拦下；这里只判白名单与否。
+    non_whitelist = []
+    for pid in ids:
+        person = payee_resolve.profile_of(pid)
+        if person and not person.get("is_whitelist"):
+            non_whitelist.append(str(person["name"]))
+    if non_whitelist:
+        facts["tier"] = "L2"
+        facts["aa_note"] = f"含非白名单收款人（{'、'.join(non_whitelist)}），需要验证码"
     facts["target_name"] = filled["aa_target"]
     return Prepared(ok=True, facts=facts, credential="")
 
@@ -91,6 +103,9 @@ def _prepare_aa(filled: dict) -> Prepared:
 def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
              requires_otp: bool) -> confirm_card.CardInput:
     """AA 确认卡：人数 / 总额 / 每人 / 余数**全部来自 facts**（与执行回执同一份口径）。"""
+    note = confirm_card.risk_note([], AA_CN)
+    if facts.get("aa_note"):
+        note = "；".join(x for x in (note, str(facts["aa_note"])) if x)
     return confirm_card.CardInput(
         title="AA 收款确认卡", intent_cn=AA_CN,
         rows=[("收款人", f"{facts['target_name']}（{facts['payee_count']} 人）"),
@@ -98,7 +113,7 @@ def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
               ("每人", f"{facts['per_person_amount_yuan']} 元"),
               ("余数（由你承担）", f"{facts['initiator_share_yuan']} 元")],
         tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], AA_CN))
+        risk_note=note)
 
 
 def _plain_aa(filled: dict, facts: Mapping, tier: str) -> str:

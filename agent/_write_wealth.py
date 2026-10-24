@@ -78,9 +78,10 @@ def _card_trade(action: str, intent: str, filled: dict, facts: Mapping, tier: st
     rows = [("产品", str(facts["product_name"])),
             ("风险等级", str(facts.get("product_risk_label") or facts["product_risk_level"])),
             ("预期年化", f"{facts['yield']}（非保本，收益随市场波动）"),
-            ("期限", _term_cn(facts["term_days"])),
-            ("起购金额", f"{facts['min_amount_yuan']} 元"),
-            (f"{verb}金额", f"{facts['amount_yuan']} 元")]
+            ("期限", _term_cn(facts["term_days"]))]
+    if action == BUY:                                # 起购额只对申购有意义；赎回谈「可赎持仓」
+        rows.append(("起购金额", f"{facts['min_amount_yuan']} 元"))
+    rows.append((f"{verb}金额", f"{facts['amount_yuan']} 元"))
     if facts.get("risk_desc"):                       # 让用户明确知道这个等级大概会亏多少
         rows.append(("风险说明", str(facts["risk_desc"])))
     if action == BUY:
