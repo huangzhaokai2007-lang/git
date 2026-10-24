@@ -2,8 +2,10 @@
 html,body,[data-testid="stApp"]{background:var(--bank-bg);color:var(--bank-text);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
 [data-testid="stHeader"]{background:#0b0c0ef5;border-bottom:1px solid #ffffff06}
 [data-testid="stAppDeployButton"]{display:none}
-[data-testid="stMainBlockContainer"]{max-width:1120px;padding:2.5rem 3rem 7rem}
-[data-testid="stSidebar"]{background:#101113;border-right:1px solid var(--bank-border);min-width:272px;max-width:272px}
+[data-testid="stMainBlockContainer"]{width:100%;max-width:none;padding:2.5rem 3rem 7rem}
+[data-testid="stSidebar"]{background:#101113;border-right:1px solid var(--bank-border)}
+[data-testid="stSidebar"][aria-expanded="true"]{min-width:272px;max-width:272px}
+[data-testid="stSidebar"][aria-expanded="false"]{width:0;min-width:0;max-width:0;border-right:0}
 [data-testid="stSidebarUserContent"]{padding:1.5rem 1rem}
 [data-testid="stSidebar"] h4{font-size:12px;font-weight:600;color:var(--bank-muted);letter-spacing:.04em;padding:.25rem .5rem .65rem}
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:.5rem}
@@ -61,7 +63,7 @@ button:focus-visible{outline:2px solid var(--bank-accent);outline-offset:3px}
 [data-testid="stWidgetLabel"] p{font-size:14px;color:var(--bank-text)}
 [data-testid="stMetricValue"]{font-size:26px;color:var(--bank-title)}
 [data-testid="stBottom"]{background:linear-gradient(transparent,var(--bank-bg) 24%)}
-[data-testid="stBottomBlockContainer"]{max-width:1120px;padding:1rem 3rem 1.5rem}
+[data-testid="stBottomBlockContainer"]{width:100%;max-width:none;padding:1rem 3rem 1.5rem}
 [data-testid="stChatInput"]{background:#1c1d21;border:1px solid #3d3e48;border-radius:12px;box-shadow:0 8px 32px #0003}
 [data-testid="stChatInput"] textarea{color:var(--bank-text);font-size:15px}
 [data-testid="stChatInput"] textarea::placeholder{color:var(--bank-muted)}
