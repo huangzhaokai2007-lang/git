@@ -34,6 +34,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         return
     with st.container(border=True):
         st.markdown(f"##### 🔍 找到 {len(candidates)} 个同名收款人，请选择")
+        st.caption("状态：🔍 解析中（5 分钟内有效，超时自动作废）")
         st.caption("点「选这位」会带着这个人的 id 继续，不再二次解析。")
         for item in candidates:
             left, right = st.columns([3, 1], vertical_alignment="center")

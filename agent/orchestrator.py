@@ -172,7 +172,10 @@ def _write_audit(ctx: _Ctx, *, tool: str | None, result: str, error_code: str | 
                          params_json={"trace_id": ctx.trace_id, "slots": ctx.slots,
                                       "states": ctx.states, "confidence": ctx.confidence,
                                       "missing_slots": ctx.missing, "tool_calls": ctx.tool_calls},
-                         risk_level=READ_TIER, permission_tier=READ_TIER, result=result,
+                         #: 写步骤要记**实际档位**（`ctx.tier` 由 write_flow 的回执带入）；
+                         #: 只读/追问才记 READ_TIER。否则审计回放会把它看成 L0（实测）。
+                         risk_level=ctx.tier or READ_TIER,
+                         permission_tier=ctx.tier or READ_TIER, result=result,
                          error_code=error_code)
     except Exception:                                        # noqa: BLE001 —— 审计隔离于回执
         logger.exception("写审计失败（回执照常返回，但必须排查）：trace=%s", ctx.trace_id)
@@ -243,6 +246,9 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         return _finish(ctx, templates.refuse(screen.reason), result="rejected")
     if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类；S5 非确认先当「改卡」试一次
         ctx.intent = inflight
+        in_flight = confirm_card.current(ctx.session_id)
+        if in_flight is not None and in_flight.trace_id:   # 同一笔业务沿用出卡时的 trace（审计可回放整条链）
+            ctx.trace_id = in_flight.trace_id
         return _apply(ctx, write_flow.resume(ctx.session_id, text, classify=lambda t: (intent_resolver or classifier.classify)(_with_date_context(t), history)))
     ctx.enter("CLASSIFY")
     verdict = (intent_resolver or classifier.classify)(_with_date_context(text), history)
@@ -270,7 +276,8 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
             ctx.tier = risk_flow.TIER
             return _finish(ctx, risk_flow.PROMPT, result="pending_confirm")
     if ctx.intent in WRITE_INTENTS:                                      # 卡 10：写路径
-        return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id))
+        return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id,
+                                        trace_id=ctx.trace_id))
     return _read_flow(ctx, card_reader=card_reader)
 
 

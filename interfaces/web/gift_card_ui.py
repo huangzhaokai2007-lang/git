@@ -47,6 +47,17 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         left, pay_btn, cancel_btn = st.columns([3.6, 0.9, 0.9], vertical_alignment="center")
         left.markdown(f"**{item['contact']}** · {item['amount_yuan']} 元 · "
                       f"{item['gift_date']} · {item['status_cn']} · `{order_id}`")
+        with left.expander("详情 / 重新下单", expanded=False):
+            st.caption(f"平台 {item.get('platform') or '—'} · 地址 {item.get('address') or '—'}"
+                       f" · 平台订单号 {item.get('platform_order_no') or '—'}")
+            if item["status"] in ("cancelled", "failed"):
+                if st.button("重新下单", key=f"gredo-{order_id}", width="content"):
+                    _start(executor, session_id, "gift_plan",
+                           {"contact": item["contact"],
+                            "date": item["gift_date"],
+                            "budget": item["amount_yuan"]},
+                           f"（按钮）重新下单：{item['contact']}")
+                    st.rerun()
         if item["status"] == "created":                     # 待支付：可支付 / 可取消（解锁）
             if pay_btn.button("支付", key=f"gpay-{order_id}", width="content",
                               help="从储蓄账户真扣款（需验证码）"):

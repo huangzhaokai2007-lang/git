@@ -106,7 +106,9 @@ def _otp_rejected(session_id: str, step: Step, spec: write_intents.WriteSpec,
     remaining = confirm_card.note_otp_error(session_id)
     if confirm_card.is_locked(session_id):
         confirm_card.clear(session_id)
-        step.result, step.reply = "rejected", confirm_card.otp_locked_text(spec.what)
+        step.result = "rejected"
+        step.reply = (f"状态：{confirm_card.state_line(confirm_card.STATE_EXPIRED)}\n"
+                      f"{confirm_card.otp_locked_text(spec.what)}")
         return step
     step.reply = confirm_card.otp_wrong_text(remaining)
     step.ask = confirm_card.otp_prompt(spec.what, masked_phone)
@@ -136,7 +138,9 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     step.states.append("VERIFY_NUMBERS")
     step.reply, step.degraded = compose_result_reply(result.message, result.facts)
     #: 2026-10-24（人类规格「卡片需包含状态」）：成功回执挂状态行；在润色**之后**加，避免被改写。
-    step.reply = f"状态：{confirm_card.state_line(confirm_card.STATE_DONE)}\n{step.reply}"
+    cancelled = confirmation.intent.endswith("_cancel") or "cancel" in confirmation.intent
+    state = confirm_card.STATE_CANCELLED if cancelled else confirm_card.STATE_DONE
+    step.reply = f"状态：{confirm_card.state_line(state)}\n{step.reply}"
     if step.degraded:
         step.error_code = "HALLUCINATION_BLOCKED"
     return step
@@ -274,12 +278,13 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
         masked_phone=confirm_card.mask_phone(str(filled.get("masked_phone") or "")),
         amount_yuan=str(prepared.facts.get("amount_yuan") or ""),
         amount_cents=context["amount_cents"], tier=verdict.tier,
-        requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled)))
+        requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled),
+        trace_id=str(context.get("trace_id") or "")))
     return Step(states=["CONFIRM_CARD"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, reply=card_text, ask=card_text, degraded=degraded)
 
 
-def start(intent: str, slots: Mapping, session_id: str) -> Step:
+def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
     spec = write_intents.spec_of(intent)
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
@@ -311,6 +316,7 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
     verdict = permission.assess_write(intent, tier=prepared.facts.get("tier"),       # 纯代码档位
                                       factors=prepared.facts.get("factors"))
     context = {"session_id": session_id, "intent": intent, "spec": spec, "prepared": prepared,
+               "trace_id": str(trace_id or ""),
                "amount_cents": filled.get("amount_cents") or 0,
                "target_id": str(filled.get(spec.target_key) or "")}
     branch = (_to_pending(context, verdict) if verdict.delayed                       # L3：延迟 + 撤销

@@ -184,6 +184,9 @@ class Confirmation(BaseModel):
     tier: str
     requires_otp: bool
     stage: str = "confirm"            # confirm → otp → 完成/放弃
+    #: 出卡那一轮的 trace_id —— 「一笔业务 = 一个 trace」，确认/执行沿用同一条，
+    #: 审计回放（T52）才能把整条链摊开（2026-10-24 追加）。
+    trace_id: str = ""
     card_text: str = ""
     #: SLOT_FILL 补齐后的槽位快照，供描述符的 `execute` 取用（card-24 泛化后的补充）。
     #: **为什么需要它**：`target_id` 只装得下单主键 —— T9 `create_aa_request(payee_ids, amount)`

@@ -41,6 +41,7 @@ import payee_picker_ui                                          # noqa: E402  �
 import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
 import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
+import audit_ui                                                 # noqa: E402  （审计回放：trace_id → 链路）
 
 load_dotenv(ROOT / ".env")
 
@@ -239,6 +240,7 @@ def _chat_page() -> None:
     if latest.get("categories"):
         with st.expander("📊 这份账单的图表", expanded=True):
             ui.bill_panel(ui.bill_series(messages), latest)
+    audit_ui.render(_agent_executor())                            # 侧边栏：审计回放
     _render_pending()
     _render_confirm()
     payee_picker_ui.render(_agent_executor(), st.session_state["session_id"])  # 解析卡（同名多命中）

@@ -37,6 +37,16 @@ def split_amount(amount: int, count: int) -> tuple[int, int]:
     return per_person, amount - per_person * count
 
 
+def _current_limits() -> dict:
+    """当前用户的「单笔上限 / 今日剩余额度」（与转账共用 `_transfer_risk` 的同一套内核）。"""
+    from tools import _transfer_risk, transfer
+    try:
+        flows = _transfer_risk._today_out_flows(transfer._now())
+        return dict(_transfer_risk._limits(flows))
+    except Exception:                                    # noqa: BLE001 —— 取不到限额就不拦（保守）
+        return {}
+
+
 def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = None,
              per_person: Sequence[int] | None = None) -> dict:
     """AA 的事实包：人数 / 总额 / 每人金额 / 余数 / 档位 / 收款人名单。
@@ -46,6 +56,7 @@ def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = 
     `split_mode="custom"`；缺省 = **一键均摊**（`split_mode="equal"`，余数给发起人）。
     `extra` 供执行侧补 `request_id` 这类只在真发起后才存在的键。
     """
+    limits = _current_limits()                         # 2026-10-24：AA 总额也吃限额（人类规格）
     if per_person:
         per_person = [int(cents) for cents in per_person]
         lines = [{"id": payee["id"], "name": payee["name"], **_money_facts(cents, "amount")}
@@ -58,6 +69,7 @@ def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = 
             "per_person_lines": lines,
             "total_check": sum(per_person),
             "payees": [{"id": payee["id"], "name": payee["name"]} for payee in payees],
+            **_limit_facts(limits),
         }
     else:
         per_person_amount, share = split_amount(amount, len(payees))
@@ -70,6 +82,7 @@ def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = 
             "split_mode": "equal",
             "total_check": per_person_amount * len(payees) + share,
             "payees": [{"id": payee["id"], "name": payee["name"]} for payee in payees],
+            **_limit_facts(limits),
         }
     if extra:
         facts.update(extra)
@@ -117,3 +130,13 @@ def create_aa_request_with_amounts(payee_ids: list[str], amounts: list[int]) -> 
                      risk_level="L1", permission_tier="L1", result="success", error_code=None)
     return _ok({"request_id": request_id, "total_amount": total}, facts,
                f"已发起 AA 收款 {total / 100:.2f} 元（{len(payees)} 人，按人金额）")
+
+def _limit_facts(limits: Mapping) -> dict:
+    """把限额渲染成「整数分 + 元」两套（供卡面与数字校验器）。"""
+    out: dict = {}
+    for key, value in limits.items():
+        name = key if key.startswith("limits_") else f"limits_{key}"   # 与 T7 的事实包同名
+        out[name] = value
+        if isinstance(value, int) and not isinstance(value, bool):
+            out[f"{name}_yuan"] = f"{value / 100:,.2f}"
+    return out

@@ -139,6 +139,18 @@ def _prepare_aa(filled: dict) -> Prepared:
     facts = _aa_split.aa_facts(payees, int(filled["amount_cents"]),
                                per_person=filled.get("per_person_cents"))
     facts["target_name"] = filled["aa_target"]
+    #: 2026-10-24（人类规格「AA 总额同样受限额约束」）：超单笔上限 / 超今日剩余 → 直接拒。
+    single_max = facts.get("limits_single_max")
+    daily_left = facts.get("limits_daily_remaining")
+    total_cents = int(facts.get("amount_cents") or filled.get("amount_cents") or 0)
+    if single_max is not None and total_cents > int(single_max):
+        return Prepared(ok=False, error_code="OVER_LIMIT",
+                        message=f"AA 总额 {total_cents / 100:.2f} 元超过单笔上限 "
+                                f"{int(single_max) / 100:.2f} 元")
+    if daily_left is not None and total_cents > int(daily_left):
+        return Prepared(ok=False, error_code="OVER_LIMIT",
+                        message=f"AA 总额 {total_cents / 100:.2f} 元超过今日剩余额度 "
+                                f"{int(daily_left) / 100:.2f} 元")
     #: 2026-10-24 口径（人类原文）：「AA 中只要含有非白名单收款人就要验证码」——
     #: 全是**有效**白名单 → L1 免码；含非白名单或白名单已过期 → L2；黑名单已在 `_shape_aa` 直接拒。
     non_exempt = [name for pid, name in zip(ids, names) if not _exempt(pid)]

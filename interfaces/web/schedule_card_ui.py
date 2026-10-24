@@ -45,6 +45,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         left, run_btn, edit_btn, cancel_btn = st.columns([3.4, 0.9, 0.9, 0.9],
                                                          vertical_alignment="center")
         left.markdown(f"**{when}** · {item['payee_name']} · {item['amount_yuan']} 元")
+        with left.expander("详情", expanded=False):
+            st.caption(f"预约编号 {schedule_id} · 权限档 {item.get('tier') or '—'}"
+                       f" · 循环 {item.get('repeat_cycle') or '一次性'}"
+                       f" · 循环至 {item.get('repeat_until') or '—'}")
         if run_btn.button("立即执行", key=f"run-{schedule_id}", width="content",
                           help="现在就从账户扣款转账（不再等到预约时间）"):
             _start(executor, session_id, "scheduled_run", {"schedule_id": schedule_id},
