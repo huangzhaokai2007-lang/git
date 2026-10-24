@@ -16,6 +16,7 @@ CLI / API / IM 拿到的仍是同一份**文本回执**（`agent/render_lists.re
 from __future__ import annotations
 
 import html
+import pathlib
 import re
 from typing import NamedTuple
 
@@ -145,6 +146,27 @@ import streamlit as st
 
 from agent import confirm_card, payee_resolve, payee_risk, write_flow
 
+
+def _detail_ui():
+    """取同目录的 `payee_detail_ui`（人名选项 + 专属操作卡）。
+
+    为什么不用顶层 import：单测是按**文件路径**加载本模块的，那时 `interfaces/web` 不在
+    `sys.path` 上；这里按 `__file__` 兜底加载，两条入口都能用。
+    """
+    try:
+        import payee_detail_ui as module
+        return module
+    except ModuleNotFoundError:
+        import importlib.util
+        import sys
+
+        path = pathlib.Path(__file__).with_name("payee_detail_ui.py")
+        spec = importlib.util.spec_from_file_location("payee_detail_ui", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules.setdefault("payee_detail_ui", module)
+        return module
+
 #: 三类人员的中文标签（面向用户只说大白话；与 `render_lists` 的措辞同口径）
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
 
@@ -230,83 +252,4 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     if not people:
         st.caption("这一筛选下没有收款人。")
         return
-    for person in people:
-        kind = ("whitelist" if person["is_whitelist"]
-                else "blacklist" if person["blacklist"] else "normal")
-        tags = f" 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
-        #: 按钮**带 payee_id 直达**：同名收款人（种子里有两个李四）不该再触发解析追问 ——
-        #: 用户在看到卡片时已经知道是谁了（按键就是在这个人那一行）
-        who = {"payee_id": person["payee_id"], "payee": person["name"],
-               "masked_phone": person["masked_phone"]}
-        left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
-            [3.4, 0.75, 0.75, 0.75, 0.75], vertical_alignment="center")
-        note = f" · 备注 {person['note']}" if person.get("note") else ""
-        quota = _quota_note(executor, person)
-        recent = _recent_note(person)
-        card = f" · 卡号 {person['card_no']}" if person.get("card_no") else ""
-        left.markdown(f"**{person['name']}** `{person['masked_phone']}` · {KIND_CN[kind]}"
-                      f"{tags}{_expire_note(person)}{quota}{note}{card}{recent}")
-        if transfer_btn.button("转账", key=f"tr-{person['payee_id']}", width="content",
-                               help=f"给 {person['name']} 转账"):
-            _dispatch_start(executor, session_id, "transfer_single", who,
-                            f"（按钮）给{person['name']}转账")
-            st.rerun()
-        if not person["is_whitelist"] and not person["blacklist"]:
-            if whitelist_btn.button("加白", key=f"wl-{person['payee_id']}", width="content",
-                                    help=f"把 {person['name']} 加入白名单（需验证码）"):
-                _dispatch_start(executor, session_id, "payee_whitelist", who,
-                                f"（按钮）把{person['name']}加入白名单")
-                st.rerun()
-        elif person["is_whitelist"]:
-            if whitelist_btn.button("移出白名单", key=f"wlrm-{person['payee_id']}", width="content",
-                                    help=f"把 {person['name']} 移出白名单（之后转账需要验证码）"):
-                _dispatch_start(executor, session_id, "payee_whitelist_remove", who,
-                                f"（按钮）把{person['name']}移出白名单")
-                st.rerun()
-        if kind == "normal":                              # 只有**普通**收款人能拉黑（白名单先移出）
-            if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}", width="content",
-                                    help=f"把 {person['name']} 加入黑名单（之后转账/送礼被拒）"):
-                _dispatch_start(executor, session_id, "payee_blacklist", who,
-                                f"（按钮）把{person['name']}加入黑名单")
-                st.rerun()
-        elif person["blacklist"]:
-            if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}", width="content",
-                                    help=f"把 {person['name']} 移出黑名单（需验证码）"):
-                _dispatch_start(executor, session_id, "payee_unblacklist", who,
-                                f"（按钮）把{person['name']}移出黑名单")
-                st.rerun()
-        if delete_btn.button("删除", key=f"del-{person['payee_id']}", width="content",
-                             help=f"删除收款人 {person['name']}（需确认）"):
-            _dispatch_start(executor, session_id, "payee_delete", who,
-                            f"（按钮）删除收款人{person['name']}")
-            st.rerun()
-    whitelisted = [p for p in all_people if p["is_whitelist"]]
-    if whitelisted:                                        # 2026-10-24：改额度/有效期（L2 + 验证码）
-        with st.container(border=True):
-            st.markdown("###### ✏️ 修改白名单信息（额度 / 有效期）")
-            names = {f"{p['name']}（{p['masked_phone']}）": p["payee_id"] for p in whitelisted}
-            target = st.selectbox("改谁", list(names), key="wl-edit-pick")
-            col_a, col_b = st.columns(2)
-            quota = col_a.text_input("新的专属额度（元，留空=不改）", key="wl-edit-quota")
-            expire = col_b.text_input("新的有效期（留空=不改）", key="wl-edit-expire",
-                                      placeholder="例如 2026-12-31 或 月底")
-            if st.button("提交修改（需验证码）", key="wl-edit-ok", type="primary"):
-                slots = {"payee_id": names[target]}
-                if quota.strip():
-                    slots["quota"] = quota.strip()
-                if expire.strip():
-                    slots["expire"] = expire.strip()
-                _dispatch_start(executor, session_id, "payee_whitelist_edit", slots,
-                                f"（按钮）修改白名单信息：{target}")
-                st.rerun()
-    with st.container(border=True):                        # 2026-10-24：查询卡上直接改备注
-        st.markdown("###### ✏️ 改某位收款人的备注")
-        names = {f"{p['name']}（{p['masked_phone']}）": p["payee_id"] for p in all_people}
-        target = st.selectbox("改谁的备注", list(names), key="payee-note-pick")
-        text = st.text_input("备注", key="payee-note-text", value="",
-                             placeholder="例如：老同学 / 别转错（留空 = 清除）")
-        if st.button("保存备注", key="payee-note-ok", type="primary"):
-            _dispatch_start(executor, session_id, "payee_note",
-                            {"payee_id": names[target], "note": text.strip()},
-                            f"（按钮）改备注：{target}")
-            st.rerun()
+    _detail_ui().render(executor, session_id, people)   # 人名选项 → 专属操作卡
