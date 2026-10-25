@@ -15,7 +15,8 @@ def test_sidebar_lock_and_record_page(monkeypatch, seeded):
     assert raw(seeded, 'SELECT status FROM card WHERE id=?', (CARD,))[0]['status'] == 'locked'
     click(at, '管卡')
     assert not at.radio and at.chat_input
-    assert any(tab.label == '锁卡记录' for tab in at.tabs)
+    assert not at.tabs
+    at.chat_input[0].set_value('锁卡记录').run()
     assert len(at.dataframe[-1].value) == 1
 
 

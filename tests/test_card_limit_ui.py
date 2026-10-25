@@ -42,7 +42,7 @@ def test_inline_limit_draft_allows_card_shortcut_and_operation_records(monkeypat
 def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     click(at, "管卡")
-    assert any(tab.label == "额度调整记录" for tab in at.tabs)
+    assert not at.tabs
     for digit in ("1", "2", "3"):
         click(at, "绑定银行卡")
         fill(at, "模拟银行卡号", digit * 16)
