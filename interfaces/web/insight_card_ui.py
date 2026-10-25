@@ -29,7 +29,7 @@ import io
 from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
-from interfaces.web import chart_ui
+from interfaces.web import chart_ui, txn_card_ui
 
 #: 有富卡片的意图（其余意图一律不画 —— 宁可朴素，也不许拿半截数据凑图）。
 INSIGHT_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report")
@@ -91,15 +91,14 @@ def _draw_balance(facts: Mapping[str, Any]) -> None:
 
 
 def _draw_txns(facts: Mapping[str, Any]) -> None:
-    """F02：流水 —— 本期支出/收入合计 + 每笔流水一根柱子（金额逐笔照抄）。"""
-    items = list(facts.get("items") or [])
-    if not items:
-        return
-    left, right = st.columns(2)
-    left.metric("区间支出合计（元）", str(facts.get("page_out_sum_yuan") or "—"))
-    right.metric("区间收入合计（元）", str(facts.get("page_in_sum_yuan") or "—"))
-    st.caption(f"下面每根柱子 = 一笔流水（金额原样取自事实包，共 {len(items)} 笔）：")
-    _bar([(str(item.get("ts"))[:10], item.get("amount_yuan")) for item in items[:TXN_BARS]])
+    """F02：流水 —— 交给 `txn_card_ui` 画**分类折叠 + 逐笔展开 + 按日走势**。
+
+    2026-10-26 改：原先只给两个指标 + 「每根柱子 = 一笔」的柱图 —— 五十笔流水压成十根柱子，
+    既看不清分类也点不到具体一笔，用户拿到的是张"看着像图表、实际没信息"的图，
+    这是 F02 验收里最刺眼的一处。**详情卡已迁往 `interfaces/web/txn_card_ui.py`**
+    （本文件够了 300 行红线），这里只做一行转发，调用点与页面桩全部不变。
+    """
+    txn_card_ui.render(facts, key="txn")
 
 
 def _draw_spending(facts: Mapping[str, Any]) -> None:

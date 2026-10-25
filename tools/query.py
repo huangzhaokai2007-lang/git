@@ -28,6 +28,7 @@ from tools._query_analysis import (
     _split_pct,
     _vs_prev_pct,
 )
+from tools import _txn_insight
 from tools._query_common import (
     PCT_TOTAL,
     ToolError,
@@ -167,19 +168,12 @@ def list_txn(
         **_money_facts(
             sum(row["amount"] for row in page if row["amount"] > 0), "page_in_sum"
         ),
-        #: F02 回执要显示**明细行**（时间 / 对手方 / 金额 / 分类），故 items 除金额外还带出
-        #: `counterparty` / `category` 两个**非数字**字段 —— 它们一并进 facts，数字校验器
-        #: 递归收集 facts 里的数字，商户名自带数字也不会被误判成幻觉。
-        "items": [
-            {
-                "id": row["id"],
-                "ts": row["ts"],
-                "counterparty": row.get("counterparty") or "",
-                "category": row.get("category") or "",
-                **_money_facts(row["amount"], "amount"),
-            }
-            for row in page
-        ],
+        #: F02 升级（2026-10-26）：回执不再只报一句"共 N 笔" —— 用户要的是**看得懂的一张账单**：
+        #: 分类汇总、按日走势、收支相抵后的净额、金额最大的几笔，以及带渠道/备注/余额的多维明细。
+        #: 全部由 `tools/_txn_insight.summarize` 一次算进 facts（分组与占比也在这里定死），
+        #: 界面据此画卡、回执据此铺表，**两边读同一份数**，不存在第二套算法。
+        #: 合计数取**整个命中区间**（`rows`，不受 `limit` 影响），`items` 只带本页。
+        **_txn_insight.summarize(rows, page),
     }
     data = ListTxnData(
         items=[TxnItem(**row) for row in page],

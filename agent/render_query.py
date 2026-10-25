@@ -38,6 +38,16 @@ T_TXN_EMPTY = ("{date_from} 至 {date_to} 共查到 {total_count} 笔交易 —�
                "该区间没有符合条件的流水，故不列明细。")
 T_TXN_TABLE_HEAD = "| 时间 | 交易对手 | 金额（元） | 分类 |"
 T_TXN_TABLE_SEP = "| --- | --- | --- | --- |"
+#: 收支相抵后的净额（负数是净支出）。净额由工具层算好进 facts，这里**照印**。
+T_TXN_NET = "收入与支出相抵后，本区间**净{net_yuan}**（负数为净支出）。"
+#: 分类汇总：`amount_yuan` / `count` / `pct` 全部来自 `tools/_txn_insight.category_groups`。
+T_CATEGORY_HEAD = "| 分类 | 笔数 | 金额（元） | 占比 |"
+T_CATEGORY_SEP = "| --- | --- | --- | --- |"
+#: 金额最大的几笔 —— 用户看一眼就该知道哪几笔是关键，这也是排查异常交易的入口。
+T_LARGE_HEAD = "**金额最大的几笔：**"
+
+#: 回执里最多列出几笔大额交易。
+LARGE_ROWS = 3
 
 #: 回执里最多展开多少行明细。回执不是账单，铺太长会淹没重点；**这个数不进回执**
 #: （数字校验器只认 facts，写「前 10 笔」会被判幻觉 → 降级）。
@@ -75,11 +85,28 @@ def txn_row(item: Mapping) -> str:
             f"| {_cell(item.get('category'))} |")
 
 
+def _group_row(item: Mapping) -> str:
+    """一个分类一行：`amount_yuan` / `count` / `pct` 全部照抄 facts（占比条同 `spend_row`）。"""
+    return (f"| {_cell(item['key'])} | {item['count']} | {item['amount_yuan']} "
+            f"| {item['pct']}% {pct_bar(item['pct'])} |")
+
+
+def _large_line(item: Mapping) -> str:
+    """一笔大额一行（`- 时间 · 对手方 · 金额（分类）`）：给用户一个能直接追问的锚点。"""
+    moment = str(item["ts"])[:16].replace("T", " ")
+    return (f"- {moment}　{_cell(item.get('counterparty'))}　{item['amount_yuan']} 元"
+            f"（{_cell(item.get('category'))}）")
+
+
 def render_txns(facts: Mapping) -> str:
-    """`txn_query` 回执（F02）：头句 + 明细表。
+    """`txn_query` 回执（F02）：头句 + **分类汇总** + 明细表。
 
     分支顺序：**空结果优先**（自己的句子，不套列表头）。超出 `TXN_ROWS` 的部分
     **不静默截断** —— 明确说一句「其余未展开」，避免用户以为就这几笔。
+
+    分类汇总为什么进回执（2026-10-26 用户验收口径）：只报「共 N 笔、支出 X 元」，
+    用户拿到的是一句**删减版账单** —— 钱花在哪几个类别、最大一笔是什么，全被丢在回复外。
+    这组数字来自 `tools/_txn_insight.category_groups`，与界面那张卡是同一份数。
     """
     items = list(facts.get("items") or [])
     head = T_TXN_EMPTY if not items else T_TXN_HEAD
@@ -89,8 +116,16 @@ def render_txns(facts: Mapping) -> str:
         raise TemplateError(f"'txn_query' 模板缺少 facts 键：{exc}") from exc
     if not items:
         return head
-    rows = [txn_row(item) for item in items[:TXN_ROWS]]
-    lines = [head, "", T_TXN_TABLE_HEAD, T_TXN_TABLE_SEP, *rows]
+    lines = [head]
+    #: 收支相抵后的净额（工资到账 + 日常支出，一句说清"这个月攒下还是花了"）。
+    #: 只有工具层算了才印 —— **缺键宁可不说，也不许自己算**。
+    if facts.get("net_yuan") is not None:
+        lines += ["", T_TXN_NET.format(net_yuan=facts["net_yuan"])]
+    if groups := list(facts.get("categories") or []):
+        lines += ["", T_CATEGORY_HEAD, T_CATEGORY_SEP, *(_group_row(item) for item in groups)]
+    if largest := list(facts.get("largest") or []):
+        lines += ["", T_LARGE_HEAD, *(_large_line(item) for item in largest[:LARGE_ROWS])]
+    lines += ["", T_TXN_TABLE_HEAD, T_TXN_TABLE_SEP, *(txn_row(item) for item in items[:TXN_ROWS])]
     if len(items) > TXN_ROWS:
         lines += ["", "（回执只列出其中一部分流水，其余未在此展开。）"]
     return "\n".join(lines)
