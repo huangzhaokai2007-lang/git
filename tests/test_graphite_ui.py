@@ -44,6 +44,13 @@ def test_active_shortcut_preserves_draft_and_history_never_queries(monkeypatch, 
     assert at.session_state['active-scene'] == 10
     assert at.session_state['turns'] == turns_before
     assert at.session_state['messages'] == messages_before
-    assert next(item for item in at.text_input if item.label == '模拟银行卡号').value == '6222000000000001'
+    #: 绑卡表单**应当关闭**（2026-10-26 修）。这里原先断言"表单还在、值还在"，是 10-24
+    #: 的老契约；6bee047（10-25，"replace the active workspace on shortcut navigation"）
+    #: 把快捷入口改成替换工作区后，作者同步更新了 `test_web_single_chat.py::
+    #: test_operation_history_keeps_chat_and_closes_binding_form`，却漏了本文件 —— 两条用例
+    #: 对同一动作要求互斥的结果，不可能同时绿。以**较新**的那份契约为准。
+    #: 注意：本用例真正要守的是下面那两条"导航不查库、不落绑定记录"，草稿保留由
+    #: `card_limit` 那侧负责（见 `interfaces/web/shortcut_ui.start` 的取舍说明）。
+    assert not any(item.label == '模拟银行卡号' for item in at.text_input)
     assert raw(seeded, 'SELECT * FROM card') == cards_before
     assert raw(seeded, 'SELECT * FROM agent_card_binding') == []
