@@ -88,9 +88,13 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
     """侧边栏账户余额：只回显 agent 给过的余额回执（数字来自事实包）。返回是否点了刷新。"""
     if not replies:
         st.caption("暂无余额记录，点击刷新查询。")
-    for item in replies:
-        st.markdown(f"- {item['text']}")
-        st.caption(f"`{item['trace_id']}`")
+    for item in replies[-1:]:
+        facts = item.get('facts') or {}
+        if facts.get('balance_yuan') is not None:
+            label = {'savings': '储蓄账户', 'credit': '信用卡账户'}.get(facts.get('account_type'), '账户')
+            st.markdown(f"您的{label}余额为 {facts['balance_yuan']} RMB")
+        else:
+            st.markdown(re.split('[，。]', item['text'], maxsplit=1)[0].replace(' 元', ' RMB'))
     return st.button("刷新余额", icon=":material/refresh:", key="refresh-balance", width="stretch")
 
 
