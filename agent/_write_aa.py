@@ -42,16 +42,20 @@ def _as_list(raw: object) -> list[str]:
     return [text] if text else []
 
 
-def _parse_per_person(raw: object, picked: dict[str, str]) -> tuple[list[int] | None, str | None]:
-    """「王五 100 元、赵六 200 元」→ 按 `picked` 顺序的**整数分**列表；解析不了 → `(None, 原因)`。
+def _parse_per_person(raw: object, picked: dict[str, str],
+                      aliases: dict[str, str] | None = None) -> tuple[list[int] | None, str | None]:
+    """「李四 30、妈妈 40、房东 50」→ 按 `picked` 顺序的**整数分**列表；解析不了 → `(None, 原因)`。
 
-    名字必须恰好是这次 AA 名单里的人（同名歧义在外面已解决，这里只做精确匹配）；
+    名字既可以是**真名**（解析后的姓名），也可以是**用户原话**（标签「房东」/ 手机号「139****1001」）——
+    实测：用户说「向李四，妈妈，房东…各 30,40,50」，而解析后的名单里是「李四、张小美、王五」，
+    只按真名比对会把「妈妈/房东」判成「不在名单里」。`aliases` 就是「原话 → payee_id」的映射。
     金额用 `yuan_to_cents`（与转账同一份解析，禁浮点）。
     """
     text = str(raw or "").strip()
     if not text:
         return None, None
-    name_to_cents: dict[str, int] = {}
+    by_name = {name: payee_id for payee_id, name in picked.items()}
+    cents_of: dict[str, int] = {}
     for seg in re.split(r"[、,，;；]", text):
         seg = seg.strip()
         if not seg:
@@ -60,16 +64,17 @@ def _parse_per_person(raw: object, picked: dict[str, str]) -> tuple[list[int] | 
         if match is None:
             return None, f"「{seg}」看不懂，请写成「王五 100 元、赵六 200 元」的样子"
         name = match.group(1).strip()
-        if name not in picked.values():
+        payee_id = by_name.get(name) or (aliases or {}).get(name)
+        if payee_id is None or payee_id not in picked:
             return None, f"「{name}」不在这次 AA 的名单里"
         cents = yuan_to_cents(match.group(2))
         if cents is None:
             return None, f"「{seg}」的金额看不懂"
-        name_to_cents[name] = cents
-    if set(name_to_cents) != set(picked.values()):
-        lacking = [n for n in picked.values() if n not in name_to_cents]
+        cents_of[payee_id] = cents
+    lacking = [name for payee_id, name in picked.items() if payee_id not in cents_of]
+    if lacking:
         return None, f"还缺 {'、'.join(lacking)} 的金额"
-    return [name_to_cents[name] for name in picked.values()], None
+    return [cents_of[payee_id] for payee_id in picked], None
 
 
 def _shape_aa(slots: Mapping) -> ShapeResult:
@@ -83,6 +88,7 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
     """
     filled, missing = dict(slots), []
     picked: dict[str, str] = {}                     # id → name，顺带完成去重（T9 对重复收款人直接拒）
+    aliases: dict[str, str] = {}                    # 用户原话（标签/手机号）→ id，供按人金额认名字
     clarify, unresolved = "", False
     candidates: list[dict] = []                     # 同名候选 → 交给解析卡
     for query in _as_list(filled.get("payee_ids")):
@@ -95,14 +101,19 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
             clarify = clarify or payee_clarify.ask_for(facts)
         else:
             picked.setdefault(person["payee_id"], person["name"])
+            aliases.setdefault(str(query).strip(), person["payee_id"])
     if unresolved or not picked:
         missing.append("payee_ids")
     else:
         filled["payee_ids"] = list(picked)
         filled["aa_names"] = [picked[payee_id] for payee_id in picked]
         filled["aa_target"] = "、".join(filled["aa_names"])      # 审计与卡面用的可读主对象
-    if picked and filled.get("per_person_cents") is None and filled.get("amounts"):
-        per_person, err = _parse_per_person(filled["amounts"], picked)
+    #: 2026-10-24 修：**名单没解析全时先不校验按人金额**。
+    #: 实测「向李四，妈妈，房东，aa 收款各 30,40,50」——李四同名进解析卡待选，
+    #: 但按人金额里写着「李四 30」，跟已解析出的名单一比就报「李四不在名单里」，
+    #: 把用户挡在门外。正确顺序是：先解析出人（解析卡），再校验金额。
+    if picked and not unresolved and filled.get("per_person_cents") is None and filled.get("amounts"):
+        per_person, err = _parse_per_person(filled["amounts"], picked, aliases)
         if err is not None:
             return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT", message=err)
         filled["per_person_cents"] = per_person
@@ -110,7 +121,7 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
             filled["amount_cents"] = sum(per_person)             # 没报总额 → 按人金额的合计
     if filled.get("amount_cents") is None:
         cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
-        if cents is None:
+        if cents is None and not filled.get("amounts"):      # 按人金额在手时不算「缺金额」
             missing.append("amount")
             # 同名与缺金额**同时发生**时两件事都要说（否则用户以为只差选人）
             amount_hint = "请说明这次 AA 的总金额（例如「AA 收款 300 元」）。"
