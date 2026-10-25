@@ -109,9 +109,8 @@ def test_orchestration_aa_lifecycle(wired, monkeypatch) -> None:
     monkeypatch.setattr(llm, "chat_json", chat_json)
     card = orchestrator.handle("向王五和赵六 AA 收款 300 元", session_id=SESSION)
     assert "CONFIRM_CARD" in card.states
-    stage = orchestrator.handle("确认", session_id=SESSION)      # 含非白名单 → 先要验证码
-    assert stage.executed is False and "验证码" in stage.reply
-    done = orchestrator.handle("123456", session_id=SESSION)
+    # 2026-10-25 口径：AA 是收款方向，一律免码 → 「确认」即发起，没有验证码阶段
+    done = orchestrator.handle("确认", session_id=SESSION)
     assert done.executed is True and "AA 单号 aa_" in done.reply
 
     def chat_json2(system: str, user: object, schema):
