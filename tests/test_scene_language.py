@@ -189,3 +189,29 @@ def test_status_navigation_never_executes(text):
     result = planner(text, {'intent':'card_report_lost'})
     assert result is not None
     assert result.get('action')
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('上个月的流水', 'txn_query'),
+    ('那2026年5月的流水呢', 'txn_query'),
+    ('8月有什么异常支出', 'anomaly_check'),
+    ('上个月的账单总结', 'bill_report'),
+    ('5月花了多少', 'bill_analysis'),
+])
+def test_explicit_intent_word_beats_inheritance(text, expected):
+    """句子里明确点名了意图时，必须覆盖上一轮的继承（2026-10-26 实测缺陷）。
+
+    上轮是 anomaly_check、这轮说「上个月的流水」，原实现直接继承 previous →
+    问流水答异常。继承只该兜底「那 5 月的呢」这种省略了意图的追问。
+    """
+    result = planner(text, {'intent': 'anomaly_check', 'period': '2026-09'})
+    assert result['intent'] == expected
+    assert result['slots']
+
+
+@pytest.mark.parametrize('text', ['那5月的呢', '再看看8月', '那2026年7月'])
+def test_omitted_intent_still_inherits_previous(text):
+    """省略意图的纯账期追问仍走继承（不能被显式词逻辑误伤）。"""
+    result = planner(text, {'intent': 'anomaly_check', 'period': '2026-09'})
+    assert result['intent'] == 'anomaly_check'
+    assert result['slots']['period']

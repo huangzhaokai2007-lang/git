@@ -13,6 +13,11 @@ from agent.period import anchor_period, resolve_period
 from agent.scene_phrases import ALIASES, extra
 
 _BILLS = {'txn_query', 'bill_analysis', 'bill_report', 'anomaly_check'}
+#: 规格 §3 / `classifier.SYSTEM_PROMPT` 的「账单总结」触发词：只有**明确要一份成品报告**的说法
+#: 才判 `bill_report`；只是问「X月的账单」= 问花了多少 → `bill_analysis`。
+#: 这张表必须与分类器提示词逐字一致 —— scene 层返回 confidence=1 会压过分类器，
+#: 口径一旦漂移，同一句话在网页端和 CLI/API/IM/离线入口就会给出两个意图。
+_REPORT_MARKS = ('总结', '汇总', '报告', '出一份', '给我一份')
 _CARDS = {'card_query', 'card_lock', 'card_unlock', 'card_report_lost', 'card_limit_adjust'}
 _SUBS = {'subscription_list', 'subscription_cancel', 'subscription_remind'}
 _WEALTH = {'wealth_holdings', 'wealth_all_products', 'wealth_buy', 'wealth_redeem', 'wealth_recommend'}
@@ -64,21 +69,71 @@ def _entity(text: str, context: dict, domain: str) -> object | None:
     return row.get(key) or row.get('id')
 
 
-def _period(text: str) -> str | None:
-    text = re.sub(r'^(?:那|那么|再|查一下|查询|查|看看|看一下|看)', '', text)
-    text = re.sub(r'(?:的)?(?:账单|消费|交易|支出)?(?:怎么样|呢|如何|比呢)?$', '', text)
-    text = re.sub(r'^和|^跟', '', text)
-    if value := resolve_period(text):
-        return value
-    match = re.fullmatch(r'(?:(\d{4})年)?([一二三四五六七八九十]+|\d{1,2})月', text)
+#: 追问题开头的引导词（可以叠着说：「再看看 8 月」= 再 + 看看）
+_LEAD = re.compile(r'^(?:那|那么|再|查一下|查询|查|看看|看一下|看)+')
+_MONTH = r'(?:(\d{4})年)?([一二三四五六七八九十]+|\d{1,2})月'
+_TAIL = r'(?:的)?(?:账单|消费|交易|支出)?(?:怎么样|呢|如何|比呢)?$'
+
+
+def _month(text: str) -> str | None:
+    """`{(\\d{4})年}?{月}` → `YYYY-MM`（缺年份时按锚点年补）。"""
+    match = re.fullmatch(_MONTH, text)
     if not match:
         return None
     month = int(match[2]) if match[2].isdigit() else _NUMBERS.get(match[2], 0)
     return f'{match[1] or anchor_period()[:4]}-{month:02d}' if 1 <= month <= 12 else None
 
 
+def _period(text: str) -> str | None:
+    text = _LEAD.sub('', text)
+    text = re.sub(_TAIL, '', text)
+    text = re.sub(r'^和|^跟', '', text)
+    return resolve_period(text) or _month(text)
+
+
+def _embedded_period(text: str) -> str | None:
+    """账期被意图词隔断时的兜底：「上个月的流水」「8月有什么异常支出」。
+
+    `_period` 走的是"剥掉固定后缀 → 整串匹配"，于是账期后面只要多接了半个字（点名
+    意图、加个「有什么」）就整条追问掉回分类器，上一轮的上下文全丢 —— 用户问流水、
+    拿到的是上一轮的异常检测。
+
+    只在**已经认出了显式意图词**时才兜底（见 `_time`），且账期永远是追问题里最先说
+    出来的那个成分，所以从句首锚定搜一次即可：纯筛选类追问（「只看餐饮」）认不出
+    意图词，不会走到这里，仍按老样子回分类器。
+    """
+    text = _LEAD.sub('', text)
+    if match := re.match(_MONTH, text):
+        month = int(match[2]) if match[2].isdigit() else _NUMBERS.get(match[2], 0)
+        if 1 <= month <= 12:
+            return f'{match[1] or anchor_period()[:4]}-{month:02d}'
+    for word in ('上上个月', '上个月', '上月', '这个月', '本月', '当月'):
+        if word in text:
+            return resolve_period(word)
+    return None
+
+
+def _explicit_intent(text: str) -> str | None:
+    """句子里出现**明确的意图词**时返回对应意图（覆盖继承）。
+
+    2026-10-26 修：「上个月的流水」在上一轮是异常检测时被继承成 anomaly_check ——
+    问流水答异常。词序沿用 `app/cli.py` OFFLINE_RULES 的口径：更具体的意图词优先
+    （「异常支出」归异常、「账单总结」归报告，不能被泛词截走）。
+    """
+    if '异常' in text or '可疑' in text:
+        return 'anomaly_check'
+    if any(mark in text for mark in _REPORT_MARKS):
+        return 'bill_report'
+    if '流水' in text or '交易记录' in text:
+        return 'txn_query'
+    if '花了多少' in text or '消费' in text or '支出' in text:
+        return 'bill_analysis'
+    return None
+
+
 def _time(text: str, context: dict) -> dict | None:
-    period = _period(text)
+    explicit = _explicit_intent(text)
+    period = _period(text) or (explicit and _embedded_period(text))
     if not period:
         return None
     previous = context.get('intent')
@@ -93,12 +148,12 @@ def _time(text: str, context: dict) -> dict | None:
                     **({'card_id': context['card_id']} if context.get('card_id') else {})})
     if previous not in _BILLS and not re.search(r'账单|消费|交易|支出', text):
         return None
-    #: 意图归属（2026-10-26 修）：原实现无条件 `'bill_report' if '账单' in text`，
-    #: 于是**上轮是账单分析（bill_analysis）、这轮换个账期说「那 5 月的账单」时，继承来的意图被
-    #: 硬写成 bill_report** —— 用户问的是分析，拿到的是报告。故：**有前序账单意图就继承**；
-    #: 没有前序时，「X月的账单」按开宗明义要账单处理 = bill_report（与
-    #: `tests/test_scene_integration.py` 锁定的口径一致，不动它）。
-    intent = previous if previous in _BILLS else 'bill_report'
+    #: 意图归属（2026-10-26 修）：**显式意图词 > 前序继承 > bill_report**。
+    #: 有前序账单意图就继承；没有前序时，「X月的账单」按开宗明义要账单处理 = bill_report
+    #: （与 `tests/test_scene_integration.py` 锁定的口径一致，不动它）。
+    #: 但句子里明确点名了意图（如「上个月的流水」）时，必须以前序为准让位 —— 继承只该
+    #: 兜底省略了意图的追问（「那 5 月的呢」），不该改写用户点名的意图。
+    intent = explicit or (previous if previous in _BILLS else 'bill_report')
     if intent not in _BILLS:
         intent = 'bill_analysis'
     if intent == 'txn_query' and len(period) == 7:
