@@ -27,6 +27,7 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
+from interfaces.web import chart_ui
 
 #: 有富卡片的意图（其余意图一律不画 —— 宁可朴素，也不许拿半截数据凑图）。
 INSIGHT_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report")
@@ -73,7 +74,7 @@ def _bar(pairs: Sequence[tuple[str, object]], *, height: int = 240) -> None:
     series = {label: _num(value) for label, value in pairs if str(value or "").strip()}
     if not series:
         return
-    st.bar_chart(series, height=height)
+    chart_ui.bar(list(series.items()), height=height)
 
 
 # ---------------- 各意图的图 ----------------
@@ -100,13 +101,7 @@ def _draw_txns(facts: Mapping[str, Any]) -> None:
 
 
 def _draw_spending(facts: Mapping[str, Any]) -> None:
-    """F14：账单分析 —— 分类金额柱状图（`groups[]` 由工具层算好，界面不重算）。"""
-    groups = list(facts.get("groups") or [])
-    if not groups:
-        return
-    st.caption(f"支出分类（共 {len(groups)} 类，合计 {facts.get('total_yuan') or '—'} 元，"
-               "占比由工具层给出）：")
-    _bar([(str(group.get("key")), group.get("amount_yuan")) for group in groups])
+    """The category pie is already embedded in the reply at its original table."""
 
 
 def _draw_anomalies(facts: Mapping[str, Any]) -> None:
@@ -127,13 +122,12 @@ def _draw_anomalies(facts: Mapping[str, Any]) -> None:
 
 
 def _draw_report(facts: Mapping[str, Any]) -> None:
-    """F24：账单总结 —— 收/支/净三指标 + 分类柱状图。"""
+    """F24：收/支/净三指标和收支对比；分类饼图随正文展示。"""
     cols = st.columns(3)
     cols[0].metric("支出合计（元）", str(facts.get("out_sum_yuan") or "—"))
     cols[1].metric("收入合计（元）", str(facts.get("in_sum_yuan") or "—"))
     cols[2].metric("净额（元）", str(facts.get("net_yuan") or "—"))
     _bar([("支出", facts.get("out_sum_yuan")), ("收入", facts.get("in_sum_yuan"))], height=200)
-    _draw_spending(facts)
 
 
 _DRAWERS: dict[str, Callable[[Mapping[str, Any]], None]] = {
