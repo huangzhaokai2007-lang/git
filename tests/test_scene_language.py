@@ -24,6 +24,35 @@ def test_relative_month(text):
     assert result['slots']['period'] == resolve_period('上个月')
 
 
+@pytest.mark.parametrize('previous,expected', [('bill_analysis', 'bill_analysis'),
+                                               ('bill_report', 'bill_report'),
+                                               ('anomaly_check', 'anomaly_check'),
+                                               ('txn_query', 'txn_query')])
+def test_month_switch_inherits_previous_bill_intent(previous, expected):
+    """换个账期追问时，上一轮的账单类意图必须被继承 —— **不能被硬写成 bill_report**。
+
+    实测缺陷（2026-10-26 修）：上轮问「上个月花了多少」（bill_analysis），这轮说
+    「那 2026年5月的账单」，原实现无条件 `'bill_report' if '账单' in text`，
+    把继承来的 `previous` 覆盖掉 → 用户问的是分析、拿到的是报告，且数字来自真实事实包，
+    看着完全像对的。
+    """
+    result = planner('那2026年5月的账单', {'intent': previous, 'period': '2026-09'})
+    assert result['intent'] == expected
+    assert result['slots']
+
+
+@pytest.mark.parametrize('text', ['2026年5月的账单', '查八月账单', '上个月的账单'])
+def test_month_bill_phrase_without_context_is_a_report(text):
+    """**没有前序上下文**时，「X月的账单」= 开宗明义要一份账单 → `bill_report`。
+
+    与 `tests/test_scene_integration.py::test_month_card_detail_and_filters_keep_scope`
+    锁定的口径保持一致（那条用例在首轮就把「查八月账单」判给 bill_report）。
+    """
+    result = planner(text, {})
+    assert result['intent'] == 'bill_report'
+    assert result['slots']['period']
+
+
 def test_month_comparison():
     result = planner('和八月比呢', {'intent': 'bill_analysis', 'period': '2026-09'})
     assert result['read_request'] == {'kind': 'compare_periods', 'period': '2026-09',

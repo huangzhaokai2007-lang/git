@@ -93,7 +93,12 @@ def _time(text: str, context: dict) -> dict | None:
                     **({'card_id': context['card_id']} if context.get('card_id') else {})})
     if previous not in _BILLS and not re.search(r'账单|消费|交易|支出', text):
         return None
-    intent = 'bill_report' if '账单' in text else previous
+    #: 意图归属（2026-10-26 修）：原实现无条件 `'bill_report' if '账单' in text`，
+    #: 于是**上轮是账单分析（bill_analysis）、这轮换个账期说「那 5 月的账单」时，继承来的意图被
+    #: 硬写成 bill_report** —— 用户问的是分析，拿到的是报告。故：**有前序账单意图就继承**；
+    #: 没有前序时，「X月的账单」按开宗明义要账单处理 = bill_report（与
+    #: `tests/test_scene_integration.py` 锁定的口径一致，不动它）。
+    intent = previous if previous in _BILLS else 'bill_report'
     if intent not in _BILLS:
         intent = 'bill_analysis'
     if intent == 'txn_query' and len(period) == 7:
