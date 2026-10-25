@@ -106,8 +106,8 @@ def test_series_still_falls_back_to_reply_text() -> None:
     assert ui.latest_bill(messages)["period"] == "2026-08"
 
 
-def test_bill_page_charts_the_facts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """端到端：问一句账单总结 → 切到图表页 → 图在；**抹掉回执文案里的数字，图还在**。
+def test_chat_page_charts_the_facts(monkeypatch: pytest.MonkeyPatch) -> None:
+    """端到端：问一句账单总结 → 聊天页内嵌图表出图；**抹掉回执文案里的数字，图还在**。
 
     最后那一步是本用例的价值所在：老实现靠正则扫回执文案出坐标，文案一改图就静默变空；
     现在数字来自 `Turn.facts`，把 `text` 换成一句没有数字的话，图**一张不少**。
@@ -116,10 +116,8 @@ def test_bill_page_charts_the_facts(monkeypatch: pytest.MonkeyPatch) -> None:
     at.chat_input[0].set_value("上个月的账单总结").run()
     assert not at.exception, at.exception
 
-    at.radio[0].set_value("📊 账单图表").run()
-    assert not at.exception, at.exception
     charts = len(at.get("vega_lite_chart"))
-    assert charts > 0                                        # 分类占比图 + 月度趋势图
+    assert charts > 0                                        # 洞察卡 + 账单图表都出图
     captions = "\n".join(str(element.value) for element in at.caption)
     assert "事实包" in captions                              # 页面自己说明：数据取自 Turn.facts
 

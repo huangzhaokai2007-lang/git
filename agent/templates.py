@@ -62,11 +62,11 @@ def sanitize_facts(value: object, *, key: str | None = None) -> object:
 #: **非数字**标签注入，校验器只认数字，标签不影响校验）
 T_BALANCE = "您的{account_type_cn}账户余额为 {balance_yuan} 元，可用余额 {available_yuan} 元（截至 {as_of}）。"
 
-#: 流水：facts 键见 T2（total_count / page_out_sum_yuan / page_in_sum_yuan / items[]）
-#: 注意：T2 的 facts **没有** date_from/date_to 键 → 模板不得印时间范围（否则数字校验会把它当幻觉）
-#: 实际渲染在 `render_query.render_txns`（头句 + **明细表**）；这里保留键位是为了
+#: 流水：facts 键见 T2（total_count / page_out_sum_yuan / page_in_sum_yuan / items[] / date_from / date_to）
+#: 实际渲染在 `render_query.render_txns`（头句带**查询区间** + **明细表**）；这里保留键位是为了
 #: 「每个只读意图都有模板」这类检查不落空（与 T_ANOMALY 同口径）。
-T_TXN = "共查到 {total_count} 笔交易，其中支出合计 {page_out_sum_yuan} 元、收入合计 {page_in_sum_yuan} 元。"
+T_TXN = ("{date_from} 至 {date_to} 共查到 {total_count} 笔交易，"
+         "其中支出合计 {page_out_sum_yuan} 元、收入合计 {page_in_sum_yuan} 元。")
 
 #: 账单分析：facts 键见 T3（period / total_yuan / vs_prev_pct / groups[]）
 #: 实际渲染在 `render_query.render_spending`（头句 + **分类占比表**）；同样只保留键位。

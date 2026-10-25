@@ -27,11 +27,15 @@ __all__ = ["BAR_CELLS", "T_ANALYSIS_EMPTY", "T_ANALYSIS_HEAD", "T_ANALYSIS_NO_PR
 #: facts 键见 `tools/query.py` T2（`total_count` / `page_out_sum_yuan` / `page_in_sum_yuan` / `items[]`）。
 #: 老口径只印一句「共查到 N 笔交易」——用户拿到合计数却**一笔流水都看不到**，
 #: 这是 F02 在对话框里最直观的缺口，明细表补在这里。
-#: 注意：T2 的 facts **没有** date_from/date_to 键 → 头句不得印时间范围（否则校验器当幻觉）。
-T_TXN_HEAD = "共查到 {total_count} 笔交易，其中支出合计 {page_out_sum_yuan} 元、收入合计 {page_in_sum_yuan} 元。"
-#: 空结果也**照印条数**（`total_count` 来自 facts）：只看「没有流水」四个字，用户无法判断
-#: 是"真的没有"还是"没查到"；带上「共 0 笔交易」才是一句完整的交代。
-T_TXN_EMPTY = "共查到 {total_count} 笔交易 —— 该区间没有符合条件的流水，故不列明细。"
+#: T2 的 facts 带 `date_from` / `date_to`（查询区间原样回传），故头句**点明查的是哪一段** ——
+#: 账单分析/账单总结的头句都带账期（「2025-09 共支出…」），唯独流水不带的话，用户拿到
+#: 「共 50 笔交易」无从判断查对了月份没有。日期不进数字校验（`_DATEISH` 先摘掉再比），安全。
+T_TXN_HEAD = ("{date_from} 至 {date_to} 共查到 {total_count} 笔交易，"
+              "其中支出合计 {page_out_sum_yuan} 元、收入合计 {page_in_sum_yuan} 元。")
+#: 空结果也**照印区间与条数**（都来自 facts）：只看「没有流水」四个字，用户无法判断
+#: 是"真的没有"还是"没查到"；带上区间和「共 0 笔交易」才是一句完整的交代。
+T_TXN_EMPTY = ("{date_from} 至 {date_to} 共查到 {total_count} 笔交易 —— "
+               "该区间没有符合条件的流水，故不列明细。")
 T_TXN_TABLE_HEAD = "| 时间 | 交易对手 | 金额（元） | 分类 |"
 T_TXN_TABLE_SEP = "| --- | --- | --- | --- |"
 

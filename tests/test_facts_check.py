@@ -13,6 +13,7 @@ SPEC-CHANGE（§7 口径收窄）：容差**由回执数字的单位决定** —
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -120,14 +121,18 @@ def test_no_dead_helpers_left_in_templates() -> None:
 # ---------------- ③ 端到端：改数字 → 重生成一次 → 降级 + 审计 ----------------
 
 def _lying_llm(monkeypatch: pytest.MonkeyPatch, *, lie: str = "9,999,999.00") -> dict[str, int]:
-    """假 LLM：分类照常；润色时**把金额改成 facts 里没有的数字**。统计调用次数。"""
+    """假 LLM：分类照常；润色时**把金额改成 facts 里没有的数字**。统计调用次数。
+
+    按金额形态（而非写死某个余额）替换：写死的话换个种子余额就"替换不到"，
+    回执自然合规 → 红线用例当场绿着躺平（本次扩数据就踩到了）。
+    """
     calls = {"classify": 0, "polish": 0}
 
     def chat_json(system: str, user: str, schema):
         if "润色" in system:
             calls["polish"] += 1
             text = json.loads(user)["reply"]
-            return schema(reply=text.replace("46,634.00", lie))
+            return schema(reply=re.sub(r"\d[\d,]*\.\d{2}", lie, text, count=1))
         calls["classify"] += 1
         return schema.model_validate({"intent": "balance_query", "confidence": 0.95, "slots": {}})
 
@@ -157,7 +162,7 @@ def test_hallucinated_reply_is_regenerated_then_degraded_and_audited(seeded: Pat
     turn = orchestrator.handle("我的储蓄卡还有多少钱", session_id="facts-13")
     assert calls["classify"] == 1 and calls["polish"] == 2           # 只重生成一次
     assert turn.degraded is True and turn.error_code == facts_check.ERROR_CODE
-    assert "9,999,999" not in turn.reply and "46,634.00" in turn.reply
+    assert "9,999,999" not in turn.reply and "52,281.00" in turn.reply
     assert turn.reply.startswith("您的储蓄账户余额为")                  # 模板回执（不是模型的措辞）
     row = raw(seeded, "SELECT error_code, result, tool FROM audit_log ORDER BY rowid DESC LIMIT 1")[0]
     assert count(seeded, "audit_log") == before_audit + 1 and row["error_code"] == facts_check.ERROR_CODE

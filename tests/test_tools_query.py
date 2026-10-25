@@ -63,12 +63,12 @@ def test_get_balance_rejects_illegal_account_type(seeded: Path, bad: object) -> 
 
 
 def test_list_txn_full_range_counts_all_rows_but_limits_the_page(seeded: Path) -> None:
-    result = query.list_txn("2025-09-01", "2026-08-31", limit=5)
-    assert result.data["total_count"] == txns_of(seeded, "1 = 1") == 600
+    result = query.list_txn("2025-09-01", "2026-09-30", limit=5)
+    assert result.data["total_count"] == txns_of(seeded, "1 = 1") == 645
     assert len(result.data["items"]) == 5
     stamps = [item["ts"] for item in result.data["items"]]
     assert stamps == sorted(stamps, reverse=True)
-    assert result.facts["total_count"] == 600 and result.facts["returned_count"] == 5
+    assert result.facts["total_count"] == 645 and result.facts["returned_count"] == 5
     assert_covered(result.message, result.facts)
 
 

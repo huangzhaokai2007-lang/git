@@ -15,7 +15,7 @@ import pytest
 from data.seed import SAVINGS_ID
 from tools import _transfer_risk, query, transfer
 
-from tests.conftest import (FOREIGN_PAYEE, PAYEE, PAYEE_NEW, OTP, Clock, write_sql, count, balance, assert_covered, preview_ok, add_today_flows)
+from tests.conftest import (FOREIGN_PAYEE, PAYEE, PAYEE_NEW, OTP, Clock, write_sql, count, balance, assert_covered, preview_ok, set_today_flows)
 
 
 def test_error_code_enum_has_all_ten_registered_values() -> None:
@@ -175,20 +175,22 @@ def test_preview_writes_absolutely_nothing(seeded: Path) -> None:
 
 
 def test_preview_reports_remaining_limits_from_today(seeded: Path) -> None:
+    set_today_flows(seeded, "2026-09-12", [])                            # 从"当天零支出"起步
     result = preview_ok(PAYEE, 10_000)
     assert result.data["limits"] == {"single_max": 50_000, "daily_max": 200_000,
                                      "daily_used": 0, "daily_remaining": 200_000}
     assert result.facts["limits_daily_remaining_yuan"] == "2,000.00"
-    add_today_flows(seeded, [("2026-09-12T09:00:00", -160_000)])
+    set_today_flows(seeded, "2026-09-12", [("2026-09-12T09:00:00", -160_000)])
     used = preview_ok(PAYEE, 30_000)
     assert used.facts["limits_daily_used"] == 160_000 and used.data["limits"]["daily_remaining"] == 40_000
 
 
 def test_preview_enforces_single_and_daily_hard_limits(seeded: Path) -> None:
+    set_today_flows(seeded, "2026-09-12", [])                                 # 从"当天零支出"起步
     over_single = transfer.preview_transfer(PAYEE, 50_001)
     assert over_single.error_code == "OVER_LIMIT" and over_single.data is None
     assert transfer.preview_transfer(PAYEE, 50_000).ok                       # 恰好上限：放行
-    add_today_flows(seeded, [("2026-09-12T09:00:00", -160_000)])
+    set_today_flows(seeded, "2026-09-12", [("2026-09-12T09:00:00", -160_000)])
     assert transfer.preview_transfer(PAYEE, 50_000).error_code == "OVER_LIMIT"      # 160000+50000 > 200000
     assert preview_ok(PAYEE, 40_000).facts["limits_daily_used"] == 160_000         # 恰好不超：放行
 

@@ -18,65 +18,18 @@
 
 from __future__ import annotations
 
-import calendar
-import re
-from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
 
+#: 日期槽位抽取**只有一份实现**，住在 `app/cli.py`（网页端、CLI、API、IM 四个入口共用）。
+#: 此前本文件留了一份同名副本，于是"整月说法"这类能力加在哪边、另一边就缺一块 —— 双份口径必漂移。
 def dates_from_text(text: str) -> dict:
-    """从话里抽 F02 的 `date_from` / `date_to`（离线演示用，**非**业务实现）。
+    """转发到 `app.cli.dates_from_text`（离线演示用，**非**业务实现）。"""
+    from app import cli
 
-    支持：「2026-08-01 到 2026-08-31」「8月1日到8月31日」「上个月」「本月」
-    「最近 N 天」「最近」。相对说法一律以**数据锚点**为今天（`agent.period.anchor_date`）。
-    """
-    iso = re.findall(r"(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})", text)
-    if len(iso) >= 2:                                            # 一对完整日期 → 直接用
-        (y1, m1, d1), (y2, m2, d2) = iso[0], iso[-1]
-        return {"date_from": f"{y1}-{int(m1):02d}-{int(d1):02d}",
-                "date_to": f"{y2}-{int(m2):02d}-{int(d2):02d}"}
-
-    cn = re.findall(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]", text)  # 「8月1日到8月31日」
-    if len(cn) >= 2:
-        year = int(iso[0][0]) if iso else date.today().year
-        (m1, d1), (m2, d2) = cn[0], cn[-1]
-        return {"date_from": f"{year}-{int(m1):02d}-{int(d1):02d}",
-                "date_to": f"{year}-{int(m2):02d}-{int(d2):02d}"}
-
-    def whole_month(y: int, m: int) -> dict:
-        return {"date_from": f"{y}-{m:02d}-01",
-                "date_to": f"{y}-{m:02d}-{calendar.monthrange(y, m)[1]:02d}"}
-
-    #: ⚠️ **不许用 `date.today()`**：真实时钟跑在 2026-10，而合成数据窗口的末月是 2026-08
-    #: （锚点 `AS_OF` = 2026-09-12）→ 「上个月」解析成 2026-09 → 一笔都没有，演示当场翻车。
-    #: 全系统的口径是「锚点即今天」（orchestrator 也是这么告诉模型的），这里必须同一个锚点。
-    #: 局部 import：本文件被 streamlit 直接加载，模块级 import 时 `sys.path` 还没配好。
-    from agent.period import anchor_date
-
-    today = anchor_date()
-    if "上上个月" in text:
-        y, m = (today.year, today.month - 2) if today.month > 2 else (today.year - 1, today.month + 10)
-        return whole_month(y, m)
-    if "上个月" in text or "上月" in text:
-        y, m = (today.year, today.month - 1) if today.month > 1 else (today.year - 1, 12)
-        return whole_month(y, m)
-    if "本月" in text or "这个月" in text:
-        return whole_month(today.year, today.month)
-
-    days = re.search(r"最近\s*(\d+)\s*天", text)
-    if days:
-        return {"date_from": date.fromordinal(today.toordinal() - int(days.group(1)) + 1).isoformat(),
-                "date_to": today.isoformat()}
-    if "最近" in text:                                           # 没给天数 → 默认近 30 天
-        return {"date_from": date.fromordinal(today.toordinal() - 29).isoformat(),
-                "date_to": today.isoformat()}
-    if len(iso) == 1:                                            # 单个日期 → 当天
-        y, m, d = iso[0]
-        day = f"{y}-{int(m):02d}-{int(d):02d}"
-        return {"date_from": day, "date_to": day}
-    return {}
+    return cli.dates_from_text(text)
 
 
 def activate() -> None:

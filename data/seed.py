@@ -2,8 +2,12 @@
 
 全部为**合成数据**：不含真实姓名、身份证号、手机号或完整卡号，也不含真实机构名。
 - 用户 张三（138****0001，KYC=L2）+ 储蓄/信用 2 个账户 + 3 张卡（其中 1 张已挂失）。
-- 账期 2025-09-01 ~ 2026-08-31（12 个月）：每月 49 条常规流水（588 条）+ 12 条植入流水
-  （6 条异常 + 1 条年费 + 5 条已取消订阅的历史扣费）= **600 条**。
+- 账期 2025-09-01 ~ 2026-09-30（**13 个账期月** = 完整一年 + 锚点当月），故**每个月**的账单
+  与流水都查得到：每月 49 条常规流水（637 条）+ 12 条植入流水（6 条异常 + 1 条年费 +
+  5 条已取消订阅的历史扣费）= 649 条，末月尚未过完扣掉 4 条（见下）= **645 条**。
+- 末月（2026-09）只生成到 `AS_OF`（09-12）：今天之后的流水**还没发生**，塞进库里等于给账期
+  编未来交易 —— 查「本月账单」时看着就像幻觉。故扣费日/还款日落在今天之后的 4 条不生成
+  （信用卡还款 2 条 + 月订 2 条），当月 45 条。
 - 期初余额见 `OPENING_BALANCES`：每个账户按 (ts, id) 顺序累加 amount 得到 balance_after，
   账户最终 balance 即最后一笔的 balance_after —— "流水合计 = 余额变动"可独立复算。
 - `AS_OF` 是数据集的"今天"（固定常量，跨天亦可复现）；订阅下次扣费日以它为准落在未来 30 天内。
@@ -30,10 +34,11 @@ logger = logging.getLogger(__name__)
 SEED = 20260912                                            # 固定随机种子
 AS_OF = date(2026, 9, 12)                                  # 数据集的"今天"（固定常量，跨天复现）
 DEFAULT_DB_PATH = Path(os.environ.get("DB_PATH") or "var/bank.db")   # 卡 20-C：库住 var/，不混进代码目录 data/
-DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 8, 31), 12
+DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 9, 30), 13
 USER_ID, SAVINGS_ID, CREDIT_ID = "u_zhangsan_0001", "acc_savings_0001", "acc_credit_0001"
 CREDIT_LIMIT = 3_000_000                                   # 信用额度 30,000.00 元（分）
 SALARY = 950_000                                           # 月薪 9,500.00 元（分）
+SALARY_DAY, REPAY_DAY = 10, 15                              # 每月发薪日 / 信用卡还款日
 CREDIT_OPENING_BILL = 125_000                              # 期初账单 1,250.00 元 → 首月还款额
 OPENING_BALANCES: dict[str, int] = {SAVINGS_ID: 2_865_000, CREDIT_ID: -CREDIT_OPENING_BILL}
 
@@ -158,34 +163,58 @@ def _month_of(index: int) -> tuple[int, int]:
     return 2025 + (8 + index) // 12, (8 + index) % 12 + 1     # 月份序号（0 = 2025-09）→ (年, 月)
 
 
+def _month_last_day(index: int) -> int:
+    """第 index 个月可用于生成流水的最大日子：锚点当月只到 `AS_OF`，其余月一律 28。
+
+    不用当月真实天数，是为了让各月口径一致（28 天以内每个月都有，跨月比较才公平）；
+    而锚点当月**尚未过完**，生成今天之后的流水等于给账期编未来交易。
+    """
+    return AS_OF.day if _month_of(index) == (AS_OF.year, AS_OF.month) else 28
+
+
+def _sample_days(rng: random.Random, pool: range, count: int) -> list[int]:
+    """在 `pool` 里取 `count` 个日子：够抽就不重复，天数不够（末月）才允许同日多笔。"""
+    return rng.sample(pool, count) if len(pool) >= count else rng.choices(pool, k=count)
+
+
 def _month_drafts(index: int, rng: random.Random, prev_credit: int,
                   payee_usage: dict[str, str]) -> tuple[list[TxnDraft], int]:
-    """第 index 个月的 49 条常规流水；返回 (草稿, 本月信用卡消费合计)。
-    批次按 rng.sample 取日内不重复的日子、同商户每月最多 2 笔，故正常数据不命中"同商户 1 小时 ≥3 笔"。"""
+    """第 index 个月的常规流水；返回 (草稿, 本月信用卡消费合计)。
+
+    整月 49 条 = 40 条批次消费 + 工资 + 3 笔转账 + 3 笔月订 + 信用卡还款 2 条；
+    锚点当月只到今天，扣费日/还款日落在今天之后的几条不生成（当月 45 条）。
+    批次按 rng.sample 取日内不重复的日子、同商户每月最多 2 笔，故正常数据不命中"同商户 1 小时 ≥3 笔"。
+    """
     year, month = _month_of(index)
+    last = _month_last_day(index)
+    pool = range(1, last + 1)
     drafts: list[TxnDraft] = []
     credit_cents = 0
     for batch in MONTHLY_BATCHES:
-        for i, day in enumerate(rng.sample(range(1, 29), batch.count)):
+        for i, day in enumerate(_sample_days(rng, pool, batch.count)):
             amount = rng.randint(batch.low_yuan, batch.high_yuan) * 100
             drafts.append(TxnDraft(batch.account_id, _ts(date(year, month, day), rng.randint(7, 21),
                                                          rng.randint(0, 59)), -amount, batch.category,
                                    batch.channel, batch.merchants[i % len(batch.merchants)],
                                    batch.memos[i % len(batch.memos)]))
             credit_cents += amount if batch.account_id == CREDIT_ID else 0
-    drafts.append(TxnDraft(SAVINGS_ID, _ts(date(year, month, 10), 9, 30), SALARY, "工资", "转账",
-                           "示例科技有限公司", "月薪"))
-    for slot, day in enumerate(rng.sample(range(1, 29), 3)):
+    if SALARY_DAY <= last:                                   # 发薪日还没到 → 本月工资尚未入账
+        drafts.append(TxnDraft(SAVINGS_ID, _ts(date(year, month, SALARY_DAY), 9, 30), SALARY, "工资", "转账",
+                               "示例科技有限公司", "月薪"))
+    for slot, day in enumerate(_sample_days(rng, pool, 3)):
         payee_id, name = TRANSFER_PAYEES[(index * 3 + slot) % len(TRANSFER_PAYEES)]
         ts = _ts(date(year, month, day), rng.randint(7, 21), rng.randint(0, 59))
         drafts.append(TxnDraft(SAVINGS_ID, ts, -rng.randint(100, 800) * 100, "转账", "转账", name, f"转账给{name}"))
         payee_usage[payee_id] = max(payee_usage.get(payee_id, ""), ts)
-    for sub in (s for s in SUBSCRIPTIONS if s.status == "active" and s.cycle == "monthly"):
+    monthly = [s for s in SUBSCRIPTIONS
+               if s.status == "active" and s.cycle == "monthly" and s.charge_day <= last]
+    for sub in monthly:                                      # 扣费日未到 → 本月还没扣
         drafts.append(TxnDraft(SAVINGS_ID, _ts(date(year, month, sub.charge_day), 10, 5), -sub.amount,
                                "订阅", "代扣", sub.merchant, f"{sub.merchant} 月费"))
-    repay_ts = _ts(date(year, month, 15), 20, 40)          # 还款额 = 上月信用卡消费合计
-    drafts.append(TxnDraft(SAVINGS_ID, repay_ts, -prev_credit, "转账", "转账", "信用卡还款", "信用卡还款"))
-    drafts.append(TxnDraft(CREDIT_ID, repay_ts, prev_credit, "转账", "转账", "信用卡还款", "信用卡还款"))
+    if REPAY_DAY <= last:                                    # 还款日未到 → 本期账单还没还
+        repay_ts = _ts(date(year, month, REPAY_DAY), 20, 40)  # 还款额 = 上月信用卡消费合计
+        drafts.append(TxnDraft(SAVINGS_ID, repay_ts, -prev_credit, "转账", "转账", "信用卡还款", "信用卡还款"))
+        drafts.append(TxnDraft(CREDIT_ID, repay_ts, prev_credit, "转账", "转账", "信用卡还款", "信用卡还款"))
     return drafts, credit_cents
 
 
@@ -283,7 +312,7 @@ def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False) -> d
 
 def main(argv: list[str] | None = None) -> int:
     """CLI：`uv run python -m data.seed --reset`。"""
-    parser = argparse.ArgumentParser(prog="python -m data.seed", description="生成 2025-09~2026-08 的合成银行数据")
+    parser = argparse.ArgumentParser(prog="python -m data.seed", description="生成 2025-09~2026-09 的合成银行数据")
     parser.add_argument("--reset", action="store_true", help="先清库再生成（覆盖已有数据）")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="库文件路径，默认取环境变量 DB_PATH")
     args = parser.parse_args(argv)

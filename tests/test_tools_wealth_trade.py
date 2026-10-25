@@ -87,7 +87,7 @@ def test_t15_insufficient_funds(seeded: Path) -> None:
     _assess(AGGRESSIVE)                                                 # R5 用户 → 先过风险匹配
     result = _trade(seeded, GROWTH, "buy", 10_000_000)                   # R5 起购 10 万元 > 余额
     assert result.error_code == ErrorCode.INSUFFICIENT_FUNDS
-    assert _balance(seeded)["balance"] == 4_663_400                     # 未动
+    assert _balance(seeded)["balance"] == 5_228_100                     # 未动
 
 
 # ---------------- 风险等级匹配（卡 07 必查点） ----------------
@@ -156,7 +156,7 @@ def test_t15_expired_ref_is_token_expired(seeded: Path, clock: Clock) -> None:
     clock.tick(seconds=sub.CONFIRM_TTL_SECONDS + 1)
     result = _trade(seeded, BOND90, "buy", 100_000, ref)
     assert result.error_code == ErrorCode.TOKEN_EXPIRED            # 良性超时，不记 rejected
-    assert _balance(seeded)["balance"] == 4_663_400
+    assert _balance(seeded)["balance"] == 5_228_100
 
 
 def test_t15_same_ref_replays_once(seeded: Path) -> None:
@@ -179,5 +179,5 @@ def test_t15_new_ref_is_a_new_trade(seeded: Path) -> None:
     _assess()
     _trade(seeded, BOND90, "buy", 100_000)
     _trade(seeded, BOND90, "buy", 100_000)
-    assert _balance(seeded)["balance"] == 4_663_400 - 200_000
+    assert _balance(seeded)["balance"] == 5_228_100 - 200_000
     assert len([row for row in _holdings(seeded, BOND90) if row["amount"] == 100_000]) == 2

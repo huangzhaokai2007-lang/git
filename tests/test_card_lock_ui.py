@@ -55,7 +55,7 @@ def test_card_icon_opens_inline_confirmation_and_keeps_other_controls(monkeypatc
     assert not any('临时锁定银行卡' in item.value for item in at.markdown)
     assert any(item.key == f'lock-inline-otp-{CARD}' for item in at.text_input)
     next(button for button in at.button if button.key == f'balance-{CARD}').click().run()
-    assert any('46,634.00' in item.value for item in at.text)
+    assert any('52,281.00' in item.value for item in at.text)
     click(at, '6222 **** **** 0001')
     assert any(button.label == '查看完整卡号' for button in at.button)
     assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'

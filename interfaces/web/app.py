@@ -281,6 +281,8 @@ def _bill_charts() -> None:
 
 def _bill_contents(latest: dict) -> None:
     st.caption('图表数据全部取自编排层回执的**事实包**（`Turn.facts`），与对话框里的数字同一份来源。')
+    st.button(f'⬇️ 拉取近 {len(PULL_PERIODS)} 期账单（逐期走编排层）',
+              type='primary', on_click=_pull_bills)
     ui.bill_panel(ui.bill_series(st.session_state["messages"]), latest)
 
 

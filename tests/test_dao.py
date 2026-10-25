@@ -27,12 +27,12 @@ def test_get_balance_matches_account_rows(seeded: Path) -> None:
 
 
 def test_list_txn_full_range_counts_all_rows_but_limits_page(seeded: Path) -> None:
-    page = dao.list_txn("2025-09-01", "2026-08-31", limit=500)
-    assert page["total_count"] == count(seeded, "txn") == 600
+    page = dao.list_txn("2025-09-01", "2026-09-30", limit=500)
+    assert page["total_count"] == count(seeded, "txn") == 645
     assert len(page["items"]) == 500                                  # limit 生效，total_count 不受影响
     stamps = [item["ts"] for item in page["items"]]
     assert stamps == sorted(stamps, reverse=True)                     # 时间倒序
-    assert dao.list_txn("2025-09-01", "2026-08-31", limit=1)["total_count"] == 600
+    assert dao.list_txn("2025-09-01", "2026-09-30", limit=1)["total_count"] == 645
 
 
 def test_list_txn_month_window_category_and_min_amount_match_sql(seeded: Path) -> None:
@@ -44,10 +44,11 @@ def test_list_txn_month_window_category_and_min_amount_match_sql(seeded: Path) -
         seeded, "SELECT COUNT(*) AS n FROM txn WHERE category = '餐饮' AND substr(ts, 1, 7) = '2026-03'"
     )[0]["n"]
     assert {item["category"] for item in food["items"]} == {"餐饮"}
-    big = dao.list_txn("2025-09-01", "2026-08-31", min_amount=100_000, limit=500)
+    big = dao.list_txn("2025-09-01", "2026-09-30", min_amount=100_000, limit=500)
     assert big["items"] and all(abs(item["amount"]) >= 100_000 for item in big["items"])
     assert big["total_count"] == raw(
-        seeded, "SELECT COUNT(*) AS n FROM txn WHERE amount >= 100000 OR amount <= -100000")[0]["n"]
+        seeded, "SELECT COUNT(*) AS n FROM txn WHERE substr(ts, 1, 10) BETWEEN '2025-09-01'"
+                " AND '2026-09-30' AND (amount >= 100000 OR amount <= -100000)")[0]["n"]
 
 
 def test_list_txn_window_includes_the_last_day(seeded: Path) -> None:
@@ -136,7 +137,7 @@ def test_insert_txn_persists_and_is_visible_to_list_txn(seeded: Path) -> None:
     assert (row["amount"], row["direction"], row["balance_after"], row["memo"]) == (-12_345, "out", 100, "午饭")
     assert dao.list_txn("2026-08-31", "2026-08-31", limit=500)["items"][0]["id"] == "txn_test_0001"
     assert dao.insert_txn(ACCOUNT, STAMP, 500, "in", 600)["direction"] == "in"
-    assert count(seeded, "txn") == 602
+    assert count(seeded, "txn") == 647
 
 
 def test_insert_txn_generates_unique_ids(seeded: Path) -> None:
@@ -148,10 +149,10 @@ def test_insert_txn_generates_unique_ids(seeded: Path) -> None:
 def test_insert_txn_is_idempotent_and_rejects_conflicting_id(seeded: Path) -> None:
     first = dao.insert_txn(ACCOUNT, STAMP, -100, "out", 1, id="txn_dup")
     assert dao.insert_txn(ACCOUNT, STAMP, -100, "out", 1, id="txn_dup") == first
-    assert count(seeded, "txn") == 601
+    assert count(seeded, "txn") == 646
     with pytest.raises(ValueError, match="幂等键冲突"):
         dao.insert_txn(ACCOUNT, STAMP, -999, "out", 1, id="txn_dup")
-    assert count(seeded, "txn") == 601
+    assert count(seeded, "txn") == 646
 
 
 def test_insert_txn_does_not_write_audit_log(seeded: Path) -> None:
@@ -210,7 +211,7 @@ def test_writes_join_an_outer_transaction_and_roll_back_together(seeded: Path) -
             dao.insert_txn(ACCOUNT, STAMP, -100, "out", 1, id="txn_rollback")
             raise RuntimeError("编排层中途失败")
     assert raw(seeded, "SELECT COUNT(*) AS n FROM audit_log WHERE trace_id = 'trace-tx'")[0]["n"] == 0
-    assert count(seeded, "risk_event") == 0 and count(seeded, "txn") == 600
+    assert count(seeded, "risk_event") == 0 and count(seeded, "txn") == 645
 
 
 def test_all_reads_are_empty_on_a_fresh_database(blank: Path) -> None:

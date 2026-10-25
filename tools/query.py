@@ -155,6 +155,12 @@ def list_txn(
     facts = {
         "total_count": len(rows),
         "returned_count": len(page),
+        #: 查询区间**原样回给回执**（不换算、不推导）：流水查询的结果天然需要点明"查的是哪一段"，
+        #: 否则用户拿到「共 50 笔交易」却无从判断查对了月份没有 —— 数据集现已覆盖 13 个账期月，
+        #: 逐月查询时这一句就是对错的可核对锚点。日期时间不进数字校验（`guard/facts_check._DATEISH`
+        #: 先摘掉再比），故印出来不会触发幻觉判据。
+        "date_from": date_from,
+        "date_to": date_to,
         **_money_facts(
             sum(-row["amount"] for row in page if row["amount"] < 0), "page_out_sum"
         ),

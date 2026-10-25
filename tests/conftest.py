@@ -284,9 +284,13 @@ def preview_ok(payee_id: str = PAYEE, amount: int = 10_000) -> transfer.ToolResu
     return result
 
 
-def add_today_flows(path: Path, rows: list[tuple[str, int]]) -> None:
-    """往今日塞入支出流水（单日累计/短时高频口径用）；rows = [(ts, amount), ...]。"""
-    write_sql(path, [
+def set_today_flows(path: Path, day: str, rows: list[tuple[str, int]]) -> None:
+    """**设定**某天的支出流水（单日累计 / 短时高频口径用）：先清掉数据集当天已有的流水，再按 rows 插入。
+
+    为什么是"设定"而不是"追加"：这两个口径只关心"当天已经转出去多少"，若叠加在数据集当天
+    的流水上，换个种子数字就漂了 —— 测试必须从确定的初始状态出发。rows = [(ts, amount), ...]
+    """
+    write_sql(path, [("DELETE FROM txn WHERE substr(ts, 1, 10) = ?", (day,))] + [
         ("INSERT INTO txn (id, account_id, ts, amount, direction, counterparty, category, channel,"
          " memo, balance_after) VALUES (?, ?, ?, ?, 'out', '灌水商户', '餐饮', '二维码', NULL, 0)",
          (f"txn-fill-{index:03d}", SAVINGS_ID, ts, cents))

@@ -15,9 +15,9 @@ def test_bank_card_face_opens_details_without_revealing_number(monkeypatch, seed
     assert not at.exception
     assert any(button.label == '查看完整卡号' for button in at.button)
     assert not any(NUMBER in element.value for element in at.markdown)
-    assert not any('46,634.00' in element.value for element in at.text)
+    assert not any('52,281.00' in element.value for element in at.text)
     next(button for button in at.button if button.key == f'balance-{CARD}').click().run()
-    assert any('46,634.00' in element.value for element in at.text)
+    assert any('52,281.00' in element.value for element in at.text)
     assert raw(seeded, 'SELECT status FROM card WHERE id=?', (CARD,))[0]['status'] == 'normal'
     assert any(button.key == f'lock-toggle-{CARD}' for button in at.button)
 

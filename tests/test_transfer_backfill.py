@@ -48,7 +48,7 @@ def test_execute_backfills_payee_id_and_last_used(wired, monkeypatch) -> None:
     assert card.tier == "L1"                                            # 白天 + 白名单额度内
     done = orchestrator.handle("确认", session_id=SESSION)
     assert done.executed is True
-    txn = raw(wired, "SELECT payee_id FROM txn ORDER BY ts DESC LIMIT 1")[0]
+    txn = raw(wired, "SELECT payee_id FROM txn ORDER BY rowid DESC LIMIT 1")[0]     # 刚写入的那条
     assert txn["payee_id"] == wang["id"]                                # txn 回填收款人 id
     after = raw(wired, "SELECT last_used_ts FROM payee WHERE id = ?", (wang["id"],))[0]
     assert after["last_used_ts"] == "2026-09-12T12:00:00"               # 时钟钉住的执行时刻

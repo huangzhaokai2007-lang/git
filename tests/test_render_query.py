@@ -17,6 +17,8 @@ from agent import render_query
 
 TXN_FACTS = {
     "total_count": 2, "returned_count": 2,
+    #: 查询区间（T2 facts 原样回传）：头句点明"查的是哪一段"，用户才核对得了月份对不对
+    "date_from": "2026-08-01", "date_to": "2026-08-31",
     "page_out_sum_yuan": "465.00", "page_in_sum_yuan": "11,046.00",
     "items": [{"id": "txn-1", "ts": "2026-08-28T16:27:00", "counterparty": "街角烧烤",
                "category": "餐饮", "amount": -1500, "amount_yuan": "-15.00"},
@@ -51,6 +53,7 @@ def test_txn_missing_facts_raises_instead_of_blanking() -> None:
 def test_txn_cell_escapes_pipes_and_never_invents_a_value() -> None:
     """竖线会破坏 Markdown 表格 → 换斜杠；空值用占位符（不编造）。"""
     facts = {"total_count": 1, "page_out_sum_yuan": "0.00", "page_in_sum_yuan": "0.00",
+             "date_from": "2026-08-01", "date_to": "2026-08-31",
              "items": [{"ts": "2026-08-01T00:00:00", "counterparty": "A|B", "category": "",
                         "amount_yuan": "-1.00"}]}
     reply = render_query.render_txns(facts)

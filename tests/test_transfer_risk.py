@@ -11,6 +11,8 @@ from pathlib import Path
 
 from tools import _query_analysis, _transfer_risk
 
+from tests.conftest import raw
+
 DAY = datetime(2026, 9, 12, 12, 0, 0)          # 白天：不触发 night 因子
 NIGHT = datetime(2026, 9, 12, 2, 30, 0)        # 凌晨：触发 night 因子
 
@@ -91,6 +93,15 @@ def test_limits_never_go_negative_when_over_the_daily_cap() -> None:
 
 
 def test_today_flows_only_counts_outgoing_flows_of_the_injected_day(seeded: Path) -> None:
-    """时间注入：只统计 `moment` 当天、属于当前用户账户的**支出**流水。"""
-    assert _transfer_risk._today_out_flows(DAY) == []                        # 合成数据里 2026-09-12 无流水
-    assert isinstance(_transfer_risk._today_out_flows(datetime(2026, 3, 1, 12, 0, 0)), list)
+    """时间注入：只统计 `moment` 当天、属于当前用户账户的**支出**流水。
+
+    条数不写死：数据集当月（2026-09）本身就有流水，写死"当天为空"换个种子就红 ——
+    这里改用**独立复算**对当天支出条数，换一天取的也就是那一天的。
+    """
+    day = DAY.date().isoformat()
+    flows = _transfer_risk._today_out_flows(DAY)
+    assert all(flow["ts"].startswith(day) and flow["amount"] < 0 for flow in flows)
+    assert len(flows) == raw(seeded, "SELECT COUNT(*) AS n FROM txn WHERE amount < 0"
+                                     " AND substr(ts, 1, 10) = ?", (day,))[0]["n"]
+    assert all(flow["ts"].startswith("2026-09-11")
+               for flow in _transfer_risk._today_out_flows(datetime(2026, 9, 11, 12, 0, 0)))
