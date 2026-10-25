@@ -36,6 +36,29 @@ def test_close_focus_restores_gallery_and_clears_sensitive_detail(monkeypatch, s
     assert '****** 元' in [item.value for item in at.text]
 
 
+def test_reopening_same_card_does_not_repeat_detail_chat_message(monkeypatch, seeded):
+    at = app(monkeypatch, seeded)
+    click(at, '管卡')
+    bind(at)
+    before = list(at.session_state['messages'])
+    for _ in range(3):
+        click(at, '6222 **** **** 0001')
+    click(at, '关闭详情')
+    click(at, '6222 **** **** 0001')
+
+    messages = list(at.session_state['messages'])
+    assert len(messages) == len(before) + 1
+    assert messages[:len(before)] == before
+    assert sum(bool(item.get('binding_detail')) for item in messages) == 1
+    assert any(button.label == '查看完整卡号' for button in at.button)
+    assert raw(seeded, 'SELECT status FROM card WHERE id=?', (CARD,))[0]['status'] == 'normal'
+
+    # Older sessions can already contain copies; keep the first and remove the rest.
+    at.session_state['messages'] = messages + [dict(messages[-1]), dict(messages[-1])]
+    click(at, '6222 **** **** 0001')
+    assert list(at.session_state['messages']) == messages
+
+
 def test_filter_change_leaves_focus_instead_of_showing_an_unlisted_card(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     click(at, '管卡')

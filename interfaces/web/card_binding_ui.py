@@ -88,7 +88,13 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
         state["selected"] = card_id
         state["full_number"], state["reveal_form"], state["detail_balance"] = None, False, False
         messages = st.session_state.setdefault("messages", [])
-        messages.append({"role": "assistant", "text": result["summary"], "turn": None, "binding_detail": True})
+        matching = [index for index, message in enumerate(messages)
+                    if message.get("binding_detail") and message["text"] == result["summary"]]
+        if not matching:
+            messages.append({"role": "assistant", "text": result["summary"], "turn": None, "binding_detail": True})
+        else:
+            for index in reversed(matching[1:]):
+                messages.pop(index)
     st.rerun()
 
 
