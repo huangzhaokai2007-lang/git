@@ -31,3 +31,15 @@ def test_old_replies_are_immediate_and_long_reply_has_bounded_delay(monkeypatch)
     fake.write_stream.assert_not_called()
     assert ''.join(ui.chunks('长' * 5000)) == '长' * 5000
     assert sum(delays) <= 2.61
+
+
+def test_long_replies_do_not_flood_browser_layout(monkeypatch):
+    from interfaces.web import reply_animation as ui
+    delays = []
+    monkeypatch.setattr(ui.time, 'sleep', delays.append)
+    text = '长回复内容' * 1000
+    updates = list(ui.chunks(text))
+    assert ''.join(updates) == text
+    assert len(updates) <= 80
+    assert min(delays) >= 1 / 30 - 1e-6
+    assert sum(delays) <= 2.61
