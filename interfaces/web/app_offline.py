@@ -81,6 +81,14 @@ def dates_from_text(text: str) -> dict:
 
 def activate() -> None:
     """装配离线替身，并让它在进程生命周期内持续生效。"""
+    import sys as _sys
+    # 仓库根必须排在 interfaces/web 之前，否则顶层的 `app` 包会被 web/app.py 遮蔽。
+    # （`app/` 现已带 __init__.py 成为普通包，这里再把顺序钉死，双保险。）
+    _root = str(Path(__file__).resolve().parents[2])
+    if _root in _sys.path:
+        _sys.path.remove(_root)
+    _sys.path.insert(0, _root)
+
     from app import cli
 
     original_verdict = cli.offline_verdict

@@ -24,6 +24,8 @@
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
@@ -139,6 +141,60 @@ _DRAWERS: dict[str, Callable[[Mapping[str, Any]], None]] = {
 }
 
 
+def _csv(rows: Sequence[Mapping[str, Any]], headers: Sequence[str]) -> str:
+    """把 facts 里的一张表拼成 CSV 文本（**只搬运，不改数**）；空表 → 空串，不给下载。"""
+    if not rows:
+        return ""
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(headers), extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buffer.getvalue()
+
+
+def _table(facts: Mapping[str, Any], intent: str) -> tuple[str, Sequence[str], Sequence[Mapping]]:
+    """这份回执里值得导出的那张表：`(文件名前缀, 列名, 行)`。没表 → 返回空。"""
+    groups = list(facts.get("groups") or [])
+    if intent in ("bill_analysis", "bill_report") and groups:
+        return ("分类明细", ["支出分类", "金额（元）", "占比"],
+                [{"支出分类": item.get("key"), "金额（元）": item.get("amount_yuan"),
+                  "占比": f"{item.get('pct')}%"} for item in groups])
+    items = list(facts.get("items") or [])
+    if intent == "txn_query" and items:
+        return ("流水明细", ["时间", "交易对手", "分类", "金额（元）"],
+                [{"时间": str(item.get("ts"))[:16].replace("T", " "),
+                  "交易对手": item.get("counterparty") or "",
+                  "分类": item.get("category") or "",
+                  "金额（元）": item.get("amount_yuan")} for item in items])
+    if intent == "anomaly_check" and items:
+        return ("异常清单", ["时间", "交易对手", "金额（元）", "等级", "依据"],
+                [{"时间": str(item.get("ts"))[:16].replace("T", " "),
+                  "交易对手": item.get("counterparty") or "",
+                  "金额（元）": item.get("amount_yuan"),
+                  "等级": item.get("severity"), "依据": item.get("reason")} for item in items])
+    return ("", (), ())
+
+
+def _export(turn: Mapping[str, Any], intent: str, facts: Mapping[str, Any], key: str) -> None:
+    """卡片底部的导出/复制：回执原文（Markdown）+ 明细表（CSV）。
+
+    做 PPT / 汇报材料时直接从这里拿，不用再手抄屏幕上的数字 —— 导出的每个数字仍然
+    只是 `Turn.facts` 的原值搬运，界面不重算。
+    """
+    reply = str(turn.get("reply") or "")
+    label, headers, rows = _table(facts, intent)
+    with st.expander("⬇️ 导出 / 复制这份回执", expanded=False):
+        if reply:
+            st.download_button("下载回执（Markdown）", data=reply,
+                               file_name=f"{intent}-{str(turn.get('trace_id') or key)[:8]}.md",
+                               mime="text/markdown", key=f"{key}-dl-md", width="stretch")
+            st.code(reply, language="markdown")   # 手动复制用：streamlit 代码块自带复制按钮
+        if label and (csv_text := _csv(rows, headers)):
+            st.download_button(f"下载{label}（CSV）", data=csv_text,
+                               file_name=f"{label}-{str(turn.get('trace_id') or key)[:8]}.csv",
+                               mime="text/csv", key=f"{key}-dl-csv", width="stretch")
+
+
 def render(turn: Mapping[str, Any], *, key: str, on_ask: Callable[[str], None]) -> bool:
     """在助手气泡里画富卡片；画不出来（意图没有卡片 / facts 为空）→ `False`，调用方已退回纯文本。
 
@@ -157,4 +213,5 @@ def render(turn: Mapping[str, Any], *, key: str, on_ask: Callable[[str], None]) 
         for index, (label, prompt) in enumerate(FOLLOW_UPS[intent]):
             if columns[index].button(label, key=f"{key}-ask-{index}", width="stretch"):
                 on_ask(prompt)
+        _export(turn, intent, facts, key)
     return True

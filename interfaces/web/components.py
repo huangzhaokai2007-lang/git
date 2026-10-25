@@ -281,13 +281,40 @@ def parse_bill(text: str) -> dict:
     return parsed if parsed["total"] is not None else {}
 
 
+def bill_from_turn(turn: Mapping[str, Any] | None) -> dict:
+    """`Turn.facts` → 图表数据（**首选通路**）。
+
+    回执文案是给人看的，正则反解它等于把展示层当协议用 —— 回执措辞一改（「共支出」→
+    「支出合计」）图表就静默变空。编排层已经把同一批数字放进 `Turn.facts`（且过过数字
+    校验器），界面直接读它，零解析、零漂移。`parse_bill` 降级为兜底（老会话/无 facts）。
+    """
+    facts = (turn or {}).get("facts") or {}
+    if not facts:
+        return {}
+    intent = (turn or {}).get("intent")
+    if intent == "bill_report":
+        period, total, cats = facts.get("period"), facts.get("out_sum_yuan"), facts.get("groups")
+    elif intent == "bill_analysis":
+        period, total, cats = facts.get("period"), facts.get("total_yuan"), facts.get("groups")
+    else:
+        return {}
+    if period is None or total is None:
+        return {}
+    categories = [
+        {"key": item.get("key"), "amount": _yuan(item.get("amount_yuan", 0)),
+         "pct": int(item.get("pct") or 0)}
+        for item in (cats or [])
+    ]
+    return {"period": str(period), "total": _yuan(total), "categories": categories}
+
+
 def bill_series(messages: Sequence[Mapping[str, Any]]) -> dict[str, float]:
     """会话里所有账单回执 → `{账期: 支出合计}`（趋势图每个点都来自一次真实回执）。"""
     series: dict[str, float] = {}
     for message in messages:
         if message["role"] != "assistant":
             continue
-        parsed = parse_bill(message["text"])
+        parsed = bill_from_turn(message.get("turn")) or parse_bill(message["text"])
         if parsed:
             series[str(parsed["period"])] = float(parsed["total"])
     return dict(sorted(series.items()))
@@ -296,7 +323,9 @@ def bill_series(messages: Sequence[Mapping[str, Any]]) -> dict[str, float]:
 def latest_bill(messages: Sequence[Mapping[str, Any]]) -> dict:
     """最后一条可解析的账单回执（分类表来自它）。"""
     for message in reversed(list(messages)):
-        if message["role"] == "assistant" and (parsed := parse_bill(message["text"])):
+        if message["role"] != "assistant":
+            continue
+        if parsed := (bill_from_turn(message.get("turn")) or parse_bill(message["text"])):
             return parsed
     return {}
 

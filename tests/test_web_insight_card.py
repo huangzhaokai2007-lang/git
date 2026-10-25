@@ -123,6 +123,21 @@ def test_five_chat_queries_walk_all_five_tasks(monkeypatch: pytest.MonkeyPatch) 
     assert all(record["turn"]["tool_calls"] for record in at.session_state["turns"])   # 每句都真调了工具
 
 
+def test_card_offers_copy_and_export(monkeypatch: pytest.MonkeyPatch) -> None:
+    """卡片底部的导出/复制：回执原文（Markdown）+ 明细表（CSV），做 PPT 时直接拿数字。
+
+    断言的是**下载按钮真的在页面上**（`AppTest` 的 `get("download_button")`），不是"函数能拼出串"；
+    CSV 的每一行都只是 `facts` 原值搬运（见 `insight_card_ui._table`，界面不重算金额）。
+    """
+    at = _app(monkeypatch)
+    at.chat_input[0].set_value("上个月的流水").run()
+    assert not at.exception, at.exception
+
+    buttons = [button.label for button in at.get("download_button")]
+    assert "下载回执（Markdown）" in buttons
+    assert "下载流水明细（CSV）" in buttons
+
+
 def test_no_facts_means_no_card(monkeypatch: pytest.MonkeyPatch) -> None:
     """降级契约：没有事实包的回执（未接通 / 没调工具）**不许**画图表或追问按钮。"""
     at = _app(monkeypatch)
