@@ -39,7 +39,7 @@ T_TXN_EMPTY = ("{date_from} 至 {date_to} 共查到 {total_count} 笔交易 —�
 T_TXN_TABLE_HEAD = "| 时间 | 交易对手 | 金额（元） | 分类 |"
 T_TXN_TABLE_SEP = "| --- | --- | --- | --- |"
 #: 收支相抵后的净额（负数是净支出）。净额由工具层算好进 facts，这里**照印**。
-T_TXN_NET = "收入与支出相抵后，本区间**净{net_yuan}**（负数为净支出）。"
+T_TXN_NET = "收入与支出相抵后，本区间**净{net_yuan} 元**（负数为净支出）。"
 #: 分类汇总：`amount_yuan` / `count` / `pct` 全部来自 `tools/_txn_insight.category_groups`。
 T_CATEGORY_HEAD = "| 分类 | 笔数 | 金额（元） | 占比 |"
 T_CATEGORY_SEP = "| --- | --- | --- | --- |"
