@@ -213,7 +213,8 @@ def payee_form(defaults: dict | None = None) -> dict | None:
     **L2 确认卡 + 短信验证码**（`agent/payee_flow.py` → `write_flow` → T25）——
     白名单 = 转账免验证码的特权，不能靠一次表单点击就拿到。
     """
-    defaults = defaults or {}    with st.container(border=True):
+    defaults = defaults or {}
+    with st.container(border=True):
         st.markdown("##### ➕ 添加收款人")
         st.caption("填姓名和手机号即可（不收卡号）。手机号会脱敏保存，完整号码不入库、不回显。")
         with st.form("payee-form", clear_on_submit=True):
