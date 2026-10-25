@@ -19,7 +19,7 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import card_binding_flow, confirm_card, orchestrator  # noqa: E402
+from agent import balance_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -126,8 +126,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state['bound-card-query'] = state.get('bound-card-query', False) or (
         (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
-        state["balance"] = [item for item in state["balance"] if item["text"] != turn.reply][-1:]
-        state["balance"].append({"text": turn.reply, "trace_id": turn.trace_id})
+        state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
 
 
 def _follow_up(prompt: str) -> None:
@@ -202,8 +201,12 @@ def _sidebar() -> None:
         st.divider()
         st.markdown("#### 账户余额")
         if ui.balance_box(st.session_state["balance"]):
-            _ask(ui.BALANCE_PROMPT)
-            st.rerun()
+            turn = _agent_executor().submit(balance_flow.refresh, st.session_state["session_id"]).result()
+            if turn.error_code:
+                st.error(turn.reply)
+            else:
+                st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
+                st.rerun()
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:

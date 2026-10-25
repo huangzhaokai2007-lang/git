@@ -43,6 +43,12 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
     for index, message in enumerate(messages):
+        turn = message.get("turn") or {}
+        if (message["role"] == "assistant" and turn.get("intent") == "card_query"
+                and turn.get("tool_calls") == ["list_bound_cards"]
+                and (turn.get("facts") or {}).get("items")
+                and not turn.get("ask") and not turn.get("error_code")):
+            continue  # The bound-card gallery already presents this successful list.
         with st.chat_message(message["role"], avatar=":material/person:" if message["role"] == "user" else ":material/auto_awesome:"):
             turn = message.get("turn")
             drawn = (payee_card is not None and message["role"] == "assistant"
@@ -82,9 +88,15 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
     """侧边栏账户余额：只回显 agent 给过的余额回执（数字来自事实包）。返回是否点了刷新。"""
     if not replies:
         st.caption("暂无余额记录，点击刷新查询。")
-    for item in replies:
-        st.markdown(f"- {item['text']}")
-        st.caption(f"`{item['trace_id']}`")
+    for item in replies[-1:]:
+        facts = item.get('facts') or {}
+        if facts.get('balance_yuan') is not None:
+            label = {'savings': '储蓄账户', 'credit': '信用卡账户'}.get(facts.get('account_type'), '账户')
+            st.markdown(f'<div class="bank-balance"><span class="bank-balance-label">您的{label}余额为：</span>'
+                        f'<span class="bank-balance-amount">{_esc(facts["balance_yuan"])} RMB</span></div>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(re.split('[，。]', item['text'], maxsplit=1)[0].replace(' 元', ' RMB'))
     return st.button("刷新余额", icon=":material/refresh:", key="refresh-balance", width="stretch")
 
 

@@ -2,13 +2,18 @@
 html,body,[data-testid="stApp"]{background:var(--bank-bg);color:var(--bank-text);font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif}
 [data-testid="stHeader"]{background:#0b0c0ef5;border-bottom:1px solid #ffffff06}
 [data-testid="stAppDeployButton"]{display:none}
-[data-testid="stMainBlockContainer"]{max-width:1120px;padding:2.5rem 3rem 7rem}
-[data-testid="stSidebar"]{background:#101113;border-right:1px solid var(--bank-border);min-width:272px;max-width:272px}
+[data-testid="stMainBlockContainer"]{width:100%;max-width:none;padding:2.5rem 3rem 7rem}
+[data-testid="stSidebar"]{background:#101113;border-right:1px solid var(--bank-border)}
+[data-testid="stSidebar"][aria-expanded="true"]{min-width:272px;max-width:272px}
+[data-testid="stSidebar"][aria-expanded="false"]{width:0;min-width:0;max-width:0;border-right:0}
 [data-testid="stSidebarUserContent"]{padding:1.5rem 1rem}
 [data-testid="stSidebar"] h4{font-size:12px;font-weight:600;color:var(--bank-muted);letter-spacing:.04em;padding:.25rem .5rem .65rem}
 [data-testid="stSidebar"] [data-testid="stVerticalBlock"]{gap:.5rem}
 .bank-brand{padding:0 8px 16px;color:#ece9e2;width:100%;font-family:Georgia,"Times New Roman",serif;font-size:34px;font-weight:400;font-style:normal;letter-spacing:-.04em;line-height:1.12}
 .bank-brand>span{display:block;font:inherit;letter-spacing:inherit}
+[data-testid="stMarkdownContainer"]:has(>.bank-balance){margin-bottom:0}
+.bank-balance-label{display:block;font-size:14px;line-height:1.7;color:var(--bank-text)}
+.bank-balance-amount{display:block;margin-top:6px;font-family:Georgia,"Times New Roman",serif;font-size:28px;font-weight:400;line-height:1.25;letter-spacing:-.03em;color:#ece9e2}
 h1,h2,h3,h4,h5,h6{color:var(--bank-title);font-weight:600;letter-spacing:-.015em}
 h2{font-size:24px}h3{font-size:20px}h4,h5{font-size:17px}
 [data-testid="stMarkdownContainer"] p{line-height:1.7}
@@ -61,7 +66,7 @@ button:focus-visible{outline:2px solid var(--bank-accent);outline-offset:3px}
 [data-testid="stWidgetLabel"] p{font-size:14px;color:var(--bank-text)}
 [data-testid="stMetricValue"]{font-size:26px;color:var(--bank-title)}
 [data-testid="stBottom"]{background:linear-gradient(transparent,var(--bank-bg) 24%)}
-[data-testid="stBottomBlockContainer"]{max-width:1120px;padding:1rem 3rem 1.5rem}
+[data-testid="stBottomBlockContainer"]{width:100%;max-width:none;padding:1rem 3rem 1.5rem}
 [data-testid="stChatInput"]{background:#1c1d21;border:1px solid #3d3e48;border-radius:12px;box-shadow:0 8px 32px #0003}
 [data-testid="stChatInput"] textarea{color:var(--bank-text);font-size:15px}
 [data-testid="stChatInput"] textarea::placeholder{color:var(--bank-muted)}

@@ -13,7 +13,7 @@ def render(records: list[dict]) -> None:
         return
     with st.container(border=True, key='operation-records'):
         st.markdown('### 操作记录')
-        st.caption('本次聊天中的请求与办理反馈；银行卡业务记录可在“管卡”的记录页签查看。')
+        st.caption('本次聊天中的请求与办理反馈；可通过聊天查询额度调整、锁卡或挂失补卡记录。')
         if not records:
             st.info('暂无操作记录，可以直接聊天或选择快捷场景开始。')
         for record in reversed(records):

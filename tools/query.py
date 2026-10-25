@@ -99,6 +99,7 @@ def get_balance(account_type: str) -> ToolResult:
         return _fail(exc.code, exc.message)
 
     facts = {
+        "account_type": account_type,
         **_money_facts(row["balance"], "balance"),
         **_money_facts(row["available"], "available"),
         "as_of": _stamp(),

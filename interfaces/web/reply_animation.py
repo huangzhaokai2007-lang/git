@@ -6,10 +6,10 @@ import streamlit as st
 
 
 def chunks(text: str):
-    # Keep both total duration and update count bounded for long reports.
-    step = max(1, math.ceil(len(text) / 500))
+    # Bound rendering to about 30 updates/second, including long reports.
+    step = max(1, math.ceil(len(text) / 78))
     count = max(1, math.ceil(len(text) / step))
-    delay = min(.024, 2.6 / count)
+    delay = min(1 / 30, 2.6 / count)
     for offset in range(0, len(text), step):
         yield text[offset:offset + step]
         time.sleep(delay)

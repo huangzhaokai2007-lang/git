@@ -4,6 +4,7 @@ export default function () {
   let root = null;
   let signature = '';
   let resizeObserver = null;
+  let observedWidth = 0;
   let pending = null;
   let settleTimer = 0;
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -26,7 +27,8 @@ export default function () {
     const fade = reduced.matches || immediate ? '0ms' : '450ms';
     const active = tiles.find(tile => cardId(tile) === selected);
     root.style.position = 'relative';
-    root.style.transition = `height ${duration} cubic-bezier(.22,.8,.25,1)`;
+    // Card faces animate, but page height must settle immediately for scrolling.
+    root.style.transition = 'none';
     let rowY = 0;
     let rowHeight = 0;
     let totalHeight = 0;
@@ -70,7 +72,14 @@ export default function () {
     chains?.sync(root);
     if (first) {
       resizeObserver?.disconnect();
-      resizeObserver = new ResizeObserver(schedule);
+      observedWidth = root.clientWidth;
+      resizeObserver = new ResizeObserver(entries => {
+        const width = entries[0]?.contentRect.width;
+        if (width !== undefined && width !== observedWidth) {
+          observedWidth = width;
+          schedule();
+        }
+      });
       resizeObserver.observe(root);
     }
     const marker = root.querySelector('.bank-gallery-state');
@@ -103,10 +112,12 @@ export default function () {
     settleTimer = setTimeout(() => { pending = null; schedule(); }, 2500);
     layout(target);
     root.style.scrollMarginTop = '70px';
-    root.scrollIntoView?.({block: 'start', behavior: reduced.matches ? 'auto' : 'smooth'});
+    root.scrollIntoView?.({block: 'nearest', behavior: 'auto'});
   }
 
-  const observer = new MutationObserver(schedule);
+  const observer = new MutationObserver(records => {
+    if (!root || !root.isConnected || records.some(({target}) => root.contains(target))) schedule();
+  });
   observer.observe(document.body, {childList: true, subtree: true, attributes: true, attributeFilter: ['data-selected', 'data-revision', 'data-status']});
   document.addEventListener('click', click, true);
   window.addEventListener('resize', schedule);

@@ -84,10 +84,17 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
     if not result["ok"]:
         state["notice"] = (False, result["message"])
     else:
+        locks_ui.close(executor, st.session_state["session_id"])
         state["selected"] = card_id
         state["full_number"], state["reveal_form"], state["detail_balance"] = None, False, False
         messages = st.session_state.setdefault("messages", [])
-        messages.append({"role": "assistant", "text": result["summary"], "turn": None, "binding_detail": True})
+        matching = [index for index, message in enumerate(messages)
+                    if message.get("binding_detail") and message["text"] == result["summary"]]
+        if not matching:
+            messages.append({"role": "assistant", "text": result["summary"], "turn": None, "binding_detail": True})
+        else:
+            for index in reversed(matching[1:]):
+                messages.pop(index)
     st.rerun()
 
 
@@ -182,7 +189,7 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
         ok, message = state["notice"]
         (st.success if ok else st.error)(message)
     _form(executor, session_id, state)
-    selected_filter = st.selectbox("卡片状态", list(FILTERS), key="cards-filter")
+    selected_filter = st.selectbox("卡片状态", list(FILTERS), key="cards-filter", label_visibility="collapsed")
     if selected_filter != state["last_filter"]:
         state["visible"], state["full_number"] = {}, None
         state['selected'], state['reveal_form'], state['detail_balance'] = None, False, False
@@ -202,17 +209,21 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
 
 def render(executor: ThreadPoolExecutor, session_id: str, *, show_limit_button: bool = True) -> None:
     if requested := st.session_state.pop("limit-tab-request", None):
-        st.session_state["cards-tabs"] = requested
-    tabs = st.tabs(["银行卡", "额度调整记录", "锁卡记录", "挂失补卡记录"], key="cards-tabs", on_change="rerun")
-    with tabs[0]:
-        _render_cards(executor, session_id)
-    with tabs[1]:
-        limits_ui.records(executor)
-    with tabs[2]:
-        locks_ui.records(executor)
+        st.session_state["cards-record-view"] = requested
     import card_lost_ui
-    with tabs[3]:
+    record_view = st.session_state.get("cards-record-view")
+    if record_view:
+        if st.button("返回我的银行卡", key="cards-record-back"):
+            st.session_state.pop("cards-record-view", None)
+            st.rerun()
+    if record_view == "额度调整记录":
+        limits_ui.records(executor)
+    elif record_view == "锁卡记录":
+        locks_ui.records(executor)
+    elif record_view == "挂失补卡记录":
         card_lost_ui.records(executor, session_id, prefix='tab')
+    else:
+        _render_cards(executor, session_id)
     limits_ui.render(executor, session_id, show_button=show_limit_button)
     locks_ui.render(executor, session_id)
     card_lost_ui.render(executor, session_id)
