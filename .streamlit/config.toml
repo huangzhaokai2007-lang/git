@@ -1,0 +1,15 @@
+[theme]
+base = "dark"
+primaryColor = "#6667C9"
+backgroundColor = "#0B0C0E"
+secondaryBackgroundColor = "#151618"
+textColor = "#D1D4DC"
+font = "Segoe UI, Microsoft YaHei, sans-serif"
+baseFontSize = 15
+borderColor = "#2C2D33"
+chartCategoricalColors = ["#9790E5", "#78B8AA", "#D4B36C", "#8DA6CF", "#C38EA8"]
+
+[theme.sidebar]
+backgroundColor = "#101113"
+secondaryBackgroundColor = "#1C1D21"
+textColor = "#D1D4DC"

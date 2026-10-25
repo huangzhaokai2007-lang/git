@@ -160,10 +160,15 @@ def list_txn(
         **_money_facts(
             sum(row["amount"] for row in page if row["amount"] > 0), "page_in_sum"
         ),
+        #: F02 回执要显示**明细行**（时间 / 对手方 / 金额 / 分类），故 items 除金额外还带出
+        #: `counterparty` / `category` 两个**非数字**字段 —— 它们一并进 facts，数字校验器
+        #: 递归收集 facts 里的数字，商户名自带数字也不会被误判成幻觉。
         "items": [
             {
                 "id": row["id"],
                 "ts": row["ts"],
+                "counterparty": row.get("counterparty") or "",
+                "category": row.get("category") or "",
                 **_money_facts(row["amount"], "amount"),
             }
             for row in page

@@ -10,7 +10,7 @@
 
         AttributeError: 'Confirmation' object has no attribute 'payee_name'
 
-    表现：侧边栏点「💸 转账」当场报错，整条写路径在界面上不可用。
+    表现：侧边栏点「转账」当场报错，整条写路径在界面上不可用。
 
 本文件用真实 `AppTest` 跑 `interfaces/web/app.py`，把这两条渲染路径钉住。
 

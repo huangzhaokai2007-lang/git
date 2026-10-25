@@ -4,7 +4,9 @@ CLI / API / IM 拿到的仍是同一份**文本回执**（`agent/render_lists.re
 本模块只在 Streamlit 里把那张表画成卡片，不改 agent/ 的任何一行。
 
 **为什么解析回执、不重新取数**（分层 + 数字纪律）：
-- `interfaces/` 只能调 `agent/`，**不许**直接调 `tools/`；`orchestrator.Turn` 也不携带 facts；
+- `interfaces/` 只能调 `agent/`，**不许**直接调 `tools/`；白名单卡片是 T20 时写的，那时
+  `orchestrator.Turn` 还不携带 facts（卡 25 起只读路径带了 —— 新写的图表卡片走 facts，
+  见 `insight_card_ui`，本卡仍按老口径解析回执，两种都合法，先例不强制回改）；
 - 仓内先例：`components.parse_bill` 同样是「编排层回执文本 → 绘图坐标」的解析（见 components 的
   docstring 第 6–7 行）；
 - 卡片里的每个字都**从回执里照抄**（姓名 / 脱敏手机号 / 银行 / 是否白名单），不重算、不补数（铁律 2）。
@@ -77,24 +79,24 @@ def parse_payee_reply(reply: str) -> PayeeCard | None:
 
 #: 卡片样式：圆角 + 细边框 + 轻阴影；白名单用绿色徽章，非白名单用灰色（两组的验证方式不同）。
 _CSS = """<style>
-.payee-card{border:1px solid #e3e8ef;border-radius:14px;background:#fff;margin:2px 0 4px;
- padding:12px 16px 10px;box-shadow:0 1px 3px rgba(16,24,40,.08);color:#1f2937;font-size:14px}
+.payee-card{border:1px solid #2c2d33;border-radius:14px;background:#151618;margin:2px 0 4px;
+ padding:12px 16px 10px;box-shadow:0 1px 3px rgba(16,24,40,.08);color:#d1d4dc;font-size:14px}
 .payee-card-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;
- padding-bottom:9px;border-bottom:1px dashed #e3e8ef}
+ padding-bottom:9px;border-bottom:1px dashed #2c2d33}
 .payee-card-title{font-weight:650;font-size:15px}
-.payee-card-sub{color:#6b7280;font-size:12.5px}
+.payee-card-sub{color:#a1a5af;font-size:12.5px}
 .payee-row{display:flex;align-items:center;gap:10px;padding:7px 0}
-.payee-row+.payee-row{border-top:1px solid #f3f4f6}
-.payee-avatar{width:26px;height:26px;flex:0 0 26px;border-radius:50%;background:#eef2ff;color:#4338ca;
+.payee-row+.payee-row{border-top:1px solid #2c2d33}
+.payee-avatar{width:26px;height:26px;flex:0 0 26px;border-radius:50%;background:#2b2940;color:#b7b1ff;
  display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
 .payee-name{min-width:66px;font-weight:600}
-.payee-phone{font-family:ui-monospace,Consolas,monospace;color:#374151;letter-spacing:.3px}
-.payee-bank{color:#6b7280;flex:1 1 auto;min-width:60px}
+.payee-phone{font-family:ui-monospace,Consolas,monospace;color:#d1d4dc;letter-spacing:.3px}
+.payee-bank{color:#a1a5af;flex:1 1 auto;min-width:60px}
 .payee-badge{font-size:11.5px;padding:2px 8px;border-radius:999px;white-space:nowrap}
-.payee-badge.on{background:#ecfdf3;color:#067647;border:1px solid #abefc6}
-.payee-badge.off{background:#f2f4f7;color:#475467;border:1px solid #e4e7ec}
-.payee-card-foot{color:#6b7280;font-size:12px;line-height:1.55;margin-top:6px;
- padding-top:8px;border-top:1px solid #f3f4f6}
+.payee-badge.on{background:#183026;color:#9bd3b0;border:1px solid #315843}
+.payee-badge.off{background:#23252b;color:#b8bdc8;border:1px solid #3a3d46}
+.payee-card-foot{color:#a1a5af;font-size:12px;line-height:1.55;margin-top:6px;
+ padding-top:8px;border-top:1px solid #2c2d33}
 </style>"""
 
 

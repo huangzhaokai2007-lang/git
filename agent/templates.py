@@ -18,6 +18,13 @@ from pydantic import BaseModel, ConfigDict
 
 from agent import llm
 from agent._risk_questions import QUESTIONS as _RISK_QUESTIONS
+#: 查询类回执（F02 流水明细 / F14 分类占比）：`render_query` 自己一份实现，这里再导出同一批对象。
+from agent.render_query import (         # noqa: F401 —— 与 render_lists 同一拆法：import 即再导出
+    BAR_CELLS, T_ANALYSIS_EMPTY, T_ANALYSIS_HEAD, T_ANALYSIS_NO_PREV,
+    T_SPEND_TABLE_HEAD, T_SPEND_TABLE_SEP, T_TXN_EMPTY, T_TXN_HEAD,
+    T_TXN_TABLE_HEAD, T_TXN_TABLE_SEP, TXN_ROWS, pct_bar, render_spending, render_txns,
+    spend_row, txn_row,
+)
 from agent.render_lists import (          # noqa: F401 —— 列表类回执按职责拆出后**再导出**（同一份实现）
     CARD_STATUS_CN, CARD_TYPE_CN, CYCLE_LABELS, SEVERITY_CN, T_ANOMALY, T_CARD_HEAD,
     T_CARD_HEAD_FILTERED, T_CARD_NO_CARD,
@@ -57,9 +64,12 @@ T_BALANCE = "您的{account_type_cn}账户余额为 {balance_yuan} 元，可用�
 
 #: 流水：facts 键见 T2（total_count / page_out_sum_yuan / page_in_sum_yuan / items[]）
 #: 注意：T2 的 facts **没有** date_from/date_to 键 → 模板不得印时间范围（否则数字校验会把它当幻觉）
+#: 实际渲染在 `render_query.render_txns`（头句 + **明细表**）；这里保留键位是为了
+#: 「每个只读意图都有模板」这类检查不落空（与 T_ANOMALY 同口径）。
 T_TXN = "共查到 {total_count} 笔交易，其中支出合计 {page_out_sum_yuan} 元、收入合计 {page_in_sum_yuan} 元。"
 
 #: 账单分析：facts 键见 T3（period / total_yuan / vs_prev_pct / groups[]）
+#: 实际渲染在 `render_query.render_spending`（头句 + **分类占比表**）；同样只保留键位。
 T_ANALYSIS = "{period} 共支出 {total_yuan} 元，环比 {vs_prev_pct}%。"
 
 #: 异常检测：facts 键见 T4（scanned_count / anomaly_count / items[]）。
@@ -143,6 +153,10 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
     """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
     if intent == "anomaly_check":                            # F03：汇总 + 每条命中一行（交易 + 依据）
         return render_anomalies(facts)
+    if intent == "txn_query":                                # F02：头句 + 流水明细表（不再只报个合计）
+        return render_txns(facts)
+    if intent == "bill_analysis":                             # F14：头句 + 分类占比表（钱花在哪要看得见）
+        return render_spending(facts)
     if intent == "card_query":                               # 卡 23：列表 + 空结果分支（不走单行 format）
         return render_cards(facts)
     if intent == "subscription_list":                        # 卡 20 + F19：汇总 + 明细，按状态分支
@@ -220,9 +234,12 @@ def account_type_cn(account_type: object) -> str:
 POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重生成一次 → 仍不过则降级为模板」
 #: **结构型回执**（Markdown 表格）不进润色：润色器只被授权改「措辞」，但排版也是结构的一部分，
 #: 数字校验器只核数字、**拦不住表格被压平成一串文字** —— 这类意图直接把模板原文交付。
-#: 目前只有 `payee_list`（T20「查看白名单」的表格）。列表类（刷卡/订阅/理财）口径不变，
-#: 以免顺手改掉别人的回执行为；要扩大范围时在此登记并同步用例。
-NO_POLISH_INTENTS = frozenset({"payee_list"})
+#: 目前是 `payee_list`（T20「查看白名单」的表格）+ **本次登记的三个查询类**：
+#: - `txn_query`（F02 流水明细表）、`bill_analysis`（F14 分类占比表）——本轮刚改成表格；
+#: - `bill_report`（F24 账单报告）——回执主体是工具层生成的整篇 Markdown 文档，
+#:   标题层级与表格都是结构，交给润色有可能被压平成一串文字。
+#: 列表类（刷卡/订阅/理财）口径不变，以免顺手改掉别人的回执行为。
+NO_POLISH_INTENTS = frozenset({"payee_list", "txn_query", "bill_analysis", "bill_report"})
 def verify_numbers(text: str, facts: Mapping) -> set[str]:
     """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。
 

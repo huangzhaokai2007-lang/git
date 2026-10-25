@@ -5,7 +5,7 @@ from tests.conftest import raw
 
 def test_bank_card_face_opens_details_without_revealing_number(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '管卡')
     bind(at)
     face = next(button for button in at.button if button.key == f'detail-{CARD}')
     assert face.proto.help == '点击卡片查看详情'
@@ -22,7 +22,7 @@ def test_bank_card_face_opens_details_without_revealing_number(monkeypatch, seed
 
 def test_close_focus_restores_gallery_and_clears_sensitive_detail(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '管卡')
     bind(at)
     click(at, '6222 **** **** 0001')
     assert any(f'data-selected="{CARD}"' in item.value for item in at.markdown)
@@ -31,12 +31,12 @@ def test_close_focus_restores_gallery_and_clears_sensitive_detail(monkeypatch, s
     assert any('data-selected=""' in item.value for item in at.markdown)
     assert not any(button.label == '查看完整卡号' for button in at.button)
     assert any(button.key == f'detail-{CARD}' for button in at.button)
-    assert '******' in [item.value for item in at.text]
+    assert '****** 元' in [item.value for item in at.text]
 
 
 def test_filter_change_leaves_focus_instead_of_showing_an_unlisted_card(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '管卡')
     bind(at)
     click(at, '6222 **** **** 0001')
     next(item for item in at.selectbox if item.label == '卡片状态').set_value('已锁定').run()
@@ -47,7 +47,7 @@ def test_failed_detail_acknowledges_request_and_keeps_gallery_available(monkeypa
     from agent import card_binding_flow
 
     at = app(monkeypatch, seeded)
-    at.radio[0].set_value('💳 我的银行卡').run()
+    click(at, '管卡')
     bind(at)
     monkeypatch.setattr(card_binding_flow, 'detail', lambda card_id: {'ok': False, 'message': '详情暂时不可用'})
     click(at, '6222 **** **** 0001')

@@ -1,26 +1,4 @@
-"""写路径（卡 10 实现 / 10b 拆出 / card-24 泛化）：**所有写意图共用的四步骨架**。
-
-铁律 3 的四步在这里走完，一步不少：
-
-    SLOT_FILL（每意图自己的槽位整形）
-      → PRECHECK（`guard.permission` 纯代码定档，LLM 无从参与 —— 铁律 1）
-      → CONFIRM_CARD（确认卡；L2 再要 OTP）或 PENDING_REVIEW（L3：延迟窗口 + 撤销入口）
-      → EXECUTE（工具层执行；OTP 校验位置由描述符声明）
-
-**card-24 的泛化**：本模块只留「四步骨架 + 与意图无关的通用件」，
-每个写意图的形状（槽位整形 / 凭证种类 / 卡面 / 执行调用）落在 `agent/write_intents.py` 的描述符里。
-**新增写意图不需要改本文件** —— 加一条描述符即可。
-
-**两种凭证**（描述符的 `credential_kind` / `otp_in_tool` 声明）：
-
-- `preview_token`（T7 转账）：凭证由工具层 `preview_*` 签发，**OTP 校验与幂等在工具层**；
-- `confirm_ref`（T11/T12/T15）：凭证由工具层私有约定 `issue_confirm_ref` 签发，
-  这些工具签名**没有 otp 参数** → **OTP 闸门在本层**（`write_intents.otp_ok`），
-  依据 `tools/cross_scene.py`「确认与 OTP 落在编排层（同 T11/T15 的分工）」。
-
-**与 orchestrator 的边界**：本模块不 import `orchestrator`（否则回边/循环）。三段流程返回 `Step`
-（状态轨迹 + 审计字段 + 回执），由 orchestrator 落成 `_finish`/`_clarify` 与审计 —— 状态机仍只有一个入口。
-"""
+'写路径（卡 10 实现 / 10b 拆出 / card-24 泛化）：**所有写意图共用的四步骨架**。'
 
 from __future__ import annotations
 
@@ -148,12 +126,7 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
 
 def resume(session_id: str, text: str,
            *, classify: "Callable[[str], Any] | None" = None) -> Step:
-    """接续在途确认：等确认 / 等 OTP；回复非确认内容 → 回到 SLOT_FILL（本笔作废、不执行）。
-
-    S5（可编辑卡片）：给了 `classify` 回调时，非确认回复先当成**改卡**试一次 ——
-    分类结果与在途意图一致 → 走 `edit()`（旧卡字段 + 新值 → 重走 shape/风控 → 出新卡）；
-    意图不一致 → 维持旧行为（清卡、回 SLOT_FILL 追问）。
-    """
+    '接续在途确认：等确认 / 等 OTP；回复非确认内容 → 回到 SLOT_FILL（本笔作废、不执行）。'
     confirmation = confirm_card.current(session_id)
     assert confirmation is not None                                   # 调用方已判存在
     spec = write_intents.spec_of(confirmation.intent)
@@ -194,11 +167,7 @@ def resume(session_id: str, text: str,
 # ---------------- S5：可编辑卡片 ----------------
 
 def edit(session_id: str, updates: Mapping) -> Step:
-    """**改卡 = 重走校验**（设计 §4）：把在途确认卡的关键字段改掉，重新 `shape → 风控 → 出新卡`。
-
-    不是直接改卡 —— 卡上数字必须来自 facts；这里只做「旧卡字段 + 新值 → 重跑 start()」，
-    由工具层重新出事实包、重新定档。只允许在 confirm 阶段改（OTP 阶段先完成或撤销）。
-    """
+    '**改卡 = 重走校验**（设计 §4）：把在途确认卡的关键字段改掉，重新 `shape → 风控 → 出新卡`。'
     confirmation = confirm_card.current(session_id)
     if confirmation is None:
         return Step(states=[], result="rejected", reply="当前没有待确认的操作",
@@ -227,7 +196,15 @@ def edit(session_id: str, updates: Mapping) -> Step:
         raw[key] = str(value)
         for stale in derived.get(key, ()):
             raw.pop(stale, None)
-    return start(confirmation.intent, raw, session_id)
+    if confirmation.intent in ('transfer_single', 'transfer_scheduled'):
+        from tools._scene_drafts import revoke
+        if not revoke(confirmation.credential_kind, confirmation.credential):
+            return Step(states=[], result='rejected', intent=confirmation.intent,
+                        reply='原草稿已失效，请重新发起办理。', error_code='INVALID_STATE')
+    result = start(confirmation.intent, raw, session_id)
+    from agent import scene_context
+    scene_context.remember_write(session_id, confirmation.intent, raw, status=result.result, reply=result.reply)
+    return result
 
 
 # ---------------- PRECHECK：定档 → 待复核 / 确认卡 ----------------

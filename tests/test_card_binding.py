@@ -198,7 +198,11 @@ def test_card_query_shortcuts_do_not_capture_write_or_mixed_requests(seeded, mon
 
     monkeypatch.setattr(classifier, "classify", classify)
     result = card_binding_flow.handle(text, session_id=SESSION)
-    assert seen and result.intent == "out_of_scope" and result.tool_calls == []
+    if text == '帮我挂失银行卡':
+        assert not seen and result.intent == 'card_report_lost' and result.ask == 'card_lost_choice'
+        assert not result.executed
+    else:
+        assert seen and result.intent == "out_of_scope" and result.tool_calls == []
 
 
 def test_explicit_card_query_keeps_injection_screen_and_single_audit(seeded):

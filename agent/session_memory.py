@@ -41,6 +41,8 @@ def remember(session_id: str, user_text: str, reply: str) -> None:
 
 def reset(session_id: str | None = None) -> None:
     """清空会话记忆（测试隔离与界面「重置会话态」用）。传 `None` 清全部。"""
+    from agent import scene_context
+    scene_context.reset(session_id)
     if session_id is None:
         _RECENT.clear()
     else:
