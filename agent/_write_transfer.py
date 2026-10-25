@@ -14,49 +14,128 @@ F16 的关键差异只有两处：① PRECHECK 时把 `schedule` 一起传给 T7
 from __future__ import annotations
 
 import datetime
+import re
 from typing import Mapping
 
 from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
-from agent._write_common import Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
+from agent import _relative_time                              # 相对时间说法（明天/下周一/月底）
+from agent._write_common import repeat_cycle, Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
 
 #: 转账类的中文名与卡标题（只做措辞，不含任何业务数字）
 TRANSFER_CN = {"transfer_single": "单笔转账", "transfer_scheduled": "定时转账"}
 
-#: 预约时间认不出时的追问（纯措辞，不含业务数字）。**相对日（明天/下周一）暂不支持**（Q10）。
-SCHEDULE_CLARIFY = ("请说明预约时间，格式如 2026-10-21 09:00（也接受 2026-10-21）；"
-                    "「明天」「下周一」这类相对说法暂不支持。")
+#: 预约时间合法性的三个界（人类规格「过去 / 5 分钟内 / 超过 1 年，均拒绝并提示」）
+SCHEDULE_MIN_AHEAD = datetime.timedelta(minutes=5)
+SCHEDULE_MAX_AHEAD = datetime.timedelta(days=365)
+
+#: 预约时间认不出时的追问（纯措辞，不含业务数字）。相对说法已支持（见 `_relative_time`）。
+SCHEDULE_CLARIFY = ("请说明预约时间，格式如 2026-10-21 09:00（也接受 2026-10-21），"
+                    "或直接说「明天」「下周一」「下个月 5 号」「月底」这类说法。")
 
 
 def _iso_schedule(value: object) -> str | None:
-    """预约时间：接受 ISO8601 日期或日期时间；**认不出 → `None`**（当缺槽追问，绝不猜）。"""
+    """预约时间：先按 ISO8601 解析，失败再按**相对说法**（明天/下周一/月底…）解析。
+
+    两者都认不出 → `None`（当缺槽追问，绝不猜）。
+    """
     text = str(value or "").strip()
     if not text:
         return None
     try:
         return datetime.datetime.fromisoformat(text).isoformat(timespec="minutes")
     except ValueError:
+        return _relative_time.parse(text, transfer._now())
+
+
+def _schedule_guard(when: str) -> str:
+    """预约时间合法性：过去 / 5 分钟内 / 超过 1 年 → 返回拒绝文案（否则空串）。
+
+    依据人类规格「时间合法性校验：过去时间、5 分钟内、超过 1 年，均拒绝并提示」。
+    """
+    moment = datetime.datetime.fromisoformat(when)
+    now = transfer._now()
+    if moment <= now:
+        return f"预约时间 {when.replace('T', ' ')} 已经过去了，请换一个将来的时间。"
+    if moment - now < SCHEDULE_MIN_AHEAD:
+        return "预约时间太近了（5 分钟内），请至少提前 5 分钟；想马上转请用「即时转账」。"
+    if moment - now > SCHEDULE_MAX_AHEAD:
+        return "预约时间超过 1 年了，请换一个 1 年内的日期。"
+    return ""
+
+
+#: 「每月 15 日」「每个月 15 号」里的日号（1..31）
+_MONTH_DAY_HINT = re.compile(r"(\d{1,2})\s*[日号]")
+
+
+def _day_of_month(hint: object) -> int | None:
+    """从循环原话里抠出「每月 N 日」的 N；抠不到或越界 → None（不猜）。"""
+    match = _MONTH_DAY_HINT.search(str(hint or ""))
+    if match is None:
         return None
+    day = int(match.group(1))
+    return day if 1 <= day <= 31 else None
+
+
+def _first_occurrence(cycle: str, hint: object) -> str:
+    """循环预约**没给日期**时推导首期：先看原话，再按周期取缺省。
+
+    2026-10-24 修（实测）：「每月 15 日给房东转 30」被算成**月末**（10-31）。
+    原因是原话里只有「15 日」，`_relative_time` 的「N 号」规则要求带「本月/下个月」前缀。
+    现在补一条：**monthly + 原话里带 N 日/号** → 本月 N 日（还没到）否则次月 N 日。
+    """
+    from_hint = _relative_time.parse(hint, transfer._now())
+    if from_hint:
+        return from_hint
+    if cycle == "monthly" and (day_of_month := _day_of_month(hint)):
+        today = transfer._now()
+        first = _relative_time.month_day(today, day_of_month)
+        if first <= today.date():                       # 本月这天已过 → 排到下月同日
+            first = _relative_time.month_day(today, day_of_month, month_shift=1)
+        return first.isoformat() + "T09:00"
+    if cycle == "monthly":
+        day = _relative_time.next_month_end(transfer._now())
+    else:                                                    # weekly：从今天起 +7 天
+        day = (transfer._now() + datetime.timedelta(days=7)).date()
+    return datetime.datetime(day.year, day.month, day.day, 9, 0).isoformat(timespec="minutes")
 
 
 def _shape_scheduled(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：收款人 / 金额沿用转账口径，另加 `schedule`（ISO8601）。
+    """SLOT_FILL：收款人 / 金额沿用转账口径，另加 `schedule`（ISO 或相对说法）。
 
     收款人解析与金额换算**直接复用 `_shape_transfer`**（同一份实现，不复制）—— 同名追问、
-    脱敏手机号透出等 F17 行为因此自动一致。预约时间认不出 → 追问并给出格式。
+    脱敏手机号透出等 F17 行为因此自动一致。
+
+    **循环预约可以不给日期**：「每个月月末给房东转 300」→ 按周期推出首期（最近月末），
+    不再追问格式（实测缺陷：以前会问「请说明预约时间」）。
     """
     shaped = _shape_transfer(slots)
     filled, missing = dict(shaped.filled), list(shaped.missing)
     when = _iso_schedule(filled.get("schedule"))
+    if when is not None:                                      # 2026-10-24：时间合法性三界
+        error = _schedule_guard(when)
+        if error:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT", message=error)
+    cycle = repeat_cycle(filled.get("repeat"))               # 「每个月」→ monthly（认不出 = 一次性）
+    if filled.get("repeat_until"):                           # 循环结束日（「到年底」等相对说法也认）
+        end = _iso_schedule(filled["repeat_until"])
+        filled["repeat_until"] = end[:10] if end else None
+        if end is None:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
+                               message="循环结束日看不懂，请用 2026-12-31 这样的日期")
+    if when is None and cycle:
+        when = _first_occurrence(cycle, filled.get("repeat"))
+        filled["first_auto"] = True                          # 卡面标注「首期为自动推算」
     if when is None:
         missing.append("schedule")
     else:
         filled["schedule"] = when
+    if cycle:
+        filled["repeat_cycle"] = cycle
     clarify = shaped.clarify or (SCHEDULE_CLARIFY if "schedule" in missing else "")
     return ShapeResult(filled=filled, missing=missing, clarify=clarify)
 
 
-#: 脱敏手机号（`139****1001`）；追问文案与卡面用的就是这个形态
 def _payee_query(raw: object) -> str:
     """把「模型回显的卡面串」还原成可解析的查询键（实现见 `_write_common.normalize_query`）。
 
@@ -97,7 +176,8 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
         else:
             filled["amount_cents"] = cents
     clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify,
+                       candidates=list(payee_facts.get("candidates") or []))
 
 
 def _prepare_transfer(filled: dict) -> Prepared:
@@ -135,7 +215,13 @@ def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
         title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
         rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
               ("金额", f"{facts['amount_yuan']} 元"),
-              ("预计到账", confirm_card.expected_arrival(tier))],
+              ("预计到账", confirm_card.expected_arrival(tier)),
+              #: 2026-10-24 人类规格「转账卡片：转账后余额 / 今日剩余额度」——
+              #: 两个数都直接来自 T7 的事实包（`balance_after` / `limits_daily_remaining`），不重算。
+              *([("转账后余额", f"{facts['balance_after_yuan']} 元")]
+                if facts.get("balance_after_yuan") else []),
+              *([("今日剩余额度", f"{facts['limits_daily_remaining_yuan']} 元")]
+                if facts.get("limits_daily_remaining_yuan") else [])],
         tier=tier, requires_otp=requires_otp,
         risk_note=note)
 
@@ -185,12 +271,18 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
     而 F16 验收第 2 条正是不许把预约当即时。
     """
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
+    cycle = {"monthly": "每月循环（首期后按月续期，月末自动对齐）",
+             "weekly": "每周循环（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
+    if cycle and filled.get("repeat_until"):               # 人类规格「周期结束条件」
+        cycle = f"{cycle}，循环至 {filled['repeat_until']}"
+    rows = [("收款人", f"{facts['payee_name']}（{masked}）"),
+            ("金额", f"{facts['amount_yuan']} 元"),
+            ("预约时间", str(facts["schedule"]).replace("T", " ")),
+            ("执行说明", "到预约时间后才扣款，此前不会动钱")]
+    if cycle:                                                              # 循环预约：多一行讲清续期口径
+        rows.insert(3, ("循环", cycle))
     return confirm_card.CardInput(
-        title="定时转账确认卡", intent_cn="定时转账",
-        rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
-              ("金额", f"{facts['amount_yuan']} 元"),
-              ("预约时间", str(facts["schedule"]).replace("T", " ")),
-              ("执行说明", "到预约时间后才扣款，此前不会动钱")],
+        title="定时转账确认卡", intent_cn="定时转账", rows=rows,
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note(list(facts.get("factors") or [])))
 
@@ -203,88 +295,21 @@ def _plain_scheduled(filled: dict, facts: Mapping, tier: str) -> str:
 
 
 def _book_scheduled(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
-    """EXECUTE：调 **T21** 落一条 `pending` 预约（**不扣款**）—— 验收第 2 条的落点。
+    """EXECUTE：调 **T21** 落一条 `pending` 预约（**不扣款**）；带循环 → 再调 **T34** 记周期。
 
     延迟 import：本模块属编排层，`_transfer_schedule` 属工具层且反过来依赖 `tools.transfer`，
     在函数内导入可彻底避开导入顺序问题（同 `tools/transfer.py` 调 `schedule_args_error` 的做法）。
     """
-    from tools import _transfer_schedule
-    return _transfer_schedule.schedule_transfer(confirmation.credential, otp)
-
-
-# ---------------- 取消预约（F16 · Q4：L1 确认卡、**不要 OTP**） ----------------
-
-#: 取消的档位：**恒 L1**（Q4）。取消是「撤回一个尚未发生的动作」，风险低于发起，且不动钱。
-#: **不沿用原预约冻结的档位** —— 否则一笔 L2 预约的取消也要 OTP，与 Q4 冲突。
-CANCEL_TIER = "L1"
-
-#: 有多笔待执行预约时的追问（纯措辞，不含业务数字）
-CANCEL_AMBIGUOUS = "您有多笔尚未执行的预约，请说明要取消哪一笔（可以说出预约时间）。"
-
-
-def _pending_listed() -> tuple[list[dict], str | None]:
-    """只读 T24 取「待执行」预约；返回 (items, 错误码)。延迟 import 同 `_book_scheduled` 的理由。"""
-    from tools import _transfer_schedule
-    listed = _transfer_schedule.list_scheduled("pending")
-    if not listed.ok:
-        return [], _code_of(listed)
-    return list(listed.facts.get("items") or []), None
-
-
-def _shape_cancel(slots: Mapping) -> ShapeResult:
-    """SLOT_FILL：从**只读**列表里挑要取消的那一笔。
-
-    一笔 → 直接定；**零笔 → `NOT_FOUND`**；**多笔 → 追问**（绝不擅自挑一笔）。
-    """
-    filled = dict(slots)
-    items, code = _pending_listed()
-    if code is not None:
-        return ShapeResult(filled=filled, error_code=code, message="取不到您的预约列表")
-    if not items:
-        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有待执行的预约")
-    if len(items) > 1:
-        return ShapeResult(filled=filled, missing=["schedule_id"], clarify=CANCEL_AMBIGUOUS)
-    filled["schedule_id"] = items[0]["schedule_id"]
-    filled["amount_cents"] = items[0]["amount"]                 # 供确认卡显示金额
-    return ShapeResult(filled=filled)
-
-
-def _prepare_cancel(filled: dict) -> Prepared:
-    """取消的确认卡事实包：**只读**列表里那一笔（不调 T23 —— 落库在 EXECUTE 步）。
-
-    `tier` 覆盖成 `CANCEL_TIER`：`write_flow` 用 `facts["tier"]` 定档，而这里的原值是被取消
-    那笔的档位（可能是 L2/L3）。取消**恒 L1**（Q4），故必须覆盖。
-    """
-    items, code = _pending_listed()
-    if code is not None:
-        return Prepared(ok=False, error_code=code, message="取不到您的预约列表")
-    row = next((it for it in items if it["schedule_id"] == filled.get("schedule_id")), None)
-    if row is None:
-        return Prepared(ok=False, error_code="NOT_FOUND", message="这笔预约已不在待执行状态")
-    return Prepared(ok=True, facts={**row, "tier": CANCEL_TIER}, credential="")
-
-
-def _card_cancel(intent: str, filled: dict, facts: Mapping, tier: str,
-                 requires_otp: bool) -> confirm_card.CardInput:
-    """取消预约确认卡：取消哪一笔（收款人 / 金额 / 预约时间）+ 「不会扣款」。"""
-    return confirm_card.CardInput(
-        title="取消预约确认卡", intent_cn="取消预约",
-        rows=[("收款人", str(facts["payee_name"])),
-              ("金额", f"{facts['amount_yuan']} 元"),
-              ("预约时间", str(facts["execute_at"]).replace("T", " ")),
-              ("说明", "该预约尚未执行，取消后不会扣款")],
-        tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], "取消预约"))
-
-
-def _plain_cancel(filled: dict, facts: Mapping, tier: str) -> str:
-    """纯事实版确认文本（取消预约的降级回执）。"""
-    return (f"请确认：取消 {facts.get('execute_at')} 向 {facts.get('payee_name')} 转账 "
-            f"{facts.get('amount_yuan')} 元的预约，权限档 {tier}，不会产生扣款。")
-
-
-def _execute_cancel(confirmation: confirm_card.Confirmation, otp: str | None) -> ToolResult:
-    """EXECUTE：调 **T23** 取消（`pending → cancelled`，**不动钱**）。Q4：L1，无 OTP。"""
-    del otp
-    from tools import _transfer_schedule
-    return _transfer_schedule.cancel_scheduled(str(confirmation.filled["schedule_id"]))
+    from tools import _transfer_schedule, _transfer_schedule_ops
+    result = _transfer_schedule.schedule_transfer(confirmation.credential, otp)
+    cycle = str(confirmation.filled.get("repeat_cycle") or "")
+    if result.ok and cycle:
+        schedule_id = str((result.data or {}).get("schedule_id") or "")
+        if schedule_id:                                       # 周期记在同一笔上（T34）
+            mark = _transfer_schedule_ops.set_schedule_repeat(
+                schedule_id, cycle, str(confirmation.filled.get("repeat_until") or ""))
+            if mark.ok:
+                label = "每月" if cycle == "monthly" else "每周"
+                result = result.model_copy(update={
+                    "message": f"{result.message}（已设为{label}循环）"})
+    return result

@@ -46,7 +46,10 @@ CREATE TABLE payee (
   bank TEXT, is_whitelist INTEGER NOT NULL DEFAULT 0, last_used_ts TEXT,
   -- v2（转账域串联 · SPEC-CHANGE）：标签 / 白名单专属额度 / 黑名单
   tags TEXT,                                      -- 逗号分隔，可空（如 "妈妈,家人"）
-  whitelist_quota INTEGER,                        -- 白名单免验证码额度，单位分；NULL=无额度
+  whitelist_quota INTEGER       /* 白名单专属额度（每月重置，单位分） */,                        -- 白名单免验证码额度，单位分；NULL=无额度
+  whitelist_expire TEXT,                          -- 白名单有效期（ISO 结束日期）；到期自动降级为普通收款人；NULL=长期
+  note TEXT,                                      -- 备注（用户自己写的说明，可空；不是风控字段）
+  card_no TEXT,                                  -- 银行卡号**脱敏形态**（如 **** **** **** 8888）；完整号绝不入库
   blacklist INTEGER NOT NULL DEFAULT 0,           -- 1=黑名单；与 is_whitelist 互斥
   blacklist_reason TEXT                           -- 拉黑原因，可空
 );
@@ -81,5 +84,41 @@ CREATE TABLE scheduled_transfer (                 -- F16：定时转账预约（
   created_at TEXT NOT NULL,
   settled_at TEXT,                                -- 结算时刻；pending 时为 NULL
   txn_id TEXT,                                    -- 成功后回填
-  fail_reason TEXT                                -- 失败原因码（INSUFFICIENT_FUNDS 等）
+  fail_reason TEXT,                               -- 失败原因码（INSUFFICIENT_FUNDS 等）
+  repeat_cycle TEXT,                              -- 循环预约：weekly | monthly；NULL = 一次性（T34 设/T35 续期）
+  repeat_until TEXT                               -- 循环结束日（ISO 日期）；NULL = 一直循环（2026-10-24 人类规格「周期结束条件」）
+);
+CREATE TABLE gift_order (                         -- F20 追加：送礼订单（T16 锁款成功后由 T38 落一条）
+  id TEXT PRIMARY KEY,                            -- ord_<uuid12>
+  user_id TEXT NOT NULL,
+  contact TEXT NOT NULL,                          -- 收货人
+  gift_date TEXT NOT NULL,                        -- 送达日期（ISO 日期）
+  budget INTEGER NOT NULL,                        -- 预算，单位分
+  total INTEGER NOT NULL,                         -- 实际合计，单位分
+  items_json TEXT NOT NULL,                       -- 清单快照 [{item_id,name,price}]
+  status TEXT NOT NULL,                           -- created | paid | cancelled | failed
+  platform TEXT,                                  -- 平台（如「京东」），可空
+  address TEXT,                                   -- 收货地址（脱敏展示用），可空
+  platform_order_no TEXT,                         -- 平台订单号：**幂等键**（重复直接拒）
+  plan_id TEXT, lock_id TEXT,                     -- T16 的 plan/lock（追溯用）
+  created_at TEXT NOT NULL
+);
+CREATE TABLE aa_request (                         -- F22 追加：AA 收款请求（T41 落 / T42 查 / T43 已付 / T44 撤销）
+  id TEXT PRIMARY KEY,                            -- aa_<uuid12>
+  user_id TEXT NOT NULL,
+  title TEXT NOT NULL,                            -- 事由（如「周末聚餐」）
+  total INTEGER NOT NULL,                         -- 合计，单位分
+  split_mode TEXT NOT NULL,                       -- equal | custom
+  status TEXT NOT NULL,                           -- active | done | expired | cancelled
+  created_at TEXT NOT NULL,
+  expire_at TEXT NOT NULL                         -- 创建时刻 + 24h（ISO；到点惰性判 expired）
+);
+CREATE TABLE aa_share (                           -- AA 里每个收款人一份（每人已付状态）
+  id TEXT PRIMARY KEY,
+  request_id TEXT NOT NULL,
+  payee_id TEXT NOT NULL,
+  payee_name TEXT NOT NULL,                       -- 快照（收款人改名/删除也能查）
+  amount INTEGER NOT NULL,                        -- 该人应收，单位分
+  status TEXT NOT NULL,                           -- pending | paid
+  paid_at TEXT
 );

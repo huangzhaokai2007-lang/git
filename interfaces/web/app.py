@@ -28,9 +28,14 @@ import card_lock_ui as locks_ui                                  # noqa: E402
 import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
 import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
-import insight_card_ui
-import card_edit_ui
-import activity_ui                                              # noqa: E402
+import insight_card_ui                                        # noqa: E402  （main：洞察卡）
+import card_edit_ui                                             # noqa: E402  （S5：可编辑卡片）
+import payee_picker_ui                                          # noqa: E402  （解析卡：同名多命中）
+import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
+import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
+import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
+import audit_ui                                                 # noqa: E402  （审计回放：trace_id → 链路）
+import activity_ui                                              # noqa: E402  （main：活动流）
 
 load_dotenv(ROOT / ".env")
 
@@ -69,6 +74,9 @@ def _init_state() -> None:
     state.setdefault("pending_id", None)
     state.setdefault("clarify_round", 0)
     state.setdefault("bound-payee-query", False)
+    state.setdefault("bound-schedule-query", False)
+    state.setdefault("bound-aa-query", False)
+    state.setdefault("bound-gift-query", False)
 
 @st.cache_resource
 def _agent_executor() -> ThreadPoolExecutor:
@@ -112,6 +120,9 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
     state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
+    state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
+    state["bound-aa-query"] = turn.intent == "aa_list" and turn.error_code is None
+    state["bound-gift-query"] = turn.intent == "gift_order_list" and turn.error_code is None
     state['bound-card-query'] = state.get('bound-card-query', False) or (
         (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
@@ -231,23 +242,36 @@ def _chat_page() -> None:
         _ask(queue[0])
         st.rerun()
     messages = st.session_state["messages"]
+    audit_ui.render(_agent_executor())                            # 侧边栏：审计回放
     ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card)
     import scene_ui
     scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
     _bill_charts()
     activity_ui.render(st.session_state['turns'])
     _render_pending()
-    _render_confirm()
-    card_edit_ui.render(_agent_executor(), st.session_state["session_id"])
+    payee_picker_ui.render(_agent_executor(), st.session_state["session_id"])  # 解析卡（同名多命中）
+    card_edit_ui.render(_agent_executor(), st.session_state["session_id"])   # S5：可编辑卡片面板
+    #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
+    #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
     _render_forms()
     if st.session_state.get("bound-card-query"):
         cards_ui.render(_agent_executor(), st.session_state["session_id"], show_limit_button=False)
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
+    if st.session_state.get("bound-lost-query"):
         lost_ui.render(_agent_executor(), st.session_state['session_id'], show_button=False)
-    if st.session_state.get("bound-payee-query"):
-        payee_ui.render(_agent_executor(), st.session_state["session_id"])
+    if st.session_state.get("bound-payee-query"):                 # S6：收款人卡（人名选项 → 专属详情卡）
+        payee_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    if st.session_state.get("bound-schedule-query"):              # F16：预约卡面 + 执行/改时间/取消
+        schedule_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    if st.session_state.get("bound-aa-query"):                    # F22：AA 卡面 + 登记已付/撤销
+        aa_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    if st.session_state.get("bound-gift-query"):                  # F20：送礼查询卡 + 支付/取消
+        gift_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
+    #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
+    _render_confirm()
     if (text := st.chat_input("")) and text.strip():
         _ask(text)
         st.rerun()

@@ -15,7 +15,7 @@ from typing import Any, Mapping
 
 import streamlit as st
 
-from agent import orchestrator, risk_flow
+from agent import orchestrator, payee_flow, risk_flow
 
 import components as ui
 
@@ -85,14 +85,19 @@ def render_payee_form(state: Mapping[str, Any], executor: Any) -> bool:
     turn = state["messages"][-1].get("turn") or {}
     if turn.get("intent") != "payee_add" or turn.get("executed"):
         return False                  # 提交成功（executed=True）就把表单收起来；失败则保留可重试
-    submitted = ui.payee_form()
+    defaults = executor.submit(payee_flow.pending_slots, state["session_id"]).result()
+    submitted = ui.payee_form(defaults)
     if submitted is None:
         return False
-    name, phone, whitelist = submitted
+    payee_flow.clear_pending(state["session_id"])
     _ask_submit(state, "（表单提交）新增收款人")
     try:
-        result = executor.submit(orchestrator.submit_payee, name, phone,
-                                 session_id=state["session_id"], whitelist=whitelist).result()
+        result = executor.submit(
+            orchestrator.submit_payee, submitted["name"], submitted["phone"],
+            session_id=state["session_id"], whitelist=submitted["whitelist"],
+            note=submitted["note"], quota=submitted["quota"],
+            expire=submitted["expire"], tags=submitted.get("tags", ""),
+            card_no=submitted.get("card_no", "")).result()
     except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
         _failure(state, exc)
         return True

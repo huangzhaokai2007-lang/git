@@ -91,9 +91,46 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
 #: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
 _CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡",
-               "gift_plan": "送礼计划确认卡"}
+               "gift_plan": "送礼计划确认卡", "payee_whitelist": "白名单确认卡",
+               "payee_blacklist": "黑名单确认卡", "payee_unblacklist": "解除黑名单确认卡",
+               "payee_delete": "删除收款人确认卡",
+               #: 2026-10-24 补齐：此前 `transfer_scheduled` 等新意图都落回默认的「转账确认卡」
+               "transfer_scheduled": "定时转账确认卡",
+               "scheduled_cancel": "取消预约确认卡", "scheduled_run": "立即执行预约确认卡",
+               "scheduled_modify": "修改预约确认卡",
+               "gift_order_cancel": "取消订单确认卡", "gift_order_pay": "支付订单确认卡",
+               "gift_order_advance": "订单状态确认卡",
+               "aa_mark_paid": "登记已付确认卡", "aa_cancel": "撤销 AA 确认卡",
+               "aa_remind": "提醒付款确认卡",
+               "payee_whitelist_edit": "修改白名单信息确认卡",
+               "payee_whitelist_remove": "移出白名单确认卡",
+               "payee_note": "修改备注确认卡", "payee_tags": "修改标签确认卡"}
 _CARD_TARGET = {"subscription_cancel": "商户", "gift_plan": "联系人",
                 "wealth_buy": "产品", "wealth_redeem": "产品"}
+#: **只有这些意图**的卡有「金额」「预计到账」两截 —— 联系人状态类操作（加白/拉黑/删除）没有金额，
+#: 否则会印出空的「金额（元）」和转账专用的「预计到账」，让白名单卡看起来像转账卡（实测缺陷）。
+_MONEY_INTENTS = frozenset({"transfer_single", "transfer_scheduled", "subscription_cancel",
+                            "aa_collect", "gift_plan", "wealth_buy", "wealth_redeem"})
+
+
+def _aa_table(confirmation: Any) -> None:
+    """AA 收款：主卡面就列**每人应收金额**的表格（一键均摊时每人相同、标注均摊）。
+
+    数据全部来自确认卡快照（`filled`）—— 界面只渲染，不重算、不补数（铁律 2）。
+    """
+    filled = dict(getattr(confirmation, "filled", {}) or {})
+    names = [str(name) for name in (filled.get("aa_names") or [])]
+    if not names:
+        return
+    per = [int(cents) for cents in (filled.get("per_person_cents") or [])]
+    if len(per) != len(names):                            # 一键均摊
+        total = int(getattr(confirmation, "amount_cents", 0) or 0)
+        per = [total // len(names)] * len(names)
+        mode = "一键均摊"
+    else:
+        mode = "按人金额"
+    rows = "\n".join(f"| {_esc(name)} | {cents / 100:.2f} |" for name, cents in zip(names, per))
+    st.markdown(f"**每人应收（{mode}）**\n\n| 收款人 | 应收金额（元） |\n| --- | --- |\n{rows}")
 
 
 def confirm_card(confirmation: Any) -> str | None:
@@ -101,18 +138,25 @@ def confirm_card(confirmation: Any) -> str | None:
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
     target = _CARD_TARGET.get(intent, "收款人")
+    money = intent in _MONEY_INTENTS
     with st.container(border=True):
         st.markdown(f"##### 📋 {title}（等待您的确认）")
         head = st.columns(4)
-        head[0].metric("金额（元）", confirmation.amount_yuan)
-        head[1].metric(target, confirmation.target_name)
-        head[2].metric("权限档（风险等级）", confirmation.tier)
-        head[3].metric("短信验证码", "需要" if confirmation.requires_otp else "不需要")
+        slot = 0
+        if money:                                         # 只有涉及金额的意图才印金额
+            head[slot].metric("金额（元）", confirmation.amount_yuan or "—")
+            slot += 1
+        head[slot].metric(target, confirmation.target_name or "—")
+        head[slot + 1].metric("权限档（风险等级）", confirmation.tier or "—")
+        head[slot + 2].metric("短信验证码", "需要" if confirmation.requires_otp else "不需要")
         parts = [f"意图：{_line(confirmation.card_text, '意图：') or confirmation.intent}"]
-        if confirmation.masked_phone:                     # 转账才有；订阅取消为空
+        if confirmation.masked_phone:                     # 转账/收款人才有
             parts.append(f"收款账号：{_esc(confirmation.masked_phone)}")
-        parts.append(f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
+        if money:                                         # 「预计到账」是转账专用截
+            parts.append(f"预计到账：{_line(confirmation.card_text, '预计到账：') or '—'}")
         st.caption(" · ".join(parts))
+        if intent == "aa_collect":                        # AA：主卡面就列**每人应收**表格
+            _aa_table(confirmation)
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")
         left, right, _rest = st.columns([1, 1, 3])
@@ -144,19 +188,47 @@ def otp_card(confirmation: Any) -> tuple[str, str] | None:
     return None
 
 
-def payee_form() -> tuple[str, str, bool] | None:
-    '卡 20：添加收款人的表单（姓名 + 手机号 + **是否加入白名单**）。'
-    with st.container(border=True):
+def payee_form(defaults: dict | None = None) -> dict | None:
+    """卡 20：添加收款人的表单（姓名 + 手机号 + **是否加入白名单**）。
+
+    只**收集**输入并原样返回 `(name, phone, whitelist)`；未提交 → `None`。校验 / 脱敏 / 落库 /
+    审计一律在 `agent/` → `tools/`（界面不写业务逻辑）。
+    `defaults`：聊天句里已说出的姓名/手机号 → 预填（来自 `agent/payee_flow.pending_slots`）。
+
+    ⚠️ 勾「同时加入白名单」**不等于**当场授予特权：界面只把意图传下去，真正的授予要走
+    **L2 确认卡 + 短信验证码**（`agent/payee_flow.py` → `write_flow` → T25）——
+    白名单 = 转账免验证码的特权，不能靠一次表单点击就拿到。
+    """
+    defaults = defaults or {}    with st.container(border=True):
         st.markdown("##### ➕ 添加收款人")
         st.caption("填姓名和手机号即可（不收卡号）。手机号会脱敏保存，完整号码不入库、不回显。")
         with st.form("payee-form", clear_on_submit=True):
-            name = st.text_input("姓名", key="payee-name", placeholder="例如：王小明")
-            phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678")
+            name = st.text_input("姓名", key="payee-name", placeholder="例如：王小明",
+                                 value=str(defaults.get("name") or ""))
+            phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678",
+                                  value=str(defaults.get("phone") or ""))
+            card_no = st.text_input("银行卡号（可空）", key="payee-card-no",
+                                    placeholder="只保存脱敏形态（**** **** **** 8888）")
+            tags = st.text_input("标签（可空，多个用、分隔；**能用来指代这个人**）", key="payee-tags",
+                                 placeholder="例如：妈妈、房东（之后可以说「给我妈转 200」）")
+            note = st.text_input("备注（可空；**只给自己看，不参与识别**）", key="payee-note",
+                                 placeholder="例如：老同学，别转错",
+                                 value=str(defaults.get("note") or ""))
             whitelist = st.checkbox("同时加入白名单（之后转账免验证码，需再输一次验证码）",
                                     key="payee-whitelist")
+            quota = ""
+            expire = ""
+            if whitelist:                                    # 2026-10-24：加白要设额度与有效期
+                col_a, col_b = st.columns(2)
+                quota = col_a.text_input("专属额度（元/月）", key="payee-quota",
+                                         placeholder="例如 5000（不填 = 一律要验证码）")
+                expire = col_b.text_input("有效期至", key="payee-expire",
+                                          placeholder="例如 2026-12-31 或 月底（不填 = 长期）")
             submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
         if submitted:
-            return (name, phone, bool(whitelist))
+            return {"name": name, "phone": phone, "whitelist": bool(whitelist),
+                    "note": note, "quota": quota, "expire": expire, "tags": tags,
+                    "card_no": card_no}
     return None
 
 

@@ -220,7 +220,8 @@ def test_read_intents_are_exactly_the_contracted_set(seeded: Path,
     assert orchestrator.READ_INTENTS == ("balance_query", "txn_query", "bill_analysis", "anomaly_check",
                                          "bill_report", "subscription_list", "card_query",
                                          "wealth_recommend", "risk_assess", "payee_list",
-                                         "wealth_holdings", "wealth_all_products")
+                                         "wealth_holdings", "wealth_all_products", "scheduled_list",
+                                         "gift_order_list", "aa_list")
     assert all(intent in classifier.INTENT_LABELS for intent in orchestrator.READ_INTENTS)
     assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS)   # 卡 23 起 card_query 也有路由
 

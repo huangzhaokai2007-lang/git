@@ -15,6 +15,8 @@
 
 from __future__ import annotations
 
+import re
+
 import logging
 from typing import Literal, Mapping
 
@@ -32,7 +34,8 @@ INTENT_LABELS = (
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "gift_order_advance", "aa_list", "aa_mark_paid", "aa_cancel", "aa_remind", "payee_whitelist_edit", "payee_whitelist_remove",
+    "payee_note", "payee_tags", "payee_card_no", "smalltalk", "out_of_scope", "unsafe_request",
 )
 
 IntentLabel = Literal[
@@ -42,7 +45,8 @@ IntentLabel = Literal[
     "card_query", "card_apply", "card_limit_adjust", "card_lock", "card_unlock", "card_report_lost",
     "risk_assess", "wealth_recommend", "wealth_buy", "wealth_redeem",
     "wealth_holdings", "wealth_all_products",
-    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "smalltalk", "out_of_scope", "unsafe_request",
+    "gift_plan", "payee_add", "payee_list", "payee_whitelist", "payee_blacklist", "payee_unblacklist", "payee_delete", "scheduled_list", "scheduled_run", "scheduled_modify", "gift_order_list", "gift_order_cancel", "gift_order_pay", "gift_order_advance", "aa_list", "aa_mark_paid", "aa_cancel", "aa_remind", "payee_whitelist_edit", "payee_whitelist_remove",
+    "payee_note", "payee_tags", "payee_card_no", "smalltalk", "out_of_scope", "unsafe_request",
 ]
 
 # ---------------- 每意图允许的槽位（规格未定义 → 按 §2 工具签名归纳） ----------------
@@ -55,9 +59,9 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "anomaly_check": ("period",),                                          # T4 detect_anomalies
     "bill_report": ("period", "kind"),                                     # T5 generate_bill_report
     "transfer_single": ("payee", "amount"),                                # T6/T7
-    "transfer_scheduled": ("payee", "amount", "schedule"),                 # T7 schedule 参数
+    "transfer_scheduled": ("payee", "amount", "schedule", "repeat", "repeat_until"),                 # T7 schedule 参数
     "scheduled_cancel": (),                                                # F16 Q4：取消预约（无槽位，工具侧挑唯一 pending）
-    "aa_collect": ("payee_ids", "amount"),                                 # T9 create_aa_request
+    "aa_collect": ("payee_ids", "amount", "amounts"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
     "subscription_cancel": ("sub_id", "merchant"),                          # T11 cancel_subscription（card-24 扩 merchant）
     "subscription_remind": (),                                             # §3 有此意图、§2 无对应工具 → 留空待定
@@ -73,13 +77,30 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "wealth_redeem": ("product", "amount"),
     "wealth_holdings": (),          # T26 list_holdings（无入参）
     "wealth_all_products": (),      # T27 list_all_products（无入参）                             # T15 trade_wealth
-    "gift_plan": ("contact", "date", "budget"),                            # T16 plan_gift
+    "gift_plan": ("contact", "date", "budget", "platform", "address", "order_no"),  # T16 plan_gift（2026-10-24 补三项）
     "payee_add": ("name", "phone"),                                        # T17 add_payee（卡 20）
     "payee_list": (),                                                      # T20 list_payees（SPEC-CHANGE 新增，无入参）
-    "payee_whitelist": ("payee",),                                         # T25 set_payee_whitelist（L2）
+    "payee_whitelist": ("payee", "expire", "quota"),                                         # T25 set_payee_whitelist（L2）
     "payee_blacklist": ("payee",),                                         # T28 set_payee_blacklist（L1）
+    "aa_collect": ("payee_ids", "amount", "amounts"),
     "payee_unblacklist": ("payee",),                                       # T29 unset_payee_blacklist（L2）
     "payee_delete": ("payee",),                                            # T30 delete_payee（L1）
+    "scheduled_list": (),                                                  # T24 list_scheduled（L0 只读，无槽位）
+    "scheduled_run": (),                                                   # T32 立即执行（哪一笔由流程挑）
+    "scheduled_modify": ("schedule", "amount", "payee"),                   # T33 改时间 / T51 改金额·收款人
+    "gift_order_list": ("status",),                                        # T37 查订单（可选状态筛选）
+    "gift_order_cancel": ("order_id",),                                    # T39 取消订单
+    "gift_order_pay": ("order_id",),                                       # T40 支付订单
+    "gift_order_advance": ("order_id", "action"),                          # T49 发货/完成
+    "aa_list": ("status",),                                                # T42 查 AA（可选状态）
+    "aa_mark_paid": ("payee",),                                            # T43 登记某人已付
+    "aa_cancel": (),                                                       # T44 撤销 AA
+    "aa_remind": ("request_id", "payee"),                                  # T48 提醒未付
+    "payee_whitelist_edit": ("payee", "quota", "expire"),                  # 修改白名单信息
+    "payee_whitelist_remove": ("payee",),                                  # 移出白名单
+    "payee_note": ("payee", "note"),                                       # 修改备注
+    "payee_tags": ("payee", "tags"),                                       # 修改标签
+    "payee_card_no": ("payee", "card_no"),                                 # 记录卡号
     "smalltalk": (),                                                       # 闲聊无需槽位
     "out_of_scope": (),                                                    # 越界请求无需槽位
     "unsafe_request": (),                                                  # 不安全请求：理由在顶层字段
@@ -173,6 +194,40 @@ SYSTEM_PROMPT = (
     "payee_unblacklist（解除黑名单）的判定：「把王小明移出黑名单」「解除对X的拉黑」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_add 的区分：只是新增联系人不是它，"
     "要**恢复**一个被拉黑的人才是 payee_unblacklist。\n"
+    "payee_whitelist 的 `expire` 槽位：用户说「有效期到 2026-12-31」「有效期到月底」时填原话"
+    "（仅展示、不参与风控）；没说就不填（长期有效）。\n"
+    "transfer_scheduled 的 `repeat` 槽位：用户说「每个月/每月末/每周」这类**循环**时填原话"
+    "（例如「每个月月末给房东转 3000」→ repeat=「每个月月末」）；没说就不填（一次性预约）。\n"
+    "gift_plan 的补充槽位：platform（平台，如「京东」）、ddress（收货地址）、"
+    "order_no（平台订单号，作幂等键）—— 用户说了才填，没说就留空。\n"
+    "payee_card_no（记卡号）：「给张小美记一下卡号 6222…」「王五的卡号是 …」；`card_no` 填原文。"
+    "payee_tags（改标签）：「给王五加上标签房东」「李四的标签改成同事」。`tags` 填原话。\n"
+    "payee_whitelist_edit（修改白名单信息）：「把王五的额度改成 5000」「白名单有效期改到 2026-12-31」；"
+    "`quota` 填元、`expire` 填日期原话。payee_whitelist_remove（移出白名单）：「把王五移出白名单」。\n"
+    "payee_note（改备注）：「给王五加个备注」「把李四的备注改成老同学」。\n"
+    "aa_list（查 AA）的判定：「我的 AA」「AA 收款进行中」「谁还没付」都判它；`status` 说了才填。"
+    "aa_remind（提醒未付）：「提醒赵六付款」「催一下没付的人」；`payee` 填那个人。\n"
+    "aa_mark_paid（登记已付）：「赵六付了」「把张三标成已付」；`payee` 填那个人。"
+    "aa_cancel（撤销 AA）：「把那个 AA 撤了」；与 aa_collect（新建）划清。\n"
+    "gift_order_advance（发货/完成）：「这单礼物发了」「标记成已发货」→ action=发货；"
+    "「这单完成了」→ action=完成。\n"
+    "gift_order_cancel / gift_order_pay（订单状态流转）的判定：「取消那个礼物订单」→"
+    "gift_order_cancel；「把礼物订单支付了」→ gift_order_pay；`order_id` 只在用户报了订单号时填。"
+    "gift_order_list（查送礼订单）的判定：「我的送礼订单」「订单到哪了」「查一下订单」都判它；"
+    "`status` 只在用户说了状态时填（created/paid/cancelled/failed）。与 gift_plan 的区分："
+    "**新建**送礼计划是 gift_plan，**查订单**才是它。\n"
+    "transfer_scheduled 的 `repeat_until` 槽位：用户说了**循环到什么时候**才填"
+    "（「每个月月末给房东转 3000，到年底」→ repeat_until=年底）；没说就不填（一直循环）。\n"
+    "scheduled_list（查预约）的判定：「我的预约」「那笔定时转账到时间了吗」「查一下预约记录」都判它；"
+    "无槽位。与 transfer_scheduled 的区分：**新建**预约是 transfer_scheduled，**查看/查询**预约才是它。\n"
+    "scheduled_modify 还能改**金额/收款人**（「把那笔预约改成 200 元」「预约的收款人换成赵六」）——"
+    "`amount` 填元、`payee` 填人；与改时间可同时说。\n"
+    "scheduled_run（立即执行预约）的判定：「现在就把那笔预约转了」「立即执行我的预约」都判它；"
+    "无槽位（哪一笔由流程挑）。scheduled_modify（改预约时间）的判定：「把那笔预约改到明天」"
+    "「预约时间改成 2026-11-01 09:00」都判它；`schedule` 槽位填**新时间**。\n"
+    "aa_collect（AA 收款）的判定：「向张三和李四 AA 收款 100 元」「大家 AA 一下」都判它；"
+    "`payee_ids` 填名单，`amount` 填总额；若用户说「王五 100 元、赵六 200 元」这种**按人金额**，"
+    "把整句原样放进 `amounts` 槽位，`amount` 可以不填（合计由系统算）。\n"
     "payee_delete（删除收款人）的判定：「把王小明删掉」「删除收款人张三」都判它；"
     "`payee` 槽位填收款人姓名或手机号。与 payee_blacklist 的区分：拉黑是禁止转账、"
     "删除是把联系人整个移走（历史流水保留），要**移除联系人**才是 payee_delete。\n"
@@ -240,8 +295,100 @@ def check_structure(result: IntentOut) -> None:
         raise ClassifierOutputError(f"intent={result.intent} 出现未定义槽位：{sorted(unknown)}")
 
 
+#: 2026-10-24：**确定性快路** —— 这几类句式里有「额度/有效期」等词，容易被误判成
+#: `card_limit_adjust`（信用卡额度调整，同域不同意图）。凡明确说了「收款人/白名单/黑名单/标签
+#: /备注/卡号」的，直接判给收款人域，**不冒险交给模型**。
+_NOUNS = ("白名单", "黑名单", "专属额度", "标签", "备注", "卡号")
+#: 查询句式 —— 出现这些词就不是「改」，快路立刻放手（交给只读路径）
+_QUERY_MARKS = ("有哪些", "哪些", "多少人", "查一下", "查查", "看看", "列出", "谁", "多少")
+#: 信用卡/银行卡域 —— 别把「我的卡额度」抢过来
+_CARD_MARKS = ("信用卡", "银行卡", "我的卡", "刷卡")
+#: (名词, 必须出现的动词, 意图) —— **必须带动词**，单说「白名单」不抢
+_FAST_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
+    ("白名单", ("移出", "移除", "取消"), "payee_whitelist_remove"),
+    ("白名单", ("加入", "加进", "加白", "设为白名单"), "payee_whitelist"),
+    ("白名单", ("额度", "有效期", "改成", "修改"), "payee_whitelist_edit"),
+    ("专属额度", ("改", "修改", "调整", "设"), "payee_whitelist_edit"),
+    ("黑名单", ("移出", "移除", "解除"), "payee_unblacklist"),
+    ("拉黑", (), "payee_blacklist"),
+    ("加黑", (), "payee_blacklist"),
+    ("黑名单", ("加入", "设为"), "payee_blacklist"),
+    ("标签", ("设", "改", "加", "换"), "payee_tags"),
+    ("备注", ("加", "设", "改", "写"), "payee_note"),
+    ("卡号", ("记", "是", "设", "填"), "payee_card_no"),
+)
+
+#: 人名可能粘上的尾部动词（「王五移出」「张小美加入」「我妈加个」）——按长度倒序剥离
+_TAIL_VERBS = ("记一下", "记下", "加入", "加进", "加白", "移出", "移除", "拉黑", "加黑",
+               "设为", "改成", "改为", "加上", "加个", "设置", "记", "设")
+
+
+def _strip(text: str) -> str:
+    return str(text or "").strip(" ：:，,。 ")
+
+
+def _payee_of(text: str) -> str:
+    """人名 = 第一个「收款人域关键词」之前那一段（去掉把/给/将/的/收款人，再剥尾部动词）。"""
+    cuts = (*_NOUNS, "拉黑", "加黑")          # 拉黑/加黑也是人名后的切点
+    positions = [text.find(noun) for noun in cuts if noun in text]
+    head = text[: min(positions)] if positions else ""
+    for token in ("收款人", "把", "给", "将", "的", "，", ","):
+        head = head.replace(token, " ")
+    name = head.strip().split()[0] if head.strip() else ""
+    for verb in _TAIL_VERBS:
+        if name.endswith(verb) and len(name) > len(verb):
+            name = name[: -len(verb)]
+            break
+    return name
+
+
+def _fast_slots(intent: str, raw: str) -> dict:
+    """快路槽位：只填**能确定性给出**的（人名 / 标签 / 备注 / 卡号 / 额度 / 有效期）。"""
+    slots: dict = {}
+    payee = _payee_of(raw)
+    if payee:
+        slots["payee"] = payee
+    if intent == "payee_tags":
+        match = re.search(r"标签\s*(?:设为|改成|改为|为|=)?\s*([^，。]+)", raw)
+        slots["tags"] = _strip(match.group(1)) if match else ""
+    elif intent == "payee_note":
+        match = re.search(r"备注\s*[：:]?\s*([^。]+)", raw)
+        slots["note"] = _strip(match.group(1)) if match else ""
+    elif intent == "payee_card_no":
+        match = re.search(r"\d{12,19}", raw.replace(" ", ""))
+        slots["card_no"] = match.group() if match else ""
+    elif intent in ("payee_whitelist", "payee_whitelist_edit"):
+        quota = re.search(r"额度[^0-9]{0,6}([0-9.]+)\s*元?", raw)
+        if quota:
+            slots["quota"] = quota.group(1)
+        expire = re.search(r"有效期\s*(?:到|至|为)?\s*([^\s，。]+)", raw)
+        if expire:
+            slots["expire"] = _strip(expire.group(1))
+    return slots
+
+
+def fast_payee_intent(text: str) -> IntentOut | None:
+    """命中收款人域的确定性规则 → 直接给意图与槽位原话（不调模型）。认不出 → None。"""
+    raw = str(text or "").strip()
+    if not raw or any(mark in raw for mark in _QUERY_MARKS):
+        return None                                  # 查询类句子不进快路
+    if any(mark in raw for mark in _CARD_MARKS):
+        return None                                  # 信用卡/银行卡域不抢
+    for noun, verbs, intent in _FAST_RULES:
+        if noun not in raw:
+            continue
+        if verbs and not any(verb in raw for verb in verbs):
+            continue
+        return IntentOut(intent=intent, confidence=1.0, slots=_fast_slots(intent, raw),
+                         missing_slots=[])
+    return None
+
+
 def classify(text: str, history: list[str] | None = None) -> IntentOut:
     """意图识别 + 槽位抽取 + **槽位取值归一化**（编排层 API，非冻结工具契约）。
+
+    先走**确定性快路**（`fast_payee_intent`）：收款人域的白名单/黑名单/标签/备注/卡号
+    有明确句式时直接判，不调模型（防被误判成信用卡额度调整）。
 
     校验失败（Pydantic / 结构 / LLM 不可用）**重试一次**，再失败 → `out_of_scope`（卡 08 第 3 条）。
     本函数不判权限、不判业务、不改写 LLM 给出的 confidence；只把槽位取值归一到工具层认的枚举
@@ -256,3 +403,23 @@ def classify(text: str, history: list[str] | None = None) -> IntentOut:
         except (llm.LLMUnavailable, ValidationError, ClassifierOutputError) as exc:
             logger.warning("分类第 %s/2 次失败：%s", attempt, type(exc).__name__)
     return fallback_out_of_scope()
+
+
+#: 明显属于「信用卡/额度」域的意图 —— 只有当原话里出现收款人域动词时才纠正（防误伤）。
+_CARD_SIDE_INTENTS = frozenset({"card_limit_adjust", "card_apply", "card_query",
+                               "card_lock", "card_unlock", "card_report_lost"})
+
+
+def correct_misroute(text: str, intent: str) -> "IntentOut | None":
+    """模型把**收款人域的请求**判成了信用卡域 → 用确定性规则纠正（2026-10-24 实测踩到）。
+
+    只在「模型给了卡片域的意图 + 原话里有明确的收款人域动词」时动手；
+    其余情况一律不动（不覆盖模型的正常判断）。
+    """
+    if intent not in _CARD_SIDE_INTENTS:
+        return None
+    fast = fast_payee_intent(text)
+    if fast is None or fast.intent in _CARD_SIDE_INTENTS:
+        return None
+    logger.warning("意图纠正：%s → %s（原话含收款人域动作词）", intent, fast.intent)
+    return fast

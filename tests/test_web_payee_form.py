@@ -68,7 +68,10 @@ def test_form_appears_on_payee_add_and_submits_through_the_agent(monkeypatch: py
 
     before = count(_db_path(), "payee")
     for element in at.text_input:
-        element.set_value("王小明" if element.label == "姓名" else FULL)
+        if element.label == "姓名":
+            element.set_value("王小明")
+        elif element.label == "手机号":
+            element.set_value(FULL)                     # 备注等其余输入留空
     submit = next(b for b in at.button if str(getattr(b, "key", "")).startswith("FormSubmitter:payee-form"))
     submit.click().run()                                              # 表单的提交按钮（按 key 找，别按位置）
     assert not at.exception

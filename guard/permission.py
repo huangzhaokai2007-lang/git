@@ -48,6 +48,19 @@ INTENT_BASE_TIERS: dict[str, str] = {
     "payee_blacklist": "L1",          # F22c SPEC-CHANGE：加黑是「阻断」不是「授权」，无 OTP
     "payee_unblacklist": "L2",      # F22d SPEC-CHANGE：解除黑名单必须验证码确认（人类需求原文）
     "payee_delete": "L1",           # F22e SPEC-CHANGE：删除收款人只移联系人、不动钱（与加黑同档）
+    "scheduled_run": "L1",          # F16 追加：立即执行，实际档位沿用预约冻结值（facts.tier 取高）
+    "scheduled_modify": "L1",       # F16 追加：只改未来某一笔的时间，不动钱
+    "gift_order_cancel": "L1",      # F20 追加：取消订单只解锁冻结金额，余额不动
+    "gift_order_pay": "L2",         # F20 追加：支付订单真扣款 → 要验证码
+    "gift_order_advance": "L1",     # 2026-10-24：发货/完成只改状态，不动钱
+    "aa_mark_paid": "L1",           # F22 追加：登记某人已付，不动钱
+    "aa_cancel": "L1",              # F22 追加：撤销 AA，不动钱
+    "aa_remind": "L1",              # 2026-10-24：提醒未付，不动钱
+    "payee_whitelist_edit": "L2",   # 2026-10-24：修改白名单信息必须验证码（人类原文）
+    "payee_whitelist_remove": "L1", # 2026-10-24：移出白名单要确认、不要码
+    "payee_note": "L1",             # 2026-10-24：备注是纯说明文字
+    "payee_tags": "L1",             # 2026-10-24：标签只影响指代解析
+    "payee_card_no": "L1",          # 2026-10-24：卡号只存脱敏形态
 }
 
 #: 本模块能判定的转账类意图（档位来自工具层预览事实包）

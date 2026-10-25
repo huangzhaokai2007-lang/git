@@ -21,9 +21,21 @@ from tools.subscription import (
 )
 
 __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "TemplateError",
-           "anomaly_line", "card_line", "payee_row", "render_all_products", "render_anomalies",
-           "render_cards", "render_holdings", "render_payees", "render_subscriptions",
+           "anomaly_line", "badge", "card_line", "payee_row", "render_all_products",
+           "render_anomalies", "render_aa_requests", "render_cards", "render_gift_orders",
+           "render_holdings", "render_payees", "render_schedules", "render_subscriptions",
            "render_wealth", "subscription_line", "wealth_line"]
+
+from agent.render_tables import (
+    TemplateError,  # noqa: F401 —— 再导出（唯一定义在 render_tables）    # noqa: F401 —— 再导出：同一份实现，历史调用点零改动
+    badge, holdings_line, payee_row, render_aa_requests,
+    render_gift_orders, render_holdings, render_payees, render_schedules,
+    T_GIFT_ORDER_EMPTY, T_GIFT_ORDER_HEAD, T_PAYEE_EMPTY, T_PAYEE_HEAD,
+    T_PAYEE_LEGEND, T_PAYEE_NO, T_PAYEE_OTHER, T_PAYEE_TABLE_HEAD,
+    T_PAYEE_TABLE_SEP, T_PAYEE_WHITELIST, T_PAYEE_YES, T_SCHEDULE_EMPTY,
+    T_SCHEDULE_HEAD,
+)
+
 
 # ---------------- 异常检测（F03） ----------------
 #: facts 键见 `tools/query.py` T4（`scanned_count` / `anomaly_count` / `items[]`）。
@@ -185,13 +197,8 @@ T_SUBSCRIPTION_EMPTY = "当前没有符合条件的订阅。"
 T_SUBSCRIPTION = T_SUBSCRIPTION_ZOMBIE
 
 
-class TemplateError(RuntimeError):
-    """模板渲染失败（缺占位符 / 键名写错）。**宁可炸**也不许静默留白（静默留白=幻觉的温床）。
-
-    **与 `agent/templates.TemplateError` 是同一个类**：本模块的定义先于 `templates.py` 执行，
-    `templates.py` 从这里 import 并再导出 —— 因此 `except templates.TemplateError` 仍然命中，
-    `pytest.raises(templates.TemplateError)` 也不会因拆文件而失效。
-    """
+#: `TemplateError` 已搬到 `render_tables`（本模块依赖它，反向 import 会成环）；
+#: 这里仍然再导出，`render_lists.TemplateError` 与 `templates.TemplateError` 是同一个类。
 
 
 def card_line(item: Mapping) -> str:
@@ -258,79 +265,7 @@ def render_subscriptions(facts: Mapping) -> str:
     return "\n".join([head, *(subscription_line(item) for item in facts["items"])])
 
 
-# ---------------- 收款人 / 白名单（T20 · SPEC-CHANGE 新增） ----------------
-#: facts 键见 `tools/payee.py:list_payees`（`total_count` / `whitelist_count` /
-#: `non_whitelist_count` / `items[]`）。空结果**自己的句子**，不套列表头
-#: （与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径，避免「共 0 位：」这种残句）。
-T_PAYEE_HEAD = "您共有 {total_count} 位收款人：白名单 {whitelist_count} 位、其它 {non_whitelist_count} 位。"
-T_PAYEE_EMPTY = "您还没有收款人。可以说「我要加个收款人」来添加。"
-#: 排版改为**精简表格**（用户要求）：原先的「【分组】+ 项目符号」一行一位、看着像流水账，
-#: 表格让「姓名 / 手机号 / 银行 / 是否白名单」四列对齐。分组不再靠小标题，而是靠
-#: 「白名单」列 + 工具层既有的排序（白名单优先）表达 —— 语义不变，行序一个字没重排。
-T_PAYEE_TABLE_HEAD = "| 收款人 | 手机号 | 银行 | 白名单 |"
-T_PAYEE_TABLE_SEP = "| --- | --- | --- | --- |"
-#: 单元格文案：**都不含数字**。`T_PAYEE_NO` 同时用于「非白名单」与「银行未填」，
-#: 它只是占位符，**不是**编造的银行名（规格：`bank` 为空不补「未知银行」这类值）。
-T_PAYEE_YES, T_PAYEE_NO = "✅", "—"
-#: 表下**唯一一行**说明：两组的转账验证差别（这是用户看这张表的实际用途）；纯文案，不含数字。
-#: ⚠️ v2 SPEC-CHANGE：白名单**专属额度内免验证码（含深夜）**；超额度、或短时多笔/金额激增/
-#: 首次收款等异常因子，仍会升档要验证码。
-T_PAYEE_WHITELIST = "白名单：专属额度内转账免验证码（超额度仍需验证码）"
-T_PAYEE_OTHER = "非白名单：转账需确认卡 + 短信验证码"
-T_PAYEE_LEGEND = f"{T_PAYEE_WHITELIST}；{T_PAYEE_OTHER}。"
-
-
-def payee_row(item: Mapping) -> str:
-    """一位收款人一行（Markdown 表格行）。
-
-    手机号**照抄 facts 的脱敏值**（`139****1001`），不拼接、不补全、**绝不还原完整号**（铁律 8）；
-    银行名照抄入库值，为空则印 `—` 占位（不补「未知银行」这类编造值）；「白名单」列只用 ✅ / —。
-    """
-    bank = str(item.get("bank") or "") or T_PAYEE_NO
-    mark = T_PAYEE_YES if item["is_whitelist"] else T_PAYEE_NO
-    return f"| {item['name']} | {item['masked_phone']} | {bank} | {mark} |"
-
-
-def render_payees(facts: Mapping) -> str:
-    """`payee_list` 回执（T20）：汇总句 + **一张精简表格** + 一行分组说明。
-
-    行序**照抄 facts 的 `items` 顺序**（工具层已按「白名单优先 + 姓名」稳定排序），编排层不重排
-    —— 重排就是自己造顺序。「白名单」列让用户一眼看出哪些是白名单（两组的转账验证方式不同）。
-    """
-    if int(facts["total_count"]) == 0:
-        return T_PAYEE_EMPTY
-    head = T_PAYEE_HEAD.format(total_count=int(facts["total_count"]),
-                               whitelist_count=int(facts["whitelist_count"]),
-                               non_whitelist_count=int(facts["non_whitelist_count"]))
-    rows = [T_PAYEE_TABLE_HEAD, T_PAYEE_TABLE_SEP,
-            *(payee_row(item) for item in facts["items"])]
-    return "\n".join([head, "", *rows, "", T_PAYEE_LEGEND])
-
-
 # ---------------- 理财持仓（T21）+ 全部产品（T22） ----------------
-
-T_HOLDINGS_EMPTY = "您目前没有持有中的理财产品。"
-T_HOLDINGS_HEAD = "您目前持有 {total_count} 只理财产品，合计 {total_amount_yuan} 元："
-
-
-def holdings_line(item: Mapping) -> str:
-    """一行持仓：产品名、金额、风险等级（中文）、年化、买入日。数字全部照抄 facts。"""
-    level = str(item["risk_level"])
-    return (f"- {item['name']}：{item['amount_yuan']} 元，"
-            f"{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
-            f"买入于 {item['purchase_date']}")
-
-
-def render_holdings(facts: Mapping) -> str:
-    """`wealth_holdings` 回执（T21）：空结果优先（不套列表头），再汇总句 + 明细。"""
-    if not facts["items"]:
-        return T_HOLDINGS_EMPTY
-    try:
-        head = T_HOLDINGS_HEAD.format(**facts)
-    except KeyError as exc:
-        raise TemplateError(f"'wealth_holdings' 模板缺少 facts 键：{exc}") from exc
-    return "\n".join([head, *(holdings_line(item) for item in facts["items"])])
-
 
 def render_all_products(facts: Mapping) -> str:
     """T22：全部产品，按「适合您」/「超出等级」分组；后者明确标注**不建议购买**。

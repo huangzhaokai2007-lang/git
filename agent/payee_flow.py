@@ -33,6 +33,26 @@ PAYEE_ADD_TIER = "L1"
 #: 聊天触发时回的引导语（**不写库**；界面见到 `turn.intent == "payee_add"` 就弹表单）
 PROMPT = "好的，请在下面的表单里填写收款人的姓名和手机号，提交后我立刻帮您加上。"
 
+#: 聊天句里已经说出的姓名/手机号 → 表单**预填**（用户不必再敲一遍）。
+#: Turn 不携带 slots（编排层 API），故由本模块按 session 暂存；界面弹表单时取一次。
+_PENDING_SLOTS: dict[str, dict] = {}
+
+
+def capture_pending(session_id: str, slots: dict) -> None:
+    """记下本轮 payee_add 说出的姓名/手机号（供界面预填表单）。"""
+    _PENDING_SLOTS[session_id] = {"name": str(slots.get("name") or ""),
+                                  "phone": str(slots.get("phone") or "")}
+
+
+def pending_slots(session_id: str) -> dict:
+    """取最近一次 payee_add 的预填值（无 → 空 dict；提交成功后由表单侧清除）。"""
+    return dict(_PENDING_SLOTS.get(session_id) or {})
+
+
+def clear_pending(session_id: str) -> None:
+    """表单提交成功后清掉预填（下一次再弹就是空表单）。"""
+    _PENDING_SLOTS.pop(session_id, None)
+
 
 def _audit(trace_id: str, session_id: str, tier: str, result: str,
            error_code: str | None, params: dict) -> None:
@@ -61,7 +81,9 @@ def _reply(result: ToolResult) -> tuple[str, bool, str | None]:
     return text, False, None
 
 
-def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = False) -> "Turn":
+def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = False,
+                 note: str = "", quota: str = "", expire: str = "",
+                 tags: str = "", card_no: str = "") -> "Turn":
     """表单提交入口（界面只调这一个函数）：PRECHECK（guard 定档）→ EXECUTE → 校验回执 → AUDIT。
 
     `whitelist=True`（表单里勾了「同时加入白名单」）时，**加完人立刻接上白名单确认卡** ——
@@ -79,10 +101,23 @@ def submit_payee(name: str, phone: str, *, session_id: str, whitelist: bool = Fa
            "success" if result.ok else "error", error_code,
            {"name": str(result.data["name"]) if result.ok else name,
             "masked_phone": str(result.data["masked_phone"]) if result.ok else ""})
+    if result.ok and str(tags or "").strip():            # 2026-10-24：添加时可一并写标签（T47）
+        raw_tags = str(tags).replace("、", ",").replace("，", ",")
+        payee_tool.set_payee_tags(str(result.data["payee_id"]),
+                                  [t for t in raw_tags.split(",") if t.strip()])
+    if result.ok and str(card_no or "").strip():         # 2026-10-24：添加时可一并记卡号（T50，只存脱敏）
+        payee_tool.set_payee_card_no(str(result.data["payee_id"]), str(card_no))
+    if result.ok and str(note or "").strip():            # 2026-10-24：添加时可一并写备注（T45）
+        payee_tool.set_payee_note(str(result.data["payee_id"]), str(note))
     if result.ok and whitelist:                          # 勾了复选框 → 接着走 L2 确认卡
         from agent import orchestrator, write_flow
         ctx = orchestrator._Ctx(trace_id, session_id, 0)
-        card = orchestrator._apply(ctx, write_flow.start("payee_whitelist", {"payee": name}, session_id))
+        slots = {"payee_id": str(result.data["payee_id"]), "payee": name}   # 用 id 直达，不再解析
+        if str(quota or "").strip():                     # 加白时一并设专属额度 / 有效期（人类原文）
+            slots["quota"] = quota
+        if str(expire or "").strip():
+            slots["expire"] = expire
+        card = orchestrator._apply(ctx, write_flow.start("payee_whitelist", slots, session_id))
         card.reply = f"{reply}\n\n要把他加入白名单吗？加入后在专属额度内给他转账免验证码（超额度仍需验证码）。\n{card.reply}"
         return card
     return Turn(trace_id=trace_id, intent=INTENT, confidence=1.0, states=states,

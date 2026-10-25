@@ -51,6 +51,79 @@ from agent._write_gift import (
     _prepare_gift,
     _shape_gift,
 )
+from agent._write_payee_ops import (
+    _card_card_no as _card_payee_card_no,
+    _card_tags as _card_payee_tags,
+    _card_edit as _card_payee_edit,
+    _card_note as _card_payee_note,
+    _card_remove as _card_payee_remove,
+    _execute_edit as _execute_payee_edit,
+    _execute_card_no as _execute_payee_card_no,
+    _execute_tags as _execute_payee_tags,
+    _execute_note as _execute_payee_note,
+    _execute_remove as _execute_payee_remove,
+    _plain_edit as _plain_payee_edit,
+    _plain_card_no as _plain_payee_card_no,
+    _plain_tags as _plain_payee_tags,
+    _plain_note as _plain_payee_note,
+    _plain_remove as _plain_payee_remove,
+    _prepare_edit as _prepare_payee_edit,
+    _prepare_card_no as _prepare_payee_card_no,
+    _prepare_tags as _prepare_payee_tags,
+    _prepare_note as _prepare_payee_note,
+    _prepare_remove as _prepare_payee_remove,
+    _shape_edit as _shape_payee_edit,
+    _shape_card_no as _shape_payee_card_no,
+    _shape_tags as _shape_payee_tags,
+    _shape_note as _shape_payee_note,
+    _shape_remove as _shape_payee_remove,
+)
+from agent._write_aa_ops import (
+    _card as _card_aa_op,
+    _card_remind as _card_aa_remind,
+    _execute_cancel as _execute_aa_cancel,
+    _execute_remind as _execute_aa_remind,
+    _execute_mark_paid as _execute_aa_mark_paid,
+    _plain as _plain_aa_op,
+    _plain_remind as _plain_aa_remind,
+    _prepare_cancel as _prepare_aa_cancel,
+    _prepare_remind as _prepare_aa_remind,
+    _prepare_mark_paid as _prepare_aa_mark_paid,
+    _shape_cancel as _shape_aa_cancel,
+    _shape_remind as _shape_aa_remind,
+    _shape_mark_paid as _shape_aa_mark_paid,
+)
+from agent._write_gift_ops import (
+    _card as _card_gift_order,
+    _card_advance as _card_gift_advance,
+    _execute_cancel as _execute_gift_cancel,
+    _execute_advance as _execute_gift_advance,
+    _execute_pay as _execute_gift_pay,
+    _plain as _plain_gift_order,
+    _plain_advance as _plain_gift_advance,
+    _prepare_cancel as _prepare_gift_cancel,
+    _prepare_advance as _prepare_gift_advance,
+    _prepare_pay as _prepare_gift_pay,
+    _shape as _shape_gift_order,
+    _shape_advance as _shape_gift_advance,
+)
+from agent._write_schedule_ops import (
+    _card_cancel,
+    _card_modify,
+    _card_run,
+    _execute_cancel,
+    _execute_modify,
+    _execute_run,
+    _plain_cancel,
+    _plain_modify,
+    _plain_run,
+    _prepare_cancel,
+    _prepare_modify,
+    _prepare_run,
+    _shape_cancel,
+    _shape_modify,
+    _shape_run,
+)
 from agent._write_payee import (
     _card_blacklist,
     _card_delete,
@@ -84,18 +157,13 @@ from agent._write_subscription import (
 )
 from agent._write_transfer import (
     _book_scheduled,
-    _card_cancel,
     _card_scheduled,
     _card_transfer,
-    _execute_cancel,
     _execute_transfer,
-    _plain_cancel,
     _plain_scheduled,
     _plain_transfer,
-    _prepare_cancel,
     _prepare_scheduled,
     _prepare_transfer,
-    _shape_cancel,
     _shape_scheduled,
     _shape_transfer,
 )
@@ -205,6 +273,125 @@ _SPECS["payee_delete"] = WriteSpec(
     target_key="payee_id",
     what="删除收款人", shape=_shape_delete, prepare=_prepare_delete,
     card=_card_delete, plain=_plain_delete, execute=_execute_delete)
+
+#: F16 追加（T32）：**立即执行**一条待执行预约。档位**沿用预约冻结值**（L1 免码 / L2 要码），
+#: 扣款由 T22 的硬约束重检 —— 不重新定档（Q5 同理）。
+_SPECS["scheduled_run"] = WriteSpec(
+    intent="scheduled_run", intent_cn="立即执行预约", title="立即执行预约确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("schedule_id",), tools=("list_scheduled",), execute_tool="run_scheduled_now",
+    target_key="schedule_id",
+    what="立即执行预约", shape=_shape_run, prepare=_prepare_run,
+    card=_card_run, plain=_plain_run, execute=_execute_run)
+
+#: F16 追加（T33）：**改预约时间** —— L1（只改未来某一笔的时间，不动钱）。
+_SPECS["scheduled_modify"] = WriteSpec(
+    intent="scheduled_modify", intent_cn="修改预约时间", title="修改预约时间确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("schedule_id", "schedule"), tools=("list_scheduled",),
+    execute_tool="reschedule_scheduled", target_key="schedule_id",
+    what="修改预约时间", shape=_shape_modify, prepare=_prepare_modify,
+    card=_card_modify, plain=_plain_modify, execute=_execute_modify)
+
+#: F20 追加（T39）：**取消送礼订单** —— L1（只解锁冻结金额，余额不动）。
+_SPECS["gift_order_cancel"] = WriteSpec(
+    intent="gift_order_cancel", intent_cn="取消订单", title="取消订单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("order_id",), tools=("list_gift_orders",), execute_tool="cancel_gift_order",
+    target_key="order_id",
+    what="取消订单", shape=lambda slots: _shape_gift_order({**dict(slots), "_intent": "cancel"}),
+    prepare=_prepare_gift_cancel,
+    card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_cancel)
+
+#: F20 追加（T40）：**支付送礼订单** —— L2（真扣款，要验证码）。
+_SPECS["gift_order_pay"] = WriteSpec(
+    intent="gift_order_pay", intent_cn="支付订单", title="支付订单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("order_id",), tools=("list_gift_orders",), execute_tool="pay_gift_order",
+    target_key="order_id",
+    what="支付订单", shape=_shape_gift_order, prepare=_prepare_gift_pay,
+    card=_card_gift_order, plain=_plain_gift_order, execute=_execute_gift_pay)
+
+#: 2026-10-24（人类规格 5 状态）→ L1：只改状态、不动钱。
+_SPECS["gift_order_advance"] = WriteSpec(
+    intent="gift_order_advance", intent_cn="订单状态", title="订单状态确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("order_id", "action"), tools=("list_gift_orders",),
+    execute_tool="advance_gift_order", target_key="order_id",
+    what="订单状态", shape=_shape_gift_advance, prepare=_prepare_gift_advance,
+    card=_card_gift_advance, plain=_plain_gift_advance, execute=_execute_gift_advance)
+
+#: F22 追加（T43）：**登记某人已付** —— L1（只改 AA 的份额状态，不动钱）。
+_SPECS["aa_mark_paid"] = WriteSpec(
+    intent="aa_mark_paid", intent_cn="登记已付", title="登记已付确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_aa_requests",), execute_tool="mark_aa_share_paid",
+    target_key="request_id",
+    what="登记已付", shape=_shape_aa_mark_paid, prepare=_prepare_aa_mark_paid,
+    card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_mark_paid)
+
+#: F22 追加（T44）：**撤销 AA** —— L1（已登记的付款记录保留）。
+_SPECS["aa_cancel"] = WriteSpec(
+    intent="aa_cancel", intent_cn="撤销 AA", title="撤销 AA 确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("request_id",), tools=("list_aa_requests",), execute_tool="cancel_aa_request",
+    target_key="request_id",
+    what="撤销 AA", shape=_shape_aa_cancel, prepare=_prepare_aa_cancel,
+    card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_cancel)
+
+#: 2026-10-24（人类规格「支持提醒未付人员」）→ L1：只留痕，不真推送。
+_SPECS["aa_remind"] = WriteSpec(
+    intent="aa_remind", intent_cn="提醒付款", title="提醒付款确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_aa_requests",), execute_tool="remind_aa_share",
+    target_key="request_id",
+    what="提醒付款", shape=_shape_aa_remind, prepare=_prepare_aa_remind,
+    card=_card_aa_remind, plain=_plain_aa_remind, execute=_execute_aa_remind)
+
+#: 2026-10-24（人类原文「修改白名单信息需要验证码」→ L2）。
+_SPECS["payee_whitelist_edit"] = WriteSpec(
+    intent="payee_whitelist_edit", intent_cn="修改白名单信息", title="修改白名单信息确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "quota"), tools=("list_payees",), execute_tool="set_whitelist_quota",
+    target_key="payee_id",
+    what="修改白名单信息", shape=_shape_payee_edit, prepare=_prepare_payee_edit,
+    card=_card_payee_edit, plain=_plain_payee_edit, execute=_execute_payee_edit)
+
+#: 2026-10-24（人类原文「移除白名单需要确认」→ L1 确认卡，无需验证码）。
+_SPECS["payee_whitelist_remove"] = WriteSpec(
+    intent="payee_whitelist_remove", intent_cn="移出白名单", title="移出白名单确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee",), tools=("list_payees",), execute_tool="set_payee_whitelist",
+    target_key="payee_id",
+    what="移出白名单", shape=_shape_payee_remove, prepare=_prepare_payee_remove,
+    card=_card_payee_remove, plain=_plain_payee_remove, execute=_execute_payee_remove)
+
+#: 2026-10-24（人类原文「添加收款人与查看收款人时允许添加或修改备注」→ L1）。
+_SPECS["payee_note"] = WriteSpec(
+    intent="payee_note", intent_cn="修改备注", title="修改备注确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "note"), tools=("list_payees",), execute_tool="set_payee_note",
+    target_key="payee_id",
+    what="修改备注", shape=_shape_payee_note, prepare=_prepare_payee_note,
+    card=_card_payee_note, plain=_plain_payee_note, execute=_execute_payee_note)
+
+#: 2026-10-24（人类原文「添加收款人时增加标签字段」，标签用于**用标签指代人员**）→ L1。
+_SPECS["payee_tags"] = WriteSpec(
+    intent="payee_tags", intent_cn="修改标签", title="修改标签确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "tags"), tools=("list_payees",), execute_tool="set_payee_tags",
+    target_key="payee_id",
+    what="修改标签", shape=_shape_payee_tags, prepare=_prepare_payee_tags,
+    card=_card_payee_tags, plain=_plain_payee_tags, execute=_execute_payee_tags)
+
+#: 2026-10-24：记卡号（人类规格「添加收款人卡：银行卡号」；实测「记一下卡号」原先落到备注/闲聊）。
+_SPECS["payee_card_no"] = WriteSpec(
+    intent="payee_card_no", intent_cn="记录卡号", title="记录卡号确认卡",
+    credential_kind="none", otp_in_tool=False,
+    missing=("payee", "card_no"), tools=("list_payees",), execute_tool="set_payee_card_no",
+    target_key="payee_id",
+    what="记录卡号", shape=_shape_payee_card_no, prepare=_prepare_payee_card_no,
+    card=_card_payee_card_no, plain=_plain_payee_card_no, execute=_execute_payee_card_no)
 
 #: 已接通的写意图（`write_flow.WRITE_INTENTS` 引它 —— 单一来源，避免两份清单漂移）
 WRITE_INTENTS: tuple[str, ...] = tuple(_SPECS)

@@ -21,6 +21,7 @@ EDITABLE_FIELDS: dict[str, tuple[tuple[str, str], ...]] = {
     "transfer_single": (("payee", "收款人"), ("amount", "金额（元）")),
     "transfer_scheduled": (("payee", "收款人"), ("amount", "金额（元）"), ("schedule", "预约时间")),
     "gift_plan": (("contact", "收货人"), ("date", "日期"), ("budget", "预算（元）")),
+    "aa_collect": (("amounts", "每人金额（王五 100 元、赵六 200 元）"),),
 }
 
 #: 敏感字段（卡面一律脱敏展示）；当前可编辑集合里没有号码类字段，此表暂时为空、
@@ -29,10 +30,10 @@ SENSITIVE: frozenset[str] = frozenset()
 
 #: 改卡句式的**确定性解析**（不赌 LLM 脾气 —— 实测「金额改成 50 元」有时被判成 smalltalk）：
 #: 只认「字段 改成/改为/变成 值」这种刻板句式；「改成 50」缺字段默认当改金额。
-_EDIT_RE = re.compile(r"^(金额|收款人|收货人|预约时间|日期|预算|联系人)\s*(?:改成|改为|变成|调整为|设为)\s*(.+)$")
+_EDIT_RE = re.compile(r"^(金额|收款人|收货人|预约时间|日期|预算|联系人|每人金额)\s*(?:改成|改为|变成|调整为|设为)\s*(.+)$")
 _BARE_EDIT_RE = re.compile(r"^(?:改成|改为|变成|调整为|设为)\s*(.+)$")
 _LABEL_TO_SLOT = {"金额": "amount", "收款人": "payee", "收货人": "contact", "联系人": "contact",
-                  "预约时间": "schedule", "日期": "date", "预算": "budget"}
+                  "预约时间": "schedule", "日期": "date", "预算": "budget", "每人金额": "amounts"}
 
 
 def parse_edit(text: str, intent: str) -> dict | None:

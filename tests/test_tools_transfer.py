@@ -97,14 +97,41 @@ def test_preview_non_whitelist_is_l2_and_new_payee_is_not_double_counted(seeded:
     assert result.facts["to_human"] is False
 
 
-def test_preview_night_factor_escalates_one_tier(seeded: Path, clock: Clock) -> None:
+def test_preview_night_factor_hits_at_the_boundaries(seeded: Path, clock: Clock) -> None:
+    """夜间因子：23:00 命中、06:00 不命中。
+
+    **2026-10-24 口径变更**：`PAYEE`（李四）是白名单且在专属额度内 → 夜间**不再升档、免验证码**
+    （L1 / requires_otp=False，见 `apply_whitelist_quota`）。升档行为改由非白名单收款人验证。
+    """
     clock.moment = datetime(2026, 9, 12, 2, 30, 0)
     result = preview_ok(PAYEE, 10_000)
-    assert result.data["tier"] == "L2" and result.facts["factors"] == ["night"]
+    assert result.facts["factors"] == ["night"]                  # 因子照常记录
+    assert result.facts["tier"] == "L1" and result.facts["requires_otp"] is False
     clock.moment = datetime(2026, 9, 12, 23, 0, 0)              # 边界：23:00 命中
     assert preview_ok(PAYEE, 10_000).facts["factors"] == ["night"]
     clock.moment = datetime(2026, 9, 12, 6, 0, 0)               # 边界：06:00 不命中
     assert preview_ok(PAYEE, 10_000).facts["factors"] == []
+
+
+def test_non_whitelist_night_transfer_still_needs_otp(seeded: Path, clock: Clock) -> None:
+    """非白名单收款人夜间转账 → 仍要验证码（白名单豁免不外溢）。"""
+    clock.moment = datetime(2026, 9, 12, 2, 30, 0)
+    result = preview_ok(PAYEE_NEW, 10_000)
+    assert result.facts["requires_otp"] is True
+    assert result.facts["tier"] in ("L2", "L3")
+
+
+def test_whitelist_within_quota_executes_without_otp(seeded: Path, clock: Clock) -> None:
+    """**回归**：白名单额度内 → token 本身就是免码，**执行不再报「验证码不正确」**。
+
+    实测 bug：卡片显示 L1 免码，但预览 token 里 requires_otp=True（工具层没算额度）→
+    点确认时 T8 因缺 OTP 拒绝。修法：额度豁免必须落在工具层（`apply_whitelist_quota`）。
+    """
+    clock.moment = datetime(2026, 9, 12, 2, 30, 0)              # 深夜也免
+    preview = preview_ok(PAYEE, 10_000)
+    assert preview.facts["requires_otp"] is False
+    done = transfer.execute_transfer(preview.data["preview_token"])   # 不传 OTP
+    assert done.ok is True and done.data["amount"] == 10_000
 
 
 def test_preview_velocity_needs_three_writes_within_ten_minutes(seeded: Path) -> None:

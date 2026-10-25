@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import card_draft, confirm_card, templates, write_intents
+from agent import card_draft, confirm_card, payee_picker, templates, write_intents
 from guard import permission
 
 logger = logging.getLogger(__name__)
@@ -78,15 +78,18 @@ def compose_result_reply(text: str, facts: Mapping) -> tuple[str, bool]:
 
 # ---------------- EXECUTE ----------------
 
-def _otp_rejected(session_id: str, step: Step, spec: write_intents.WriteSpec) -> Step:
+def _otp_rejected(session_id: str, step: Step, spec: write_intents.WriteSpec,
+                 masked_phone: str = "") -> Step:
     """OTP 被拒的统一处理：数会话级错误次数，错满 3 次锁会话（卡 10 第 4 条）。"""
     remaining = confirm_card.note_otp_error(session_id)
     if confirm_card.is_locked(session_id):
         confirm_card.clear(session_id)
-        step.result, step.reply = "rejected", confirm_card.otp_locked_text(spec.what)
+        step.result = "rejected"
+        step.reply = (f"状态：{confirm_card.state_line(confirm_card.STATE_EXPIRED)}\n"
+                      f"{confirm_card.otp_locked_text(spec.what)}")
         return step
     step.reply = confirm_card.otp_wrong_text(remaining)
-    step.ask = confirm_card.otp_prompt(spec.what)
+    step.ask = confirm_card.otp_prompt(spec.what, masked_phone)
     return step
 
 
@@ -98,19 +101,24 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     # `confirm_ref` 族且**本档需要 OTP** 时才在编排层设闸门；L1 意图（如 AA 收款，T9 无 OTP）不走闸门。
     if not spec.otp_in_tool and confirmation.requires_otp and not write_intents.otp_ok(otp):
         step.result = "error"
-        return _otp_rejected(session_id, step, spec)
+        return _otp_rejected(session_id, step, spec, str(confirmation.masked_phone or ""))
     result = spec.execute(confirmation, otp)                         # 入参是整张确认卡（含槽位快照）
     if not result.ok:
         code = error_code_of(result)
         step.result, step.error_code = "error", code
         if code == "FORBIDDEN" and confirmation.requires_otp:        # OTP 错（判定权在工具层）
-            return _otp_rejected(session_id, step, spec)
-        step.reply = templates.tool_error(code, result.message)
+            return _otp_rejected(session_id, step, spec, str(confirmation.masked_phone or ""))
+        step.reply = (f"状态：{confirm_card.state_line(confirm_card.STATE_FAILED)}\n"
+                      f"{templates.tool_error(code, result.message)}")
         return step
     confirm_card.clear(session_id)                                    # 一次性确认：用完即清
     step.executed, step.result = True, "success"
     step.states.append("VERIFY_NUMBERS")
     step.reply, step.degraded = compose_result_reply(result.message, result.facts)
+    #: 2026-10-24（人类规格「卡片需包含状态」）：成功回执挂状态行；在润色**之后**加，避免被改写。
+    cancelled = confirmation.intent.endswith("_cancel") or "cancel" in confirmation.intent
+    state = confirm_card.STATE_CANCELLED if cancelled else confirm_card.STATE_DONE
+    step.reply = f"状态：{confirm_card.state_line(state)}\n{step.reply}"
     if step.degraded:
         step.error_code = "HALLUCINATION_BLOCKED"
     return step
@@ -149,7 +157,8 @@ def resume(session_id: str, text: str,
         return head
     if confirmation.requires_otp:                                      # L2：确认卡 + OTP（双因子）
         confirm_card.to_otp_stage(session_id)
-        head.result, head.reply = "pending_confirm", confirm_card.otp_prompt(spec.what)
+        head.result = "pending_confirm"
+        head.reply = confirm_card.otp_prompt(spec.what, str(confirmation.masked_phone or ""))
         head.ask = head.reply
         return head
     return _execute(session_id, confirmation, None)                    # L1：会话内确认卡即可
@@ -169,13 +178,16 @@ def edit(session_id: str, updates: Mapping) -> Step:
     spec = write_intents.spec_of(confirmation.intent)
     raw = {k: confirmation.filled.get(k) for k in spec.missing
            if confirmation.filled.get(k) is not None}
-    if confirmation.intent == "aa_collect":                           # AA 的人名快照随卡带过去
-        for key in ("aa_names", "aa_target"):
-            if key in confirmation.filled:
-                raw[key] = confirmation.filled[key]
+    if confirmation.intent == "aa_collect":                           # AA：用**姓名**重解析（id 不认名字匹配）
+        names = list(confirmation.filled.get("aa_names") or [])
+        if names:
+            raw["payee_ids"] = names
+        if "aa_target" in confirmation.filled:
+            raw["aa_target"] = confirmation.filled["aa_target"]
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
     derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
+               "amounts": ("per_person_cents", "amount_cents", "amount"),
                "schedule": (), "date": ()}
     for key, value in updates.items():
         if value in (None, ""):
@@ -200,12 +212,23 @@ def edit(session_id: str, updates: Mapping) -> Step:
 def _to_pending(context: dict, verdict: permission.TierVerdict) -> Step:
     """L3：登记待复核（60s 延迟窗口 + 撤销入口），**不执行**。"""
     spec, prepared = context["spec"], context["prepared"]
+    existing = confirm_card.find_pending(context["session_id"], str(context["target_id"]),
+                                         int(context["amount_cents"]))
+    if existing is not None:                           # 已有同对象的待复核 → 复用，不重复登记
+        confirm_card.clear(context["session_id"])
+        return Step(states=["PENDING_REVIEW"], result="pending_confirm",
+                    intent=context["intent"], tier=verdict.tier,
+                    pending_id=existing.pending_id, to_human=verdict.to_human,
+                    reply=(f"这笔{spec.what}已在待人工复核（同一笔不会重复登记）。"
+                           + confirm_card.pending_text(existing.pending_id,
+                                                       verdict.factors, spec.what)))
     pending_id = f"pend-{uuid.uuid4().hex[:8]}"
     confirm_card.remember_pending(confirm_card.Pending(
         pending_id=pending_id, session_id=context["session_id"],
         credential_kind=spec.credential_kind, credential=prepared.credential,
         target_id=context["target_id"], amount_cents=context["amount_cents"],
         created_at=confirm_card.now_iso()))
+    confirm_card.clear(context["session_id"])        # 在途一次性：避免再回「确认」重复建一笔复核
     return Step(states=["PENDING_REVIEW"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, pending_id=pending_id, to_human=verdict.to_human,
                 reply=confirm_card.pending_text(pending_id, verdict.factors, spec.what))
@@ -232,24 +255,62 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
         masked_phone=confirm_card.mask_phone(str(filled.get("masked_phone") or "")),
         amount_yuan=str(prepared.facts.get("amount_yuan") or ""),
         amount_cents=context["amount_cents"], tier=verdict.tier,
-        requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled)))
+        requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled),
+        trace_id=str(context.get("trace_id") or "")))
     return Step(states=["CONFIRM_CARD"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, reply=card_text, ask=card_text, degraded=degraded)
 
 
-def start(intent: str, slots: Mapping, session_id: str) -> Step:
+#: 缺槽时给用户看的字段名（**只影响措辞**，不含任何业务数字）
+SLOT_LABELS = {
+    "payee": "收款人", "payee_ids": "收款人", "amount": "总金额", "date": "日期",
+    "schedule": "预约时间", "budget": "预算", "contact": "联系人",
+    "platform": "平台", "address": "收货地址", "order_no": "平台订单号",
+    "tags": "标签", "note": "备注", "card_no": "银行卡号",
+    "quota": "专属额度", "expire": "有效期", "reason": "原因", "weekday": "星期几",
+}
+
+
+def missing_hint(missing: list[str]) -> str:
+    """缺槽追问（**兜底**：描述符没给 clarify 时用）。
+
+    2026-10-24 修：以前这里可能返回空串 —— 界面按钮/解析卡路径只读 Step.reply，
+    于是「选完同名收款人后还缺金额」时界面**什么都不显示**（用户以为卡住了）。
+    措辞复用 	emplates.clarify_missing（全仓唯一追问口径，不另造一套）。
+    """
+    if not missing:
+        return ""
+    labels = [SLOT_LABELS.get(slot, slot) for slot in missing]
+    return templates.clarify_missing(labels)
+
+
+def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
     spec = write_intents.spec_of(intent)
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
         return Step(states=["SLOT_FILL"], intent=intent)
     shaped = spec.shape(slots)
+    payee_picker.clear(session_id)                                     # 任何一次新解析都先清旧待选
     if shaped.error_code:                                              # 零命中 → 报错（不猜）
         return Step(states=["SLOT_FILL"], intent=intent, result="error",
                     error_code=shaped.error_code,
                     reply=templates.tool_error(shaped.error_code, shaped.message))
     if shaped.missing:                                                 # 缺槽 → 追问，不猜
+        if shaped.candidates:                                          # 同名多命中 → 界面出**解析卡**
+            slot = ("payee_ids" if isinstance(slots.get("payee_ids"), (list, tuple))
+                    else "payee")
+            payee_picker.capture(session_id, intent, dict(slots), shaped.candidates,
+                                 slot=slot)
+        hint = missing_hint(shaped.missing)
+        ask = shaped.clarify or hint                   # 描述符优先，否则兜底
+        #: 描述符的追问如果**没提到**缺的那几项，就补一句 —— 用户一次知道要补什么，
+        #: 不会出现「只问了标签、其实还差收款人」这种半句追问（实测）。
+        labels = [SLOT_LABELS.get(slot, slot) for slot in shaped.missing]
+        absent = [label for label in dict.fromkeys(labels) if label not in shaped.clarify]
+        if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
+            ask = f"{shaped.clarify}\n请补充：{'、'.join(absent)}。"
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
-                    ask=shaped.clarify or None)      # F17：描述符给了更具体的追问就用它
+                    ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
     filled = shaped.filled
     if confirm_card.is_locked(session_id):
         return Step(states=["PRECHECK"], intent=intent, result="rejected",
@@ -263,6 +324,7 @@ def start(intent: str, slots: Mapping, session_id: str) -> Step:
     verdict = permission.assess_write(intent, tier=prepared.facts.get("tier"),       # 纯代码档位
                                       factors=prepared.facts.get("factors"))
     context = {"session_id": session_id, "intent": intent, "spec": spec, "prepared": prepared,
+               "trace_id": str(trace_id or ""),
                "amount_cents": filled.get("amount_cents") or 0,
                "target_id": str(filled.get(spec.target_key) or "")}
     branch = (_to_pending(context, verdict) if verdict.delayed                       # L3：延迟 + 撤销

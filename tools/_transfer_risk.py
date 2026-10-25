@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+import datetime
+
 from datetime import datetime, timedelta
 from data import dao
 from tools._query_common import ToolError, _owned_account_ids
@@ -104,3 +106,42 @@ def _limits(flows: list[dict]) -> dict:
     used = sum(-row["amount"] for row in flows)
     return {"single_max": SINGLE_TX_MAX_CENTS, "daily_max": DAILY_MAX_CENTS,
             "daily_used": used, "daily_remaining": max(DAILY_MAX_CENTS - used, 0)}
+
+
+# ---------------- 白名单专属额度（工具层唯一实现，2026-10-24） ----------------
+
+def apply_whitelist_quota(payee: dict, amount: int, judged: dict) -> dict:
+    """白名单 + 未过期 + 剩余额度够 + **只有夜间因子** → 免验证码（tier L1）。
+
+    为什么必须在**工具层**做：预览 token 里的 `tier`/`requires_otp` 就是执行时（T8/T21）的闸门。
+    编排层「把卡面改成 L1」是**不够**的 —— 那会让卡片显示免码、执行时却因 token 要求 OTP 而失败
+    （实测：白名单额度内转账点确认 → 「验证码不正确」）。
+    口径与 `agent/payee_risk.apply_quota` 一致：额度内只免「深夜」这一项，其它异常因子照常升档。
+    """
+    if not payee or not payee.get("is_whitelist") or payee.get("blacklist"):
+        return judged
+    expire = str(payee.get("whitelist_expire") or "")[:10]
+    today = datetime.today().date()              # 本模块的 datetime 是类（下面 from datetime import datetime）
+    if expire:
+        try:
+            if today > datetime.fromisoformat(expire).date():
+                return judged                       # 过期 → 按普通处理（要码）
+        except ValueError:
+            pass
+    quota = payee.get("whitelist_quota")
+    if quota is None:
+        return judged
+    try:
+        from data import payee_dao
+        remaining = payee_dao.remaining_quota_cents(dict(payee), today.strftime("%Y-%m"))
+    except Exception:                                # noqa: BLE001 —— 算不出就按原档位（保守）
+        return judged
+    if remaining is None or int(amount) > remaining:
+        return judged
+    others = [f for f in (judged.get("factors") or []) if f != "night"]
+    if others:
+        return judged                                # 有其它异常因子 → 照常升档
+    patched = dict(judged)
+    patched.update({"tier": "L1", "requires_otp": False,
+                    "quota_note": "白名单专属额度内，转账免验证码（含深夜时段）"})
+    return patched

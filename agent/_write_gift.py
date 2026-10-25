@@ -30,7 +30,52 @@ from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
 from tools import cross_scene
 from tools.schemas import ToolResult
 
+#: 2026-10-24（人类要求）：送礼的**平台 / 收货地址 / 平台订单号必填** ——
+#: 没有平台和单号就无法对账，没有地址就送不到。
+#: 想看「不强制」的老行为：把下面这个元组清空即可（`GIFT_REQUIRED = ()`）。
+GIFT_REQUIRED = ("platform", "address", "order_no")
+#: 缺槽时各字段的说法（追问语按**实际缺的**那几项拼，不一股脑全说）
+GIFT_SLOT_LABELS = {"platform": "平台（如「京东」）",
+                    "address": "收货地址",
+                    "order_no": "平台订单号（如 JD20261024001）"}
+
+
+def missing_hint(missing: list[str]) -> str:
+    """按实际缺的必填项拼追问语。"""
+    items = [GIFT_SLOT_LABELS[slot] for slot in GIFT_REQUIRED if slot in missing]
+    return ("请补充：" + "、".join(items) + "。") if items else ""
 GIFT_CN = "送礼计划"
+
+
+def _blacklist_reason(contact: str) -> str:
+    """收货人若命中**黑名单** → 返回拒绝文案（否则空串）。只按姓名/标签解析，不猜。"""
+    if not contact:
+        return ""
+    person, _code, _facts = payee_resolve.resolve_or_explain(contact, allow_blacklisted=True)
+    if person is None or not person.get("blacklist"):
+        return ""
+    reason = str(person.get("blacklist_reason") or "")
+    text = f"{person['name']} 已在黑名单，不能送礼。"
+    return text + (f"原因：{reason}。" if reason else "")
+
+
+def _gift_day(raw: object) -> str | None:
+    """送礼日期归一：先按 `period.resolve_day`（ISO / 相对月），再试 `_relative_time`
+    （明天 / 后天 / 下周一 / 月底 / 年底…）—— 与定时转账共用同一份自然语言日期实现。
+
+    2026-10-24 修（实测）：「后天给王五送个礼物，预算 300」被判缺日期而追问，但同样的
+    「后天」在定时转账里是能解析的 —— 两条路径不该有两套日期口径。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    day = period.resolve_day(text, edge="start")
+    if day:
+        return day
+    from agent import _relative_time
+    from tools import transfer
+    when = _relative_time.parse(text, transfer._now())
+    return when[:10] if when else None
 
 
 def _shape_gift(slots: Mapping) -> ShapeResult:
@@ -45,9 +90,15 @@ def _shape_gift(slots: Mapping) -> ShapeResult:
     不复制这类业务口径 —— 复制就是第二份实现，迟早与工具层分叉。
     """
     filled, missing = dict(slots), []
-    if not str(filled.get("contact") or "").strip():
+    contact = str(filled.get("contact") or "").strip()
+    #: 2026-10-24 口径（人类原文）：「黑名单无法进行转账、定时转账、送礼，直接拒绝，无需验证码」。
+    #: 只按**收款人姓名/标签**解析（收货人可能不在收款人里 → 不拦），不猜。
+    blocked = _blacklist_reason(contact)
+    if blocked:
+        return ShapeResult(filled=filled, error_code="FORBIDDEN", message=blocked)
+    if not contact:
         missing.append("contact")
-    day = period.resolve_day(filled.get("date"), edge="start") if filled.get("date") else None
+    day = _gift_day(filled.get("date")) if filled.get("date") else None
     if day is None:
         missing.append("date")
     else:
@@ -61,7 +112,40 @@ def _shape_gift(slots: Mapping) -> ShapeResult:
             missing.append("budget")
         else:
             filled["amount_cents"] = cents
-    return ShapeResult(filled=filled, missing=missing)
+    _fill_required_gift_slots(filled, contact, missing)      # 平台 / 地址 / 订单号（见 GIFT_REQUIRED）
+    clarify = missing_hint(missing)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+
+
+def _fill_required_gift_slots(filled: dict, contact: str, missing: list[str]) -> None:
+    """必填校验：`platform` / `address` / `order_no`。
+
+    收货地址是唯一能「省一次追问」的：该收货人下过单的话，**沿用上次地址**并在卡面标注
+    `address_reused`（真实银行 App 也这么做）。平台与订单号没有可继承的来源，缺就追问。
+    """
+    for slot in ("platform", "order_no"):
+        if slot in GIFT_REQUIRED and not str(filled.get(slot) or "").strip():
+            missing.append(slot)
+    if "address" in GIFT_REQUIRED and not str(filled.get("address") or "").strip():
+        reused = _last_address(contact)
+        if reused:
+            filled["address"] = reused
+            filled["address_reused"] = True
+        else:
+            missing.append("address")
+
+
+def _last_address(contact: str) -> str:
+    """该收货人**上一次**的收货地址（只读历史；取不到就返回空 → 追问）。"""
+    try:
+        from tools import _gift_order
+        listed = _gift_order.list_gift_orders()
+    except Exception:                                    # noqa: BLE001 —— 查不到就当没有
+        return ""
+    for item in listed.facts.get("items") or []:
+        if str(item.get("contact") or "") == str(contact) and item.get("address"):
+            return str(item["address"])
+    return ""
 
 
 def _prepare_gift(filled: dict) -> Prepared:
@@ -74,12 +158,26 @@ def _prepare_gift(filled: dict) -> Prepared:
     _, code, rfacts = payee_resolve.resolve_or_explain(str(filled.get("contact") or ""))
     if code:
         return Prepared(ok=False, error_code=code, message=str(rfacts.get("message") or ""))
+    if filled.get("order_no"):                         # 幂等键前置：锁款之前就拦，别白锁一笔钱
+        from tools import _gift_order
+        order_no = str(filled["order_no"]).strip()
+        listed = _gift_order.list_gift_orders()
+        existing = [it for it in (listed.facts.get("items") or [])
+                    if it.get("platform_order_no") == order_no]
+        if existing:
+            return Prepared(ok=False, error_code="INVALID_STATE",
+                            message=f"该订单已存在送礼计划（订单号 {order_no}），不能重复下单")
     preview = cross_scene.preview_gift(str(filled["contact"]), str(filled["date"]),
                                        int(filled["amount_cents"]))
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     facts = dict(preview.facts)
     facts["target_name"] = str(filled["contact"])     # 卡面主对象（`Confirmation.target_name` 取它）
+    #: 2026-10-24：平台 / 收货地址 / 平台订单号进**事实包** —— 卡面要印它们，
+    #: 而数字护栏要求「卡面上的数字必须能在 facts 里找到」（订单号里全是数字）。
+    for key in ("platform", "address", "order_no"):
+        if filled.get(key):
+            facts[key] = str(filled[key])
     return Prepared(ok=True, facts=facts, credential="")     # T16 无凭证参数
 
 
@@ -99,6 +197,11 @@ def _card_gift(intent: str, filled: dict, facts: Mapping, tier: str,
               ("合计", f"{facts['total_yuan']} 元"),
               ("可用余额", f"{facts['available_yuan']} 元"),
               ("账户余额", f"{facts['balance_yuan']} 元"),
+              *([("平台", str(filled["platform"]))] if filled.get("platform") else []),
+              *([("收货地址", str(filled["address"])
+                              + ("（沿用上次）" if filled.get("address_reused") else ""))]
+                if filled.get("address") else []),
+              *([("平台订单号", str(filled["order_no"]))] if filled.get("order_no") else []),
               ("资金说明", "锁定只减可用余额，账户余额不变（不是支出）")],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], GIFT_CN))
@@ -119,6 +222,21 @@ def _execute_gift(confirmation: confirm_card.Confirmation, otp: str | None) -> T
     这也是 F20 设计 Q4 要改写路径签名的原因。
     """
     del otp
-    return cross_scene.plan_gift(str(confirmation.filled["contact"]),
+    result = cross_scene.plan_gift(str(confirmation.filled["contact"]),
                                  str(confirmation.filled["date"]),
                                  int(confirmation.amount_cents))
+    if result.ok:                                        # F20 追加（T38）：落一条可查的订单
+        from tools import _gift_order
+        facts = result.facts or {}
+        order = _gift_order.record_gift_order(
+            str(facts.get("plan_id") or ""), str(facts.get("lock_id") or ""),
+            str(facts.get("contact") or ""), str(facts.get("date") or ""),
+            int(facts.get("budget") or 0), int(facts.get("total") or 0),
+            list(facts.get("items") or []),
+            platform=str(confirmation.filled.get("platform") or ""),
+            address=str(confirmation.filled.get("address") or ""),
+            platform_order_no=str(confirmation.filled.get("order_no") or ""))
+        if order.ok:
+            result = result.model_copy(update={
+                "message": f"{result.message} 订单号 {order.data['order_id']}。"})
+    return result

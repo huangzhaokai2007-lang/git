@@ -18,6 +18,7 @@ CLI / API / IM 拿到的仍是同一份**文本回执**（`agent/render_lists.re
 from __future__ import annotations
 
 import html
+import pathlib
 import re
 from typing import NamedTuple
 
@@ -134,72 +135,123 @@ def render_payee_card(reply: str) -> bool:
 
 
 # ================= S6：行内操作按钮（与上方「只读卡片」并存，不互斥） =================
-#: 上方汤版只渲染回执表格；下面这组给每行加「转账 / 加白 / 拉黑」按钮，
-#: 按钮 = 替用户说一句完整的话、走同一条 orchestrator.handle 流水线。
+#: 上方汤版只渲染回执表格；下面这组给每行加「转账 / 加白 / 拉黑 / 删除」按钮。
+#: 按钮**确定性直达写流水线**（`write_flow.start`，意图是按钮给的、不是模型猜的）——
+#: 实测缺陷：走 orchestrator.handle 时，若上一张确认卡还在途，按钮消息会被当成
+#: 「在途卡回复」串台（拉黑按钮弹出转账确认卡）。
 
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import datetime
 import streamlit as st
 
-from agent import orchestrator, payee_resolve
+from agent import confirm_card, payee_resolve, payee_risk, write_flow
+
+
+def _detail_ui():
+    """取同目录的 `payee_detail_ui`（人名选项 + 专属操作卡）。
+
+    为什么不用顶层 import：单测是按**文件路径**加载本模块的，那时 `interfaces/web` 不在
+    `sys.path` 上；这里按 `__file__` 兜底加载，两条入口都能用。
+    """
+    try:
+        import payee_detail_ui as module
+        return module
+    except ModuleNotFoundError:
+        import importlib.util
+        import sys
+
+        path = pathlib.Path(__file__).with_name("payee_detail_ui.py")
+        spec = importlib.util.spec_from_file_location("payee_detail_ui", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules.setdefault("payee_detail_ui", module)
+        return module
 
 #: 三类人员的中文标签（面向用户只说大白话；与 `render_lists` 的措辞同口径）
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
 
+#: 白名单有效期的展示状态阈值（**仅展示**，不参与风控 —— 人类明确口径）
+_EXPIRE_SOON_DAYS = 30
 
-def _dispatch(executor: ThreadPoolExecutor, session_id: str, display: str, text: str) -> None:
-    """替用户发一句话，并把回执记进会话（与 `app._ask` 同口径，不写业务）。"""
+
+def _expire_note(person: dict) -> str:
+    """白名单有效期的展示串：有效 / 即将到期 / 已过期（纯展示，不参与免码判定）。"""
+    expire = str(person.get("whitelist_expire") or "")
+    if not expire or not person.get("is_whitelist"):
+        return ""
+    try:
+        deadline = datetime.date.fromisoformat(expire[:10])
+    except ValueError:
+        return ""
+    left = (deadline - datetime.date.today()).days
+    if left < 0:
+        return f" · 白名单已过期（{expire}）"
+    if left <= _EXPIRE_SOON_DAYS:
+        return f" · 白名单至 {expire}（{left} 天内到期）"
+    return f" · 白名单至 {expire}"
+
+
+def _dispatch_start(executor: ThreadPoolExecutor, session_id: str, intent: str,
+                    slots: dict, display: str) -> None:
+    """按钮直达 `write_flow.start`（零 LLM 分类），并把回执记进会话。"""
     state = st.session_state
     state["messages"].append({"role": "user", "text": display})
-    turn = executor.submit(orchestrator.handle, text, session_id=session_id).result()
-    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": turn.model_dump()})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": turn.model_dump()})
-    state["clarify_round"] = state.get("clarify_round", 0) + (1 if "CLARIFY" in turn.states else 0)
+    confirm_card.clear(session_id)                       # 在途卡作废：按钮是新一笔操作
+    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    text = step.reply or step.ask or ""
+    state["messages"].append({"role": "assistant", "text": text, "turn": None})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": None})
+    state["clarify_round"] = state.get("clarify_round", 0) + (1 if step.missing else 0)
+
+
+#: 2026-10-24（人类规格「查询卡支持全部/白名单/黑名单/已过期白名单筛选」）
+_FILTERS = ("全部", "白名单", "黑名单", "已过期白名单")
+
+
+def _is_expired(person: dict) -> bool:
+    """白名单是否已过期 —— 口径**只有一处**（`agent.payee_risk.is_expired`），界面不重写。"""
+    return bool(person.get("is_whitelist")) and payee_risk.is_expired(person)
+
+
+def _quota_note(executor: ThreadPoolExecutor, person: dict) -> str:
+    """白名单专属额度：总额 + **本月剩余**（剩余额度由 `agent.payee_risk` 算，界面不重算）。"""
+    total = person.get("whitelist_quota")
+    if not person.get("is_whitelist") or total is None:
+        return ""
+    left = executor.submit(payee_risk.remaining_quota, person).result()
+    left_txt = "—" if left is None else f"{left / 100:.2f} 元"
+    return f" · 额度 {total / 100:.2f} 元（剩余 {left_txt}）"
+
+
+def _recent_note(person: dict) -> str:
+    """最近一次转账时间（工具层回填的 `last_used_ts`；没有就不印）。"""
+    ts = str(person.get("last_used_ts") or "")
+    return f" · 最近转账 {ts[:10]}" if ts else " · 从未转账"
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """渲染收款人列表卡；每行给「转账 / 加白 / 拉黑或解除 / 删除」按钮。
+    """渲染收款人查询卡：筛选 + 统计 + 每行备注 + 「转账/加白/移出白名单/拉黑/解除/删除」+ 改备注表单。
 
-    列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签一并带回）。
+    列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签、备注、有效期一并带回）。
     """
-    people = executor.submit(payee_resolve.list_people).result()
-    if not people:
+    all_people = executor.submit(payee_resolve.list_people).result()
+    if not all_people:
         return
     st.markdown("##### 👥 收款人")
-    for person in people:
-        kind = ("whitelist" if person["is_whitelist"]
-                else "blacklist" if person["blacklist"] else "normal")
-        tags = f" · 标签 {', '.join(person['tags'])}" if person.get("tags") else ""
-        left, transfer_btn, whitelist_btn, blacklist_btn, delete_btn = st.columns(
-            [4, 1, 1, 1, 1], vertical_alignment="center")
-        left.markdown(f"**{person['name']}** · `{person['masked_phone']}`"
-                      f" · {KIND_CN[kind]}{tags}")
-        if transfer_btn.button("转账", key=f"tr-{person['payee_id']}",
-                               help=f"给 {person['name']} 转账"):
-            _dispatch(executor, session_id, f"（按钮）给{person['name']}转账",
-                      f"给{person['name']}转账")
-            st.rerun()
-        if not person["is_whitelist"] and not person["blacklist"]:
-            if whitelist_btn.button("加白", key=f"wl-{person['payee_id']}",
-                                    help=f"把 {person['name']} 加入白名单（需验证码）"):
-                _dispatch(executor, session_id, f"（按钮）把{person['name']}加入白名单",
-                          f"把{person['name']}加入白名单")
-                st.rerun()
-        if not person["blacklist"]:
-            if blacklist_btn.button("拉黑", key=f"bl-{person['payee_id']}",
-                                    help=f"把 {person['name']} 加入黑名单（之后转账/送礼被拒）"):
-                _dispatch(executor, session_id, f"（按钮）把{person['name']}加入黑名单",
-                          f"把{person['name']}加入黑名单")
-                st.rerun()
-        else:
-            if blacklist_btn.button("解除", key=f"ub-{person['payee_id']}",
-                                    help=f"把 {person['name']} 移出黑名单（需验证码）"):
-                _dispatch(executor, session_id, f"（按钮）把{person['name']}移出黑名单",
-                          f"把{person['name']}移出黑名单")
-                st.rerun()
-        if delete_btn.button("删除", key=f"del-{person['payee_id']}",
-                             help=f"删除收款人 {person['name']}（需确认）"):
-            _dispatch(executor, session_id, f"（按钮）删除收款人{person['name']}",
-                      f"删除收款人{person['name']}")
-            st.rerun()
+    st.caption(f"共 {len(all_people)} 人 · 白名单 "
+               f"{sum(1 for p in all_people if p['is_whitelist'])} 人 · 黑名单 "
+               f"{sum(1 for p in all_people if p['blacklist'])} 人 · 已过期白名单 "
+               f"{sum(1 for p in all_people if _is_expired(p))} 人")
+    picked = st.radio("筛选", _FILTERS, horizontal=True, key="payee-filter",
+                      label_visibility="collapsed")
+    people = [p for p in all_people
+              if picked == "全部"
+              or (picked == "白名单" and p["is_whitelist"] and not _is_expired(p))
+              or (picked == "黑名单" and p["blacklist"])
+              or (picked == "已过期白名单" and _is_expired(p))]
+    if not people:
+        st.caption("这一筛选下没有收款人。")
+        return
+    _detail_ui().render(executor, session_id, people)   # 人名选项 → 专属操作卡

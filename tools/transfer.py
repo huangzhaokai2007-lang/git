@@ -40,10 +40,10 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money, _money_facts, _ok, _owned_account_ids, current_user_id,
     require_owned, set_current_user, set_session_id, current_session_id,
 )
-from tools._transfer_risk import (
+from tools._transfer_risk import (  # noqa: F401 —— 末行 apply_whitelist_quota 起别名 _quota
     L1_MAX_CENTS, SINGLE_TX_MAX_CENTS, DAILY_MAX_CENTS, NIGHT_START_HOUR, VELOCITY_MINUTES_WRITE,
     VELOCITY_MIN_WRITES, AMOUNT_JUMP_RATIO, HISTORY_DAYS, TIER_ORDER, OTP_TIERS, _today_out_flows,
-    _history_mean_cents, _factors, _assess, _limits, NIGHT_END_HOUR,
+    _history_mean_cents, _factors, _assess, _limits, NIGHT_END_HOUR, apply_whitelist_quota as _quota,
 )
 from tools._transfer_token import (_TOKENS, _TOKENS_LOCK, _load_token, _load_token_authoritative,
                                    _raw_snapshot, _store_token)
@@ -138,6 +138,7 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         return _fail(ErrorCode.INSUFFICIENT_FUNDS, "储蓄账户余额不足")
 
     judged = _assess(payee, amount, flows, _now())
+    judged = _quota(payee, amount, judged)             # 白名单额度内免码（工具层唯一实现）
     mean, sample = _history_mean_cents(_now())
     token = f"pt_{uuid.uuid4().hex}"
     trace_id = f"trace-{uuid.uuid4().hex[:12]}"
@@ -152,9 +153,9 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
              "velocity_window_minutes": VELOCITY_MINUTES_WRITE, "velocity_min_writes": VELOCITY_MIN_WRITES,
              **{f"limits_{key}": value for key, value in limits.items()}, **limits_yuan,
              **_money_facts(account["balance"], "balance"), **_money_facts(fee, "fee"),
+             **_money_facts(account["balance"] - amount - fee, "balance_after"),
              **_money_facts(amount, "amount"), **_money_facts(mean, "history_mean")}
-    data = PreviewData(preview_token=token, fee=fee, tier=judged["tier"],
-                       requires_otp=judged["requires_otp"], limits=limits)
+    data = PreviewData(preview_token=token, fee=fee, tier=judged["tier"], requires_otp=judged["requires_otp"], limits=limits)
     _store_token(token, {"user_id": current_user_id(), "session_id": current_session_id(),
                          "payee_id": payee["id"], "payee_name": payee["name"], "amount": amount,
                          "fee": fee, "tier": judged["tier"], "requires_otp": judged["requires_otp"],

@@ -227,19 +227,18 @@ def scheduled_intent(slots: dict) -> dict:
             "slots": slots, "missing_slots": []}
 
 
-def test_relative_schedule_asks_for_a_format_instead_of_falling_back(wired, monkeypatch) -> None:
-    """「明天」这类相对说法 → **追问格式**，绝不降级成即时转账、也绝不猜一个日期（Q10）。
+def test_relative_schedule_resolves_instead_of_asking(wired, monkeypatch) -> None:
+    """「明天」现在**能解析**（人类需求）→ 出定时确认卡、次日 09:00 预约；**仍不当即时转账**。
 
-    钉的是 F16 验收第 2 条「**预约时间到达前不能按即时转账扣款**」：
-    修前实机表现为 `意图：定时转账 … 预计到账：实时到账 · L1`，点一下确认钱就出去了。
+    钉的仍是 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」：卡面不许出现「实时到账」，
+    且确认前不动钱。
     """
     before_balance, before_txn = balance(wired), count(wired, "txn")
     step = turn_for(monkeypatch, f"明天给{WANGWU}转 100 元",
                     [scheduled_intent({"payee": WANGWU, "amount": "100.00", "schedule": "明天"})])
-    assert step.executed is False and "CONFIRM_CARD" not in step.states
-    assert "预约时间" in step.reply                                   # 追问格式（不是「还没接通」了）
-    assert "实时到账" not in step.reply and "【转账确认卡】" not in step.reply
-    assert confirm_card.current(SESSION) is None                      # 没有留下在途确认
+    assert step.executed is False and "CONFIRM_CARD" in step.states
+    assert "预约时间" in step.reply and "请说明预约时间" not in step.reply   # 不再追问格式
+    assert "实时到账" not in step.reply and "预计到账" not in step.reply
     assert balance(wired) == before_balance and count(wired, "txn") == before_txn
 
 
@@ -260,3 +259,19 @@ def test_immediate_transfer_still_works_after_the_stopgap(wired, monkeypatch) ->
                     [intent({"payee": WANGWU, "amount": "100.00"})])
     assert "CONFIRM_CARD" in step.states and "【转账确认卡】" in step.reply
     assert "还没接通" not in step.reply
+
+
+# ---------------- 2026-10-24 人类规格 §二：卡片状态 ----------------
+
+def test_card_shows_state(wired, monkeypatch) -> None:
+    """确认卡第二行给状态：需要验证码 → 「等待验证码」；不需要 → 「草稿（待你确认）」。"""
+    from agent import confirm_card
+    card = confirm_card.CardInput(
+        title="测试卡", intent_cn="测试", rows=[("金额", "1.00 元")],
+        tier="L2", requires_otp=True, risk_note="常规测试，未触发风险因子")
+    text = confirm_card.render(card)
+    assert "状态：" in text and confirm_card.STATE_WAIT_OTP in text
+    plain = card.model_copy(update={"requires_otp": False, "tier": "L1"})
+    text2 = confirm_card.render(plain)
+    assert confirm_card.STATE_DRAFT in text2 and "待你确认" in text2
+    assert confirm_card.state_line("未定义状态") == "未定义状态"      # 认不出就原样，不猜

@@ -35,7 +35,12 @@ from tools.payee_status import (    # noqa: F401,E402 —— 保持 payee.set_pa
     check_confirm_ref,
     issue_confirm_ref,
     set_payee_blacklist,
+    set_payee_note,
+    set_payee_card_no,
+    set_payee_tags,
     set_payee_whitelist,
+    set_whitelist_expire,
+    set_whitelist_quota,
     unset_payee_blacklist,
     whitelist_target,
 )
@@ -191,7 +196,11 @@ def list_payees() -> ToolResult:
     profiles = {row["id"]: {"tags": _split_tags(row["tags"]),
                             "blacklist": bool(row["blacklist"]),
                             "blacklist_reason": row["blacklist_reason"],
-                            "whitelist_quota": row["whitelist_quota"]} for row in rows}
+                            "whitelist_quota": row["whitelist_quota"],
+                            "whitelist_expire": row["whitelist_expire"],
+                            "note": row["note"],
+                            "last_used_ts": row["last_used_ts"],
+                            "card_no": row["card_no"]} for row in rows}
     facts = {"total_count": len(items), "whitelist_count": len(whitelisted),
              "non_whitelist_count": len(items) - len(whitelisted), "items": items,
              "profiles": profiles}

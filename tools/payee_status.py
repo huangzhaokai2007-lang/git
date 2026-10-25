@@ -11,15 +11,55 @@
 from __future__ import annotations
 
 import datetime
+import re
 import threading
 import uuid
 
-from data import dao
+from data import dao, payee_dao
 
 from tools._query_common import (
     DEMO_USER_ID, ToolError, _fail, _ok, current_session_id, current_user_id, require_owned,
 )
 from tools.schemas import ErrorCode, ToolResult
+
+#: 白名单有效期的档位与工具名（**仅展示、不参与风控** —— 人类明确口径）
+EXPIRE_TIER, EXPIRE_TOOL = "L1", "set_whitelist_expire"
+
+
+def set_whitelist_expire(payee_id: str, expire_date: str) -> ToolResult:
+    """T36 设白名单有效期（**仅展示**，不参与任何风控判定）。`data` = `{payee_id, whitelist_expire}`。
+
+    空串 = 清除（长期有效）。要求该收款人**在白名单里**（否则 `INVALID_STATE`：有效期属于白名单属性）。
+    L1：只是一条展示用元数据，不动钱、不改白名单资格。
+    """
+    value = str(expire_date or "").strip()
+    if value:
+        try:
+            value = datetime.date.fromisoformat(value[:10]).isoformat()
+        except ValueError:
+            return _fail(ErrorCode.INVALID_ARGUMENT, "有效期格式不对，请用 2026-12-31 这样的日期")
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id, tool=EXPIRE_TOOL, intent="payee_whitelist")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    if not row["is_whitelist"]:
+        return _fail(ErrorCode.INVALID_STATE, "该收款人不在白名单里，谈不上有效期")
+    from data.db import transaction
+    with transaction(dao.connection()):
+        dao.connection().execute("UPDATE payee SET whitelist_expire = ? WHERE id = ? AND user_id = ?",
+                                 (value or None, payee_id, user_id))
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_whitelist", tool=EXPIRE_TOOL,
+                         params_json={"payee_id": payee_id, "expire": value or None},
+                         risk_level=EXPIRE_TIER, permission_tier=EXPIRE_TIER,
+                         result="success", error_code=None)
+    label = f"白名单有效期到 {value}" if value else "白名单长期有效"
+    return _ok({"payee_id": payee_id, "whitelist_expire": value or None},
+               {"name": row["name"], "whitelist_expire": value or ""}, f"{row['name']}：{label}")
 
 
 # ---------------- T25 set_payee_whitelist（SPEC-CHANGE 新增 · L2） ----------------
@@ -219,3 +259,143 @@ def unset_payee_blacklist(payee_id: str, confirm_ref: str) -> ToolResult:
                 "masked_phone": row["phone"], "blacklist": False},
                {"name": row["name"], "masked_phone": row["phone"]},
                f"{row['name']}（{row['phone']}）已解除黑名单")
+
+# ---------------- T45 备注 / T46 专属额度（2026-10-24 追加） ----------------
+
+NOTE_TOOL, QUOTA_TOOL = "set_payee_note", "set_whitelist_quota"
+
+#: 备注/自由文本里的完整手机号（11 位数字）→ 脱敏（铁律 8：完整号码绝不入库、绝不回显）
+_PHONE_LIKE = re.compile(r"\d{11}")
+
+
+def _mask_phones(text: str) -> str:
+    """把 11 位连续数字按 `138****5678` 脱敏（只保留前 3 后 4）。"""
+    return _PHONE_LIKE.sub(lambda m: f"{m.group()[:3]}****{m.group()[-4:]}", text)
+
+
+
+def _owned_payee(payee_id: str, *, tool: str) -> dict:
+    """取本人收款人（越权 fail-closed）；找不到 → NOT_FOUND。"""
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人", DEMO_USER_ID, user_id, tool=tool, intent="payee_list")
+    except ToolError:
+        raise
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        raise ToolError(ErrorCode.NOT_FOUND, "找不到该收款人")
+    return dict(row)
+
+
+def set_payee_note(payee_id: str, note: str) -> ToolResult:
+    """T45 设置/修改收款人**备注**（L1：纯说明文字，不参与任何风控判定）。
+
+    空串 = 清除备注。`data` = `{payee_id, note}`。
+    """
+    text = _mask_phones(str(note or "").strip())[:60]        # 备注只做提示；**完整手机号一律脱敏**（铁律 8）
+    try:
+        row = _owned_payee(payee_id, tool=NOTE_TOOL)
+        payee_dao.update_payee(payee_id, current_user_id(), note=text or None)
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_note", tool=NOTE_TOOL, params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = f"备注已设为「{text}」" if text else "备注已清除"
+    return _ok({"payee_id": payee_id, "note": text or ""},
+               {"name": row["name"], "note": text}, f"{row['name']}：{label}")
+
+
+def set_whitelist_quota(payee_id: str, quota_cents: int) -> ToolResult:
+    """T46 设白名单**专属额度**（单位分；`0` = 清除，等同未设 → 一律要验证码）。
+
+    L1 工具（真正的「修改白名单信息」在编排层按 **L2 + 验证码** 走，见 `payee_whitelist_edit`）。
+    要求该人**在白名单里**（否则 `INVALID_STATE`）；负数 → `INVALID_ARGUMENT`。
+    """
+    if int(quota_cents) < 0:
+        return _fail(ErrorCode.INVALID_ARGUMENT, "专属额度不能是负数")
+    from data.db import transaction                       # 局部 import：与文件内其余函数同口径
+    try:
+        row = _owned_payee(payee_id, tool=QUOTA_TOOL)
+        if not row["is_whitelist"]:
+            return _fail(ErrorCode.INVALID_STATE, "该收款人不在白名单里，谈不上专属额度")
+        value = int(quota_cents) or None
+        with transaction(dao.connection()):
+            payee_dao.update_payee(payee_id, current_user_id(), whitelist_quota=value)
+            dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                             intent="payee_whitelist_edit", tool=QUOTA_TOOL,
+                             params_json={"payee_id": payee_id, "quota_cents": value},
+                             risk_level="L1", permission_tier="L1", result="success",
+                             error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = f"专属额度已设为 {int(quota_cents) / 100:.2f} 元" if quota_cents else "专属额度已清除"
+    return _ok({"payee_id": payee_id, "whitelist_quota": value},
+               {"name": row["name"], "whitelist_quota": value}, f"{row['name']}：{label}")
+
+# ---------------- T47 标签（2026-10-24 追加：人类原文「添加收款人时增加标签字段」） ----------------
+
+TAGS_TOOL = "set_payee_tags"
+#: 单个标签最长 8 字、最多 5 个（标签是**指代用的短词**，长了反而不好用）
+TAG_MAX_CHARS, TAG_MAX_COUNT = 8, 5
+
+
+def set_payee_tags(payee_id: str, tags: list[str]) -> ToolResult:
+    """T47 设置/修改收款人**标签**（L1：标签影响「用标签指代人员」的解析，不动钱）。
+
+    `tags` 为空列表 = 清空标签。返回 `data = {payee_id, tags}`。
+    约束：去空白、去重、去空项；单标签 ≤ 8 字、最多 5 个（超了 → `INVALID_ARGUMENT`）。
+    """
+    cleaned: list[str] = []
+    for raw in tags or []:
+        tag = str(raw or "").strip().replace(",", " ").strip()
+        if not tag or tag in cleaned:
+            continue
+        if len(tag) > TAG_MAX_CHARS:
+            return _fail(ErrorCode.INVALID_ARGUMENT, f"标签「{tag}」太长（最多 {TAG_MAX_CHARS} 字）")
+        cleaned.append(tag)
+    if len(cleaned) > TAG_MAX_COUNT:
+        return _fail(ErrorCode.INVALID_ARGUMENT, f"标签最多 {TAG_MAX_COUNT} 个")
+    try:
+        row = _owned_payee(payee_id, tool=TAGS_TOOL)
+        payee_dao.update_payee(payee_id, current_user_id(),
+                               tags=",".join(cleaned) if cleaned else None)
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_tags", tool=TAGS_TOOL, params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = "、".join(cleaned) if cleaned else "（已清空）"
+    return _ok({"payee_id": payee_id, "tags": cleaned},
+               {"name": row["name"], "tags": cleaned}, f"{row['name']}：标签为 {label}")
+
+
+# ---------------- T50 银行卡号（2026-10-24：人类规格「添加收款人卡片：银行卡号」） ----------------
+
+CARD_NO_TOOL = "set_payee_card_no"
+#: 卡号只留后四位：`**** **** **** 8888`（**完整卡号绝不入库、绝不回显**，铁律 8）
+_CARD_NO_DIGITS = re.compile(r"\d{12,19}")
+
+
+def set_payee_card_no(payee_id: str, card_no: str) -> ToolResult:
+    """T50 记录收款人**银行卡号（脱敏形态）**。L1：只是展示用信息，不参与风控。
+
+    入参可以是完整卡号，但**入库前一律脱敏**成 `**** **** **** 8888`；空串 = 清除。
+    返回 `data = {payee_id, card_no}`（脱敏形态）。
+    """
+    digits = "".join(ch for ch in str(card_no or "") if ch.isdigit())
+    if digits and not (12 <= len(digits) <= 19):
+        return _fail(ErrorCode.INVALID_ARGUMENT, "银行卡号一般是 12-19 位数字，请核对")
+    masked = f"**** **** **** {digits[-4:]}" if digits else ""
+    try:
+        row = _owned_payee(payee_id, tool=CARD_NO_TOOL)
+        payee_dao.update_payee(payee_id, current_user_id(), card_no=masked or None)
+        dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
+                         intent="payee_card_no", tool=CARD_NO_TOOL,
+                         params_json={"payee_id": payee_id},
+                         risk_level="L1", permission_tier="L1", result="success", error_code=None)
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    label = f"卡号已记为 {masked}" if masked else "卡号已清除"
+    return _ok({"payee_id": payee_id, "card_no": masked},
+               {"name": row["name"], "card_no": masked}, f"{row['name']}：{label}")

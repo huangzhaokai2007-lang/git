@@ -63,6 +63,25 @@ def test_blacklist_is_idempotent(wired) -> None:
     assert len(raw(wired, "SELECT 1 FROM audit_log WHERE tool = 'set_payee_blacklist'")) == before
 
 
+def test_blacklist_rejects_whitelisted_payee(wired, monkeypatch) -> None:
+    """人类口径：只有**普通**收款人能拉黑 —— 白名单的人要先移出白名单（编排层直接拒，不出卡）。"""
+    _fake_with(monkeypatch, "王五")                       # 王五是种子里的白名单
+    card = orchestrator.handle("把王五加入黑名单", session_id=SESSION)
+    assert card.executed is False and card.tier is None
+    assert "白名单收款人不能直接拉黑" in card.reply
+    assert confirm_card.current(SESSION) is None          # 不出确认卡
+
+
+def _fake_with(monkeypatch, name: str) -> None:
+    def chat_json(system: str, user: object, schema):
+        if getattr(schema, "__name__", "") == "IntentOut":
+            return schema.model_validate({"intent": "payee_blacklist", "confidence": 0.95,
+                                          "slots": {"payee": name}, "missing_slots": []})
+        return schema(reply=json.loads(user)["reply"])
+
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+
+
 def _fake(monkeypatch) -> None:
     def chat_json(system: str, user: object, schema):
         if getattr(schema, "__name__", "") == "IntentOut":

@@ -38,7 +38,7 @@ MAX_CLARIFY_ROUNDS = 2        # 来源：卡 09 第 3 条「最多 2 轮」
 #: + SPEC-CHANGE 新增的 `payee_list`（T20 `list_payees`，L0 只读、无槽位）
 READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
                 "subscription_list", "card_query", "wealth_recommend", "risk_assess", "payee_list",
-                "wealth_holdings", "wealth_all_products")
+                "wealth_holdings", "wealth_all_products", "scheduled_list", "gift_order_list", "aa_list")
 
 #: 写意图清单的唯一来源是 `agent/write_intents.py` 的写描述符表（card-24 泛化拆出），
 #: 经 `write_flow.WRITE_INTENTS` 转发到这里 —— 全程只有一份，避免清单漂移。
@@ -154,7 +154,10 @@ def _write_audit(ctx: _Ctx, *, tool: str | None, result: str, error_code: str | 
                                       "scene": getattr(ctx, 'scene_request', None),
                                       "states": ctx.states, "confidence": ctx.confidence,
                                       "missing_slots": ctx.missing, "tool_calls": ctx.tool_calls},
-                         risk_level=READ_TIER, permission_tier=READ_TIER, result=result,
+                         #: 写步骤要记**实际档位**（`ctx.tier` 由 write_flow 的回执带入）；
+                         #: 只读/追问才记 READ_TIER。否则审计回放会把它看成 L0（实测）。
+                         risk_level=ctx.tier or READ_TIER,
+                         permission_tier=ctx.tier or READ_TIER, result=result,
                          error_code=error_code)
     except Exception:                                        # noqa: BLE001 —— 审计隔离于回执
         logger.exception("写审计失败（回执照常返回，但必须排查）：trace=%s", ctx.trace_id)
@@ -188,8 +191,13 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
            session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None,
            intent_resolver: Callable[[str, list[str] | None], classifier.IntentOut] | None = None) -> Turn:
-    '**对外唯一入口**（F16）：先**惰性结算到期预约**（Q1/Q9），再处理本次请求。'
-    notices, sid = scheduled_runner.settle_due(), session_id or current_session_id()
+    """**对外唯一入口**（F16）：先惰性结算到期预约 + 24h 内执行前提醒，再处理本次请求。
+
+    结算与提醒都拼在回执**前面**；自身出错只记日志，**绝不影响本次请求**。
+    **追问续接的上下文在这里统一给**（`agent/session_memory.py`）。
+    """
+    sid = session_id or current_session_id()
+    notices = [*scheduled_runner.settle_due(), *scheduled_runner.due_soon_notices(sid)]
     turn = _handle(text, history=session_memory.recent(sid, history), clarify_round=clarify_round,
                    session_id=sid, card_reader=card_reader, intent_resolver=intent_resolver)
     session_memory.remember(sid, text, turn.reply)     # 先记（不含结算告知），再做前缀
@@ -213,9 +221,16 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         return _apply(ctx, amended)
     if (inflight := write_flow.inflight(ctx.session_id)) is not None:      # 在途确认优先：短回复不再分类
         ctx.intent = inflight
+        in_flight = confirm_card.current(ctx.session_id)
+        if in_flight is not None and in_flight.trace_id:   # 同一笔业务沿用出卡时的 trace（审计可回放整条链）
+            ctx.trace_id = in_flight.trace_id
         return _apply(ctx, write_flow.resume(ctx.session_id, text, classify=lambda t: (intent_resolver or classifier.classify)(_with_date_context(t), history)))
     ctx.enter("CLASSIFY")
-    verdict = scene_runtime.plan(ctx, text) or (intent_resolver or classifier.classify)(_with_date_context(text), history)
+    verdict = (scene_runtime.plan(ctx, text)
+               or (intent_resolver or classifier.classify)(_with_date_context(text), history))
+    corrected = classifier.correct_misroute(text, verdict.intent)   # 明显误判 → 纠正
+    if corrected is not None:
+        verdict = corrected
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence
     ctx.slots = dict(verdict.slots)
     if verdict.intent == "unsafe_request":
@@ -229,6 +244,7 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
     if ctx.intent == payee_flow.INTENT:                                  # 卡 20：只回引导语，界面据此弹表单
         ctx.enter("PRECHECK")
         ctx.tier = payee_flow.PAYEE_ADD_TIER
+        payee_flow.capture_pending(ctx.session_id, ctx.slots)            # 表单预填：姓名/手机号已说过
         return _finish(ctx, payee_flow.PROMPT, result="pending_confirm")
     if ctx.intent == risk_flow.INTENT and not risk_flow.answers_ready(ctx.slots.get("answers")):
         #: F10：聊天里只说"做测评"（或一个答案都没说出来）→ 回引导语、界面弹问卷（**不计分**）；
@@ -242,7 +258,8 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
             ctx.tier = risk_flow.TIER
             return _finish(ctx, risk_flow.PROMPT, result="pending_confirm")
     if ctx.intent in WRITE_INTENTS:                                      # 卡 10：写路径
-        return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id))
+        return _apply(ctx, write_flow.start(ctx.intent, ctx.slots, ctx.session_id,
+                                        trace_id=ctx.trace_id))
     return _read_flow(ctx, card_reader=card_reader)
 
 

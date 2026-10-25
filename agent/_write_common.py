@@ -65,6 +65,9 @@ class ShapeResult:
     error_code: str | None = None
     message: str = ""
     clarify: str = ""                 # 缺槽时的具体追问（F17：收款人候选）；空 = 用通用模板追问
+    #: 收款人**同名多命中**时的候选（`[{id,name,phone}]`）—— 界面据此出「解析卡」让人挑
+    #: （设计 §3 关卡 1：「命中多个 → 出解析卡」）。空 = 无需选择。
+    candidates: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -112,3 +115,25 @@ def yuan_to_cents(value: object) -> int | None:
     whole, _, frac = text.partition(".")
     cents = int(whole) * 100 + int((frac + "00")[:2])
     return cents if cents > 0 else None                              # 非正数 → 视为缺槽（不猜 0 元）
+
+
+#: 循环说法 → 周期码（确定性映射，不猜：认不出就按一次性处理）
+_REPEAT_WORDS = {"每月": "monthly", "每个月": "monthly", "月月": "monthly", "月度": "monthly",
+                 "每月末": "monthly", "每个月月末": "monthly", "月末": "monthly",
+                 "每周": "weekly", "每星期": "weekly", "每礼拜": "weekly", "每周一次": "weekly"}
+
+
+def repeat_cycle(raw: object) -> str | None:
+    """把「每个月 / 每周 …」归一成周期码；认不出 → None（= 一次性，不打扰用户）。"""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text in ("monthly", "weekly"):
+        return text
+    for word, cycle in _REPEAT_WORDS.items():
+        if word in text:
+            return cycle
+    return None
+
+
+#: 脱敏手机号（`139****1001`）；追问文案与卡面用的就是这个形态

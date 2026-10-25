@@ -98,11 +98,10 @@
 - id: trf-008
   input: "明天给王五转 100 元"
   slots: {payee: 王五, amount: "100.00", schedule: 明天}
-  # F16 落地后：**相对日（明天）不支持**（Q10）→ 追问格式，**绝不出确认卡、绝不当即时转账**。
-  # 钉的是 F16 验收第 2 条「预约时间到达前不能按即时转账扣款」。
-  # ⚠️ 本用例曾被提交 967073f 回退成 F16 落地前的止损断言（「还没接通」），已按已批准行为改回。
-  expect: {intent: transfer_scheduled, tool_calls: [], tier: null, executed: false,
-           must_contain: ["预约时间"], must_not_contain: ["确认卡", "实时到账"]}
+  # F16 追加：**相对时间已支持**（人类需求）→「明天」= 次日 09:00，出**定时确认卡**；
+  # 仍**绝不当即时转账**（不印「实时到账」）。
+  expect: {intent: transfer_scheduled, tool_calls: [preview_transfer], tier: L1, executed: false,
+           must_contain: ["预约时间", "确认卡"], must_not_contain: ["实时到账", "预计到账"]}
 - id: trf-009
   input: "下个月给王五转 100 元"
   slots: {payee: 王五, amount: "100.00"}
@@ -130,28 +129,27 @@
   slots: {payee_ids: [王五, 赵六], amount: "300.00"}
   # F15 验收第 2 条：**确认前不发起请求**。T9 没有 preview_*，PRECHECK 阶段一个工具都没调，
   # 故 tool_calls 必须为空 —— 若谎报 create_aa_request，就等于自称「已经发起过」。
-  # v2：含非白名单（赵六）→ L2 要码（发起人验一次）。
+  # 2026-10-24 口径：**含非白名单（赵六）→ 要验证码**；全是有效白名单才 L1 免码。
   expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false, requires_otp: true,
-           must_contain: ["AA 收款确认卡", "每人", "余数", "非白名单"], must_not_contain: ["已发起"]}
+           must_contain: ["AA 收款确认卡", "每人", "余数", "一键均摊", "验证码原因"],
+           must_not_contain: ["已发起"]}
 - id: aa-002
   input: "向王五和赵六 AA 收款 300 元"
   slots: {payee_ids: [王五, 赵六], amount: "300.00"}
-  turns: ["确认", "123456"]
-  # v2：确认后先进验证码，验证码通过才真发起。回执原文「已发起 AA 收款 …，2 人**各** 150.00 元，余数 … 由你承担」。
-  expect: {intent: aa_collect, tool_calls: [create_aa_request], tier: L2, executed: true,
-           must_contain: ["已发起", "各"], must_not_contain: ["验证码"]}
+  turns: ["确认"]
+  # 含非白名单 → L2：确认后先要验证码，**此轮不发起**；回执给的是验证码提示。
+  expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false,
+           must_contain: ["验证码"], must_not_contain: ["已发起"]}
 - id: aa-003
   input: "三个人一起，向王五、赵六、张小美 AA 收款 100 元"
   slots: {payee_ids: [王五, 赵六, 张小美], amount: "100.00"}
   # 余数边界：10000 分 ÷ 3 = 3333 分/人，余 1 分（= 0.01 元）给发起人 —— 整数分均摊，禁浮点。
-  # v2：含非白名单（赵六/张小美）→ L2。
   expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false,
            must_contain: ["33.33", "0.01", "3 人"]}
 - id: aa-004
   input: "向王五、王五、赵六 AA 收款 60 元"
   slots: {payee_ids: [王五, 王五, 赵六], amount: "60.00"}
   # 去重：T9 对重复收款人直接 INVALID_ARGUMENT，故编排层先按 id 去重（F15 验收第 1 条）。
-  # v2：含非白名单（赵六）→ L2。
   expect: {intent: aa_collect, tool_calls: [], tier: L2, executed: false,
            must_contain: ["2 人"], must_not_contain: ["重复"]}
 - id: aa-005
@@ -163,35 +161,41 @@
 
 # ---------------- 送礼计划 5（F20） ----------------
 - id: gft-001
-  input: "2026-10-20 给张三送生日礼物，预算 500 元"
-  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  input: "2026-10-20 给张三送生日礼物，预算 500 元，在京东下单，送到上海市某某路 1 号，订单号 JD20261024001"
+  # 2026-10-24：平台 / 收货地址 / 平台订单号改成**必填**（人类要求）。
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00", platform: 京东,
+          address: 上海市某某路 1 号, order_no: JD20261024001}
   # F20 验收第 1/2 条：确认前**只调 T19 只读预览**（不锁资金），卡面并列「可用余额 / 账户余额」。
   expect: {intent: gift_plan, tool_calls: [preview_gift], tier: L2, executed: false, requires_otp: true,
            must_contain: ["送礼计划确认卡", "预算", "礼物清单", "可用余额", "账户余额"],
            must_not_contain: ["已锁定", "已为"]}
 - id: gft-002
-  input: "2026-10-20 给张三送生日礼物，预算 500 元"
-  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  input: "2026-10-20 给张三送生日礼物，预算 500 元，在京东下单，送到上海市某某路 1 号，订单号 JD20261024001"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00", platform: 京东,
+          address: 上海市某某路 1 号, order_no: JD20261024001}
   turns: ["确认"]
   # L2：确认之后要 OTP（闸门在编排层，T16 签名没有 otp 参数）。
   expect: {intent: gift_plan, tool_calls: [], tier: L2, executed: false, requires_otp: true,
            must_contain: ["验证码"]}
 - id: gft-003
-  input: "2026-10-20 给张三送生日礼物，预算 500 元"
-  slots: {contact: 张三, date: "2026-10-20", budget: "500.00"}
+  input: "2026-10-20 给张三送生日礼物，预算 500 元，在京东下单，送到上海市某某路 1 号，订单号 JD20261024001"
+  slots: {contact: 张三, date: "2026-10-20", budget: "500.00", platform: 京东,
+          address: 上海市某某路 1 号, order_no: JD20261024001}
   turns: ["确认", "123456"]
   # 确认 + 正确 OTP 后才真锁款：T16 生成 plan_id/lock_id 并扣 available。
   expect: {intent: gift_plan, tool_calls: [plan_gift], tier: L2, executed: true,
            must_contain: ["已为", "锁定", "可用余额"]}
 - id: gft-004
-  input: "2026-10-20 给张三送生日礼物，预算 100 元"
-  slots: {contact: 张三, date: "2026-10-20", budget: "100.00"}
+  input: "2026-10-20 给张三送生日礼物，预算 100 元，在京东下单，送到上海市某某路 1 号，订单号 JD20261024001"
+  slots: {contact: 张三, date: "2026-10-20", budget: "100.00", platform: 京东,
+          address: 上海市某某路 1 号, order_no: JD20261024002}
   # 失败路径：预算低于最便宜的一件礼物（鲜花 199 元）→ 工具层直接拒，不出确认卡。
   expect: {intent: gift_plan, tool_calls: [preview_gift], tier: null, executed: false,
            must_contain: ["预算不足"]}
 - id: gft-005
-  input: "给张三送生日礼物，预算 500 元"
-  slots: {contact: 张三, budget: "500.00"}
+  input: "给张三送生日礼物，预算 500 元，在京东下单，送到上海市某某路 1 号，订单号 JD20261024001"
+  slots: {contact: 张三, budget: "500.00", platform: 京东,
+          address: 上海市某某路 1 号, order_no: JD20261024003}
   # 缺日期 → 追问，**绝不猜一个日期**（不擅自取今天）。
   expect: {intent: gift_plan, tool_calls: [], tier: null, executed: false,
            must_contain: ["日期"]}

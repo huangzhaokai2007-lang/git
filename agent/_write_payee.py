@@ -10,12 +10,13 @@
 
 from __future__ import annotations
 
+import datetime
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify, payee_resolve
-from agent._write_common import Prepared, ShapeResult, _code_of
+from agent import _relative_time, confirm_card, payee_clarify, payee_resolve
+from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
 from agent._write_transfer import _payee_query                     # 同一份「回显串归一化」
-from tools import payee
+from tools import payee, transfer
 
 
 def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeResult:
@@ -26,7 +27,7 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
     `allow_blacklisted` 供「加黑/解除黑名单」这类**管理状态**的意图用：黑名单的人也要
     能被解析出来（转账路径里黑名单是 FORBIDDEN，这里不是）。
     """
-    filled, missing, clarify = dict(slots), [], ""
+    filled, missing, clarify, candidates = dict(slots), [], "", []
     if not filled.get("payee_id"):
         query = _payee_query(filled.get("payee"))
         person, code, facts = payee_resolve.resolve_or_explain(
@@ -36,20 +37,44 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
                                message=str(facts.get("message") or ""))
         if person is None:
             missing.append("payee")
+            candidates = list(facts.get("candidates") or [])      # 同名多命中 → 界面出解析卡
             clarify = payee_clarify.ask_for(facts, ["payee"])
         else:
             filled["payee_id"] = person["payee_id"]
             filled["masked_phone"] = person["masked_phone"]
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify, candidates=candidates)
 
 
 def _shape_whitelist(slots: Mapping) -> ShapeResult:
-    """加白：统一解析关卡。**已黑名单的人 → FORBIDDEN**（黑白互斥，先解除再谈加白）。"""
-    return _resolve_shape(slots)
+    """加白：统一解析关卡。**已黑名单的人 → FORBIDDEN**（黑白互斥，先解除再谈加白）。
+
+    2026-10-24（人类原文「要为白名单人员设置有效时间与额度」）：可选 `quota`（元）/`expire`
+    （日期或「月底」这类相对说法）两个槽位 —— 在本步归一化；缺了不报错
+    （额度未设 = 一律要验证码；有效期空 = 长期有效）。
+    """
+    shaped = _resolve_shape(slots)
+    if shaped.error_code:                              # 黑名单等硬拒绝：原样透传（不吞错误码）
+        return shaped
+    filled = dict(shaped.filled)
+    if filled.get("quota") is not None and filled.get("quota_cents") is None:
+        raw = str(filled["quota"]).strip()
+        if raw:
+            filled["quota_cents"] = yuan_to_cents(filled["quota"])
+    if filled.get("expire"):
+        expire = _iso_expire(filled["expire"])
+        if expire is None:
+            return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
+                               message="有效期看不懂，请用 2026-12-31 这样的日期（或说「月底」）")
+        filled["expire"] = expire
+    return ShapeResult(filled=filled, missing=shaped.missing, clarify=shaped.clarify,
+                       candidates=shaped.candidates)
 
 
 def _prepare_whitelist(filled: dict) -> Prepared:
-    """只读 T20 取那一笔 → 事实包 + 签发 `confirm_ref`（**本步不写库**，写库在 EXECUTE）。"""
+    """只读 T20 取那一笔 → 事实包 + 签发 `confirm_ref`（**本步不写库**，写库在 EXECUTE）。
+
+    可选 `expire` 槽位（「有效期到 2026-12-31」/「月底」）：**仅展示**，不参与风控（人类口径）。
+    """
     listed = payee.list_payees()
     if not listed.ok:
         return Prepared(ok=False, error_code=_code_of(listed), message=listed.message)
@@ -59,9 +84,30 @@ def _prepare_whitelist(filled: dict) -> Prepared:
         return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该收款人")
     if row.get("is_whitelist"):
         return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人已经在白名单里了")
+    facts = {**row, "tier": payee.WHITELIST_TIER}
+    if filled.get("quota_cents") is not None:                 # 2026-10-24：加白时一并设专属额度
+        facts["quota_cents"] = int(filled["quota_cents"])
+    if filled.get("expire"):
+        expire = _iso_expire(filled["expire"])
+        if expire is None:
+            return Prepared(ok=False, error_code="INVALID_ARGUMENT",
+                            message="有效期看不懂，请用 2026-12-31 这样的日期（或说「月底」）")
+        facts["expire"] = expire
     ref = payee.issue_confirm_ref(payee.WHITELIST_ACTION,
                                   payee.whitelist_target(str(row["payee_id"]), True))
-    return Prepared(ok=True, facts={**row, "tier": payee.WHITELIST_TIER}, credential=ref)
+    return Prepared(ok=True, facts=facts, credential=ref)
+
+
+def _iso_expire(raw: object) -> str | None:
+    """有效期：ISO 日期优先，也接受相对说法（月底/下个月5号）—— 归一成 `YYYY-MM-DD`。"""
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.date.fromisoformat(text[:10]).isoformat()
+    except ValueError:
+        when = _relative_time.parse(text, transfer._now())
+        return when[:10] if when else None
 
 
 def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
@@ -72,7 +118,11 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
         rows=[("收款人", str(facts["name"])),
               ("手机号", str(facts["masked_phone"])),
               ("变更", "加入白名单"),
-              ("影响", "专属额度内转账免验证码（含深夜）；超额度仍需验证码")],
+              ("影响", "白名单专属额度（每月）内转账免验证码（含深夜）；超额度仍需验证码"),
+              *([("专属额度", f"{facts['quota_cents'] / 100:.2f} 元/月"
+                             "（每月重置；有效期内、额度内免验证码）")]
+                if facts.get("quota_cents") is not None else []),
+              *([("有效期至", str(facts["expire"]))] if facts.get("expire") else [])],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], "加入白名单"))
 
@@ -80,13 +130,27 @@ def _card_whitelist(intent: str, filled: dict, facts: Mapping, tier: str,
 def _plain_whitelist(filled: dict, facts: Mapping, tier: str) -> str:
     """纯事实版确认文本（降级回执）。措辞与卡面一致：额度内免码、超额度要码。"""
     return (f"请确认：把 {facts.get('name')}（{facts.get('masked_phone')}）加入白名单，"
-            f"权限档 {tier}。加入后在专属额度内给该收款人转账免验证码（超额度仍需验证码）。")
+            f"权限档 {tier}。加入后在每月专属额度内给该收款人转账免验证码（超额度仍需验证码）。")
 
 
 def _execute_whitelist(confirmation: confirm_card.Confirmation, otp: str | None) -> object:
-    """EXECUTE：调 **T25** 落库（OTP 已由 `write_flow` 校验；工具层只认 `confirm_ref`）。"""
+    """EXECUTE：调 **T25** 落库；带有效期 → 再调 **T36** 记有效期（**仅展示**）。"""
     del otp
-    return payee.set_payee_whitelist(str(confirmation.target_id), True, confirmation.credential)
+    result = payee.set_payee_whitelist(str(confirmation.target_id), True, confirmation.credential)
+    expire = str(confirmation.filled.get("expire") or "")
+    quota = confirmation.filled.get("quota_cents")
+    notes: list[str] = []
+    if result.ok and expire:                                  # 有效期是白名单属性，加白成功后再记
+        marked = payee.set_whitelist_expire(str(confirmation.target_id), expire)
+        if marked.ok:
+            notes.append(f"有效期至 {expire}")
+    if result.ok and quota is not None:                       # 专属额度（T46）
+        marked = payee.set_whitelist_quota(str(confirmation.target_id), int(quota))
+        if marked.ok:
+            notes.append(f"专属额度 {int(quota) / 100:.2f} 元/月（每月重置）")
+    if result.ok and notes:
+        result = result.model_copy(update={"message": f"{result.message}（{'，'.join(notes)}）"})
+    return result
 
 
 # ---------------- 加入黑名单（T28 · L1 确认卡、无 OTP） ----------------
@@ -112,6 +176,9 @@ def _prepare_blacklist(filled: dict) -> Prepared:
     profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
     if profile.get("blacklist"):
         return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人已经在黑名单里了")
+    if row.get("is_whitelist"):                           # 人类口径：只有普通收款人能拉黑
+        return Prepared(ok=False, error_code="INVALID_STATE",
+                        message="白名单收款人不能直接拉黑，请先把他移出白名单")
     return Prepared(ok=True, facts={**row, "tier": BLACKLIST_TIER}, credential="")
 
 
@@ -208,7 +275,7 @@ def _prepare_delete(filled: dict) -> Prepared:
     if row is None:
         return Prepared(ok=False, error_code="NOT_FOUND", message="找不到该收款人")
     profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
-    kind = ("白名单" if profile.get("is_whitelist")
+    kind = ("白名单" if row.get("is_whitelist")            # 状态在 `items` 里，profiles 只有黑名单/额度
             else "黑名单" if profile.get("blacklist") else "普通")
     return Prepared(ok=True, facts={**row, "kind": kind, "tier": DELETE_TIER}, credential="")
 

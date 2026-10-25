@@ -32,8 +32,10 @@ from agent.render_lists import (          # noqa: F401 —— 列表类回执按
     T_SUBSCRIPTION, T_SUBSCRIPTION_CLEAN, T_SUBSCRIPTION_EMPTY,
     T_SUBSCRIPTION_FILTERED, T_SUBSCRIPTION_ZOMBIE, T_WEALTH, T_WEALTH_CLEAN, T_WEALTH_EMPTY,
     TemplateError, anomaly_line, card_line, payee_row, render_all_products,
-    render_anomalies, render_cards, render_holdings, render_payees, render_subscriptions,
-    render_wealth, subscription_line, term_cn, wealth_line,
+    render_aa_requests, render_anomalies, render_cards, render_gift_orders, render_holdings,
+    render_payees,
+    render_schedules,
+    render_subscriptions, render_wealth, subscription_line, term_cn, wealth_line,
 )
 from guard import facts_check, injection
 from tools.schemas import ToolResult
@@ -103,6 +105,10 @@ T_UNSUPPORTED = "「{intent_cn}」这个功能还没接通，本版本暂时只�
 
 #: 工具失败：只报错误码与工具自己的解释（工具消息里的数字本就来自 facts），不润色、不补数字
 T_TOOL_ERROR = "这次没能查到您要的信息（{error_code}）：{detail}"
+#: **业务拒绝**（黑名单 / 状态不允许 / 越权）不是「查不到」，措辞必须分开 ——
+#: 实测缺陷：黑名单送礼被回成「这次没能查到您要的信息（FORBIDDEN）」，用户会以为系统坏了。
+T_TOOL_REFUSED = "这笔操作不能办理（{error_code}）：{detail}"
+_REFUSED_CODES = frozenset({"FORBIDDEN", "INVALID_STATE", "INSUFFICIENT_FUNDS"})
 
 #: 数字校验未通过时的降级提示（与卡 13 的口径一致：降级为模板回执 + audit 记 HALLUCINATION_BLOCKED）
 T_DEGRADED_NOTE = "（以下为系统直接给出的结果）"
@@ -163,6 +169,12 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_holdings(facts)
     if intent == "wealth_all_products":                      # T22：全部产品，按等级分组
         return render_all_products(facts)
+    if intent == "scheduled_list":                           # F16 追加：预约列表（时间/收款人/金额/状态）
+        return render_schedules(facts)
+    if intent == "gift_order_list":                          # F20 追加：送礼订单（号码/收货人/金额/状态）
+        return render_gift_orders(facts)
+    if intent == "aa_list":                                  # F22 追加：AA 收款（已付人数/状态/截止）
+        return render_aa_requests(facts)
     if intent == "risk_assess":                              # F10：总分/满分/等级/有效期（不走单行 format）
         try:
             return T_RISK_RESULT.format(**facts)
@@ -208,6 +220,8 @@ T_NEED_RISK = ("您还没有完成风险测评，暂时不能买理财。\n\n"
 def tool_error(error_code: str | None, detail: str) -> str:
     if error_code == "INVALID_STATE" and ("风险测评" in detail or "风险评估" in detail):
         return T_NEED_RISK
+    if error_code in _REFUSED_CODES:                     # 业务拒绝：换成「不能办理」
+        return T_TOOL_REFUSED.format(error_code=error_code, detail=detail)
     return T_TOOL_ERROR.format(error_code=error_code or "ERROR", detail=detail)
 
 

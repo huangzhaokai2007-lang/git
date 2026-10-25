@@ -52,7 +52,25 @@ FACTOR_NOTES = {
 }
 
 #: 卡面模板。`{rows}` 由调用方拼好的多行「标签：值」构成（card-24 起不再硬编码转账字段）。
+#: 卡片状态词表（人类规格 §二：草稿 / 解析中 / 等待验证码 / 已确认 / 执行中 / 已完成 / 失败 / 已过期 / 已取消）
+STATE_DRAFT, STATE_PARSING, STATE_WAIT_OTP = "草稿", "解析中", "等待验证码"
+STATE_CONFIRMED, STATE_RUNNING = "已确认", "执行中"
+STATE_DONE, STATE_FAILED, STATE_EXPIRED, STATE_CANCELLED = "已完成", "失败", "已过期", "已取消"
+
+#: 状态徽章（纯视觉标记，不改任何判定）
+STATE_BADGE = {STATE_DRAFT: "📝", STATE_PARSING: "🔍", STATE_WAIT_OTP: "🕓",
+               STATE_CONFIRMED: "✅", STATE_RUNNING: "⏳", STATE_DONE: "✅",
+               STATE_FAILED: "⚠️", STATE_EXPIRED: "⌛", STATE_CANCELLED: "⛔"}
+
+
+def state_line(state: str) -> str:
+    """卡面状态行（人类规格「卡片需包含状态」）；认不出的状态原样返回，不猜。"""
+    badge = STATE_BADGE.get(state, "")
+    return f"{badge} {state}".strip()
+
+
 CARD_TEMPLATE = """【{title}】
+状态：{state}
 意图：{intent_cn}
 {rows}
 权限档：{tier}{otp_hint}
@@ -97,10 +115,17 @@ def expected_arrival(tier: str) -> str:
 
 
 def render(card: CardInput) -> str:
-    """渲染确认卡文本（占位符全部来自 `card`，缺字段由 Pydantic 拦下）。"""
+    """渲染确认卡文本（占位符全部来自 `card`，缺字段由 Pydantic 拦下）。
+
+    2026-10-24（人类规格 §二「卡片需包含状态」）：卡面第二行给**状态**——
+    还没输验证码 → 「等待验证码」；不需要验证码 → 「草稿（待你确认）」。
+    状态是**纯展示**：判定仍由档位/OTP 决定（这里不参与任何决策）。
+    """
     rows = "\n".join(f"{label}：{value}" for label, value in card.rows)
+    state = STATE_WAIT_OTP if card.requires_otp else f"{STATE_DRAFT}（待你确认）"
+    payload = card.model_dump(exclude={"rows"})
     return CARD_TEMPLATE.format(otp_hint="（需输入短信验证码）" if card.requires_otp else "",
-                                rows=rows, **card.model_dump(exclude={"rows"}))
+                                state=state_line(state), rows=rows, **payload)
 
 
 def is_confirmation(text: str) -> bool:
@@ -109,9 +134,10 @@ def is_confirmation(text: str) -> bool:
     return any(word in normalized for word in CONFIRM_WORDS)
 
 
-def otp_prompt(what: str = "转账") -> str:
+def otp_prompt(what: str = "转账", masked_phone: str = "") -> str:
     """等 OTP 的追问（不含任何业务数字）。"""
-    return f"请输入短信验证码以完成这笔{what}。"
+    target = f"验证码已发送至 {masked_phone}。" if masked_phone else ""
+    return f"{target}请输入短信验证码以完成这笔{what}（固定 123456）。"
 
 
 def otp_wrong_text(remaining: int) -> str:
@@ -158,6 +184,9 @@ class Confirmation(BaseModel):
     tier: str
     requires_otp: bool
     stage: str = "confirm"            # confirm → otp → 完成/放弃
+    #: 出卡那一轮的 trace_id —— 「一笔业务 = 一个 trace」，确认/执行沿用同一条，
+    #: 审计回放（T52）才能把整条链摊开（2026-10-24 追加）。
+    trace_id: str = ""
     card_text: str = ""
     #: SLOT_FILL 补齐后的槽位快照，供描述符的 `execute` 取用（card-24 泛化后的补充）。
     #: **为什么需要它**：`target_id` 只装得下单主键 —— T9 `create_aa_request(payee_ids, amount)`
@@ -239,6 +268,15 @@ def unlock(session_id: str) -> None:
 
 def remember_pending(pending: Pending) -> None:
     _PENDING[pending.pending_id] = pending
+
+
+def find_pending(session_id: str, target_id: str, amount_cents: int) -> "Pending | None":
+    """同一会话里「同一个对象 + 同一金额」是否已有待复核记录（防重复登记，实测踩过）。"""
+    for item in _PENDING.values():
+        if (item.session_id == session_id and item.target_id == target_id
+                and int(item.amount_cents) == int(amount_cents)):
+            return item
+    return None
 
 
 def pending_of(pending_id: str, session_id: str) -> Pending | None:

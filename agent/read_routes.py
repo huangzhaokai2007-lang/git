@@ -14,6 +14,9 @@ from __future__ import annotations
 
 from typing import Callable
 
+from tools import _transfer_schedule as scheduled
+from tools import _aa_request as aa_request
+from tools import _gift_order as gift_order
 from tools import payee, query, subscription, wealth
 from tools.card_query import list_cards
 from tools.schemas import ToolResult
@@ -47,4 +50,11 @@ TOOL_ROUTES: dict[str, tuple[str, Callable[[dict], ToolResult]]] = {
     "wealth_holdings": ("list_holdings", lambda s: wealth.list_holdings()),
     #: 用户需求「看到其他风险等级之外的产品，但不做推荐」：T27 `list_all_products`，L0 只读。
     "wealth_all_products": ("list_all_products", lambda s: wealth.list_all_products()),
+    #: F16 追加（用户需求「查一下我的预约」）：T24 `list_scheduled`，L0 只读、无槽位
+    #: （不传 = 全部状态）。预约表的渲染在 `render_lists.render_schedules`。
+    "scheduled_list": ("list_scheduled", lambda s: scheduled.list_scheduled()),
+    #: F20 追加（用户需求「我的送礼订单」）：T37 `list_gift_orders`，L0 只读、槽位只有 status（可选）。
+    "gift_order_list": ("list_gift_orders", lambda s: gift_order.list_gift_orders(s.get("status"))),
+    #: F22 追加（用户需求「AA 进行中/每人已付/24h 失效/撤销」）：T42 只读，槽位只有 status（可选）。
+    "aa_list": ("list_aa_requests", lambda s: aa_request.list_aa_requests(s.get("status"))),
 }
