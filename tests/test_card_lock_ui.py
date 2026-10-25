@@ -59,6 +59,8 @@ def test_card_icon_opens_inline_confirmation_and_keeps_other_controls(monkeypatc
     click(at, '6222 **** **** 0001')
     assert any(button.label == '查看完整卡号' for button in at.button)
     assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'
+    assert not any(item.key == f'lock-inline-otp-{CARD}' for item in at.text_input)
+    next(button for button in at.button if button.key == f'lock-toggle-{CARD}').click().run()
     next(item for item in at.text_input if item.key == f'lock-inline-otp-{CARD}').set_value('000000')
     click(at, '确认锁定')
     assert raw(seeded, "SELECT status FROM card WHERE id=?", (CARD,))[0]['status'] == 'normal'

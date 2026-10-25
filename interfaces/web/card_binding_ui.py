@@ -84,6 +84,7 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
     if not result["ok"]:
         state["notice"] = (False, result["message"])
     else:
+        locks_ui.close(executor, st.session_state["session_id"])
         state["selected"] = card_id
         state["full_number"], state["reveal_form"], state["detail_balance"] = None, False, False
         messages = st.session_state.setdefault("messages", [])

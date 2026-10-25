@@ -61,6 +61,12 @@ def _cancel_preview(executor: ThreadPoolExecutor, session: str, state: dict) -> 
         executor.submit(operation, state['preview']['token'], session).result()
 
 
+def close(executor: ThreadPoolExecutor, session: str) -> None:
+    """退出办理界面时一并撤销尚未执行的预览凭证。"""
+    _cancel_preview(executor, session, _state(executor, session))
+    reset()
+
+
 def open_card(executor: ThreadPoolExecutor, session: str, card_id: str, mode: str = 'lock', *, inline: bool = False) -> None:
     """卡号旁的图标只创建预览，不执行锁卡。"""
     state = _state(executor, session)
