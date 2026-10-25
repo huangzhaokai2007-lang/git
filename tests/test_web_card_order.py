@@ -18,7 +18,7 @@ import pytest
 APP = Path(__file__).resolve().parents[1] / "interfaces" / "web" / "app.py"
 
 #: 从上到下的期望顺序（只列有先后要求的）
-EXPECTED = ("payee_picker_ui.render", "payee_card_ui.render", "schedule_card_ui.render",
+EXPECTED = ("payee_picker_ui.render", "payee_ui.render", "schedule_card_ui.render",
             "aa_card_ui.render", "gift_card_ui.render", "_render_confirm()")
 
 
