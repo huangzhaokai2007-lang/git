@@ -30,6 +30,11 @@ from tools.schemas import ToolResult
 
 AA_CN = "AA 收款"
 
+#: AA 收款要不要因为「含非白名单收款人」而要验证码？
+#: - **False（当前口径，2026-10-25）**：AA 是**收款**方向，一律免码；黑名单照旧直接拒。
+#: - True：恢复到 2026-10-24 的旧规则（含非白名单 / 白名单已过期 → L2 要码）。
+AA_REQUIRE_OTP_FOR_NON_WHITELIST = False
+
 #: 「王五 100 元、赵六 200 元」→ (名字, 元数) 的确定性解析（不赌 LLM）
 _AMOUNT_PAIR = re.compile(r"^(.+?)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*(?:元|块)?$")
 
@@ -165,11 +170,13 @@ def _prepare_aa(filled: dict) -> Prepared:
         return Prepared(ok=False, error_code="OVER_LIMIT",
                         message=f"AA 总额 {total_cents / 100:.2f} 元超过今日剩余额度 "
                                 f"{int(daily_left) / 100:.2f} 元")
-    #: 2026-10-24 口径（人类原文）：「AA 中只要含有非白名单收款人就要验证码」——
-    #: 全是**有效**白名单 → L1 免码；含非白名单或白名单已过期 → L2；黑名单已在 `_shape_aa` 直接拒。
+    #: 2026-10-25 口径（人类最新原话）：「AA 收款**不要**验证码」—— 收款方向，钱是进来的。
+    #: 因此恒 L1；黑名单仍然在 `_shape_aa` 直接拒（那一条不受影响）。
+    #: 想恢复 10-24 的旧规则（含非白名单收款人要码）：把下面这个常量改回 True 即可。
     non_exempt = [name for pid, name in zip(ids, names) if not _exempt(pid)]
-    facts["tier"] = payee_risk.TIER_L2 if non_exempt else payee_risk.TIER_L1
-    if non_exempt:
+    facts["tier"] = (payee_risk.TIER_L2 if (AA_REQUIRE_OTP_FOR_NON_WHITELIST and non_exempt)
+                     else payee_risk.TIER_L1)
+    if AA_REQUIRE_OTP_FOR_NON_WHITELIST and non_exempt:
         facts["aa_otp_reason"] = "含非白名单收款人：" + "、".join(non_exempt)
     return Prepared(ok=True, facts=facts, credential="")
 
