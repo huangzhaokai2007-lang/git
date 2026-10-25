@@ -112,17 +112,11 @@ def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch
     assert "| 时间 | 交易对手 | 金额（元） | 分类 |" in page
 
 
-def test_one_click_demo_walks_all_five_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
-    """一键演示（录屏用）：点一次 → 五张任务卡**依次**跑完，每句都真调工具。
-
-    「依次」也要验：一次刷五条看着像预渲染截图，一条条冒出来才像真对话。
-    """
+def test_five_chat_queries_walk_all_five_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """五种查询依次从聊天框输入，每句都真正调用工具。"""
     at = _app(monkeypatch)
-    button = next((b for b in at.button if b.label.startswith("🎬")), None)
-    assert button is not None, "侧边栏没有一键演示按钮"
-    button.click().run()
-    for _ in range(6):                            # 每次 rerun 只问一句（留给录屏的节奏）
-        at.run()
+    for prompt in ("查一下余额", "上个月的流水", "上个月花了多少", "上个月有没有异常交易", "上个月的账单总结"):
+        at.chat_input[0].set_value(prompt).run()
     assert not at.exception, at.exception
     intents = [record["turn"]["intent"] for record in at.session_state["turns"]]
     assert intents == ["balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report"]
