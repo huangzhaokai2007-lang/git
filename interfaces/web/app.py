@@ -262,10 +262,10 @@ def _chat_page() -> None:
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
-    if st.session_state.get("bound-lost-query"):
+        #: main（#46 挂失补卡）：**无条件**渲染，靠 `accept_turn` 决定是否出按钮。
         lost_ui.render(_agent_executor(), st.session_state['session_id'], show_button=False)
     if st.session_state.get("bound-payee-query"):                 # S6：收款人卡（人名选项 → 专属详情卡）
-        payee_card_ui.render(_agent_executor(), st.session_state["session_id"])
+        payee_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-schedule-query"):              # F16：预约卡面 + 执行/改时间/取消
         schedule_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-aa-query"):                    # F22：AA 卡面 + 登记已付/撤销
