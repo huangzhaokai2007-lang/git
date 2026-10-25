@@ -92,7 +92,9 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
         facts = item.get('facts') or {}
         if facts.get('balance_yuan') is not None:
             label = {'savings': '储蓄账户', 'credit': '信用卡账户'}.get(facts.get('account_type'), '账户')
-            st.markdown(f"您的{label}余额为 {facts['balance_yuan']} RMB")
+            st.markdown(f'<div class="bank-balance"><span class="bank-balance-label">您的{label}余额为：</span>'
+                        f'<span class="bank-balance-amount">{_esc(facts["balance_yuan"])} RMB</span></div>',
+                        unsafe_allow_html=True)
         else:
             st.markdown(re.split('[，。]', item['text'], maxsplit=1)[0].replace(' 元', ' RMB'))
     return st.button("刷新余额", icon=":material/refresh:", key="refresh-balance", width="stretch")
