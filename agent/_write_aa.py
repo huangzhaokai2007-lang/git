@@ -112,6 +112,9 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
         cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
         if cents is None:
             missing.append("amount")
+            # 同名与缺金额**同时发生**时两件事都要说（否则用户以为只差选人）
+            amount_hint = "请说明这次 AA 的总金额（例如「AA 收款 300 元」）。"
+            clarify = f"{clarify}\n{amount_hint}" if clarify else amount_hint
         else:
             filled["amount_cents"] = cents
     if filled.get("per_person_cents") and filled.get("amount_cents") is not None:

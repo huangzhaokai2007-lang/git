@@ -284,6 +284,29 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
                 tier=verdict.tier, reply=card_text, ask=card_text, degraded=degraded)
 
 
+#: 缺槽时给用户看的字段名（**只影响措辞**，不含任何业务数字）
+SLOT_LABELS = {
+    "payee": "收款人", "payee_ids": "收款人", "amount": "总金额", "date": "日期",
+    "schedule": "预约时间", "budget": "预算", "contact": "联系人",
+    "platform": "平台", "address": "收货地址", "order_no": "平台订单号",
+    "tags": "标签", "note": "备注", "card_no": "银行卡号",
+    "quota": "专属额度", "expire": "有效期", "reason": "原因", "weekday": "星期几",
+}
+
+
+def missing_hint(missing: list[str]) -> str:
+    """缺槽追问（**兜底**：描述符没给 clarify 时用）。
+
+    2026-10-24 修：以前这里可能返回空串 —— 界面按钮/解析卡路径只读 Step.reply，
+    于是「选完同名收款人后还缺金额」时界面**什么都不显示**（用户以为卡住了）。
+    措辞复用 	emplates.clarify_missing（全仓唯一追问口径，不另造一套）。
+    """
+    if not missing:
+        return ""
+    labels = [SLOT_LABELS.get(slot, slot) for slot in missing]
+    return templates.clarify_missing(labels)
+
+
 def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
     spec = write_intents.spec_of(intent)
@@ -301,8 +324,16 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
                     else "payee")
             payee_picker.capture(session_id, intent, dict(slots), shaped.candidates,
                                  slot=slot)
+        hint = missing_hint(shaped.missing)
+        ask = shaped.clarify or hint                   # 描述符优先，否则兜底
+        #: 描述符的追问如果**没提到**缺的那几项，就补一句 —— 用户一次知道要补什么，
+        #: 不会出现「只问了标签、其实还差收款人」这种半句追问（实测）。
+        labels = [SLOT_LABELS.get(slot, slot) for slot in shaped.missing]
+        absent = [label for label in dict.fromkeys(labels) if label not in shaped.clarify]
+        if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
+            ask = f"{shaped.clarify}\n请补充：{'、'.join(absent)}。"
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
-                    ask=shaped.clarify or None)      # F17：描述符给了更具体的追问就用它
+                    ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
     filled = shaped.filled
     if confirm_card.is_locked(session_id):
         return Step(states=["PRECHECK"], intent=intent, result="rejected",
