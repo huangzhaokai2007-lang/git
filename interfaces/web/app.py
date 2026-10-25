@@ -69,6 +69,7 @@ def _init_state() -> None:
     state.pop('page', None)
     state.setdefault("session_id", f"web-{uuid.uuid4().hex[:8]}")
     state.setdefault("messages", [{"role": "assistant", "text": GREETING, "turn": None}])
+    state.setdefault('workspace-start', 0)
     state.setdefault("turns", [])
     state.setdefault("balance", [])
     state.setdefault("pending_id", None)
@@ -90,7 +91,8 @@ def _ask(text: str, *, display: str | None = None) -> None:
     display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
     try:
-        history = [m["text"] for m in state["messages"][-(HISTORY_TURNS + 1):-1] if m.get("text")]
+        workspace = state["messages"][state.get('workspace-start', 0):]
+        history = [m["text"] for m in workspace[-(HISTORY_TURNS + 1):-1] if m.get("text")]
         turn = _agent_executor().submit(card_binding_flow.handle, text, history=history or None,
                                         clarify_round=state["clarify_round"],
                                         session_id=state["session_id"]).result()
@@ -123,6 +125,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
     state["bound-aa-query"] = turn.intent == "aa_list" and turn.error_code is None
     state["bound-gift-query"] = turn.intent == "gift_order_list" and turn.error_code is None
+    state['bound-lost-query'] = turn.ask in ('card_lost', 'card_lost_choice', 'card_lost_records') and not turn.error_code
     state['bound-card-query'] = state.get('bound-card-query', False) or (
         (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
@@ -188,6 +191,8 @@ def _render_confirm() -> None:
 
 def _render_forms() -> None:
     """渲染全部表单桥；任一表单提交了 → rerun（与历史 `_render_payee_form` 的行为一致）。"""
+    if len(st.session_state['messages']) <= st.session_state.get('workspace-start', 0):
+        return
     if forms.render_all(st.session_state, _agent_executor()):
         st.rerun()
 
@@ -210,6 +215,8 @@ def _sidebar() -> None:
         st.divider()
         st.markdown("#### 快捷场景")
         if (prompt := ui.scenes()) is not None:
+            import shortcut_ui
+            shortcut_ui.start(_agent_executor(), st.session_state['session_id'])
             if prompt == '查看操作记录':
                 st.session_state['operation-records-open'] = True
             else:
@@ -220,6 +227,7 @@ def _sidebar() -> None:
             _agent_executor().submit(scene_flow.clear, st.session_state["session_id"]).result()
             st.session_state["demo-queue"] = list(DEMO_SCRIPT)
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
+            st.session_state['workspace-start'] = 0
             st.session_state['bound-card-query'] = False
             st.rerun()
         if st.button("重置会话", icon=":material/restart_alt:", key="reset-session", width="stretch"):
@@ -232,7 +240,7 @@ def _sidebar() -> None:
             lost_ui.reset()
             st.session_state["bound-card-query"] = False
             st.session_state['operation-records-open'] = False
-            for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0)):
+            for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0), ('workspace-start', 0)):
                 st.session_state[key] = value
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
             st.rerun()
@@ -262,10 +270,10 @@ def _chat_page() -> None:
     else:
         limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
         locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
-    if st.session_state.get("bound-lost-query"):
+    if st.session_state.get("bound-lost-query") and not st.session_state.get('bound-card-query'):
         lost_ui.render(_agent_executor(), st.session_state['session_id'], show_button=False)
     if st.session_state.get("bound-payee-query"):                 # S6：收款人卡（人名选项 → 专属详情卡）
-        payee_card_ui.render(_agent_executor(), st.session_state["session_id"])
+        payee_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-schedule-query"):              # F16：预约卡面 + 执行/改时间/取消
         schedule_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-aa-query"):                    # F22：AA 卡面 + 登记已付/撤销
@@ -281,7 +289,7 @@ def _chat_page() -> None:
 
 
 def _bill_charts() -> None:
-    latest = ui.latest_bill(st.session_state['messages'])
+    latest = ui.latest_bill(st.session_state['messages'][st.session_state.get('workspace-start', 0):])
     if not latest:
         return
     with st.expander('📊 这份账单的图表', expanded=True):
