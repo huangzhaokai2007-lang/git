@@ -45,6 +45,25 @@ def _blacklist_reason(contact: str) -> str:
     return text + (f"原因：{reason}。" if reason else "")
 
 
+def _gift_day(raw: object) -> str | None:
+    """送礼日期归一：先按 `period.resolve_day`（ISO / 相对月），再试 `_relative_time`
+    （明天 / 后天 / 下周一 / 月底 / 年底…）—— 与定时转账共用同一份自然语言日期实现。
+
+    2026-10-24 修（实测）：「后天给王五送个礼物，预算 300」被判缺日期而追问，但同样的
+    「后天」在定时转账里是能解析的 —— 两条路径不该有两套日期口径。
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    day = period.resolve_day(text, edge="start")
+    if day:
+        return day
+    from agent import _relative_time
+    from tools import transfer
+    when = _relative_time.parse(text, transfer._now())
+    return when[:10] if when else None
+
+
 def _shape_gift(slots: Mapping) -> ShapeResult:
     """SLOT_FILL：`contact` 原样用；`date` 归一到 `YYYY-MM-DD`；`budget`（元）→ 整数分。
 
@@ -65,7 +84,7 @@ def _shape_gift(slots: Mapping) -> ShapeResult:
         return ShapeResult(filled=filled, error_code="FORBIDDEN", message=blocked)
     if not contact:
         missing.append("contact")
-    day = period.resolve_day(filled.get("date"), edge="start") if filled.get("date") else None
+    day = _gift_day(filled.get("date")) if filled.get("date") else None
     if day is None:
         missing.append("date")
     else:

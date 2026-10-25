@@ -10,9 +10,20 @@
 from __future__ import annotations
 
 from typing import Mapping
+from tools._wealth_risk import RISK_LABELS  # noqa: E402 —— 持仓渲染要用（拆模块时漏带）
 
-__all__ = ["badge", "holdings_line", "payee_row", "render_aa_requests", "render_gift_orders",
-           "render_holdings", "render_payees", "render_schedules"]
+__all__ = ["TemplateError", "badge", "holdings_line", "payee_row", "render_aa_requests",
+           "render_gift_orders", "render_holdings", "render_payees", "render_schedules"]
+
+
+class TemplateError(RuntimeError):
+    """模板渲染失败（缺占位符 / 键名写错）。**宁可炸**也不许静默留白（静默留白=幻觉的温床）。
+
+    **全仓唯一定义**就在本模块**：`render_lists` 与 `templates` 都从这里 import 再导出，
+    因此 `except templates.TemplateError` 与 `pytest.raises(templates.TemplateError)` 命中同一个类。
+    2026-10-24：从 `render_lists.py` 搬到这里 —— 本模块的持仓渲染也要用它，而
+    `render_lists` 依赖本模块（反向 import 会成环）。
+    """
 
 
 #: **状态徽章**（v3 清单「每张卡的状态徽章」）：状态码 → emoji。

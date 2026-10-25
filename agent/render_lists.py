@@ -26,7 +26,8 @@ __all__ = ["CARD_STATUS_CN", "CARD_TYPE_CN", "CYCLE_LABELS", "SEVERITY_CN", "Tem
            "render_holdings", "render_payees", "render_schedules", "render_subscriptions",
            "render_wealth", "subscription_line", "wealth_line"]
 
-from agent.render_tables import (    # noqa: F401 —— 再导出：同一份实现，历史调用点零改动
+from agent.render_tables import (
+    TemplateError,  # noqa: F401 —— 再导出（唯一定义在 render_tables）    # noqa: F401 —— 再导出：同一份实现，历史调用点零改动
     badge, holdings_line, payee_row, render_aa_requests,
     render_gift_orders, render_holdings, render_payees, render_schedules,
     T_GIFT_ORDER_EMPTY, T_GIFT_ORDER_HEAD, T_PAYEE_EMPTY, T_PAYEE_HEAD,
@@ -196,13 +197,8 @@ T_SUBSCRIPTION_EMPTY = "当前没有符合条件的订阅。"
 T_SUBSCRIPTION = T_SUBSCRIPTION_ZOMBIE
 
 
-class TemplateError(RuntimeError):
-    """模板渲染失败（缺占位符 / 键名写错）。**宁可炸**也不许静默留白（静默留白=幻觉的温床）。
-
-    **与 `agent/templates.TemplateError` 是同一个类**：本模块的定义先于 `templates.py` 执行，
-    `templates.py` 从这里 import 并再导出 —— 因此 `except templates.TemplateError` 仍然命中，
-    `pytest.raises(templates.TemplateError)` 也不会因拆文件而失效。
-    """
+#: `TemplateError` 已搬到 `render_tables`（本模块依赖它，反向 import 会成环）；
+#: 这里仍然再导出，`render_lists.TemplateError` 与 `templates.TemplateError` 是同一个类。
 
 
 def card_line(item: Mapping) -> str:
