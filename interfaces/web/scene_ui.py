@@ -39,9 +39,6 @@ def render(executor, session: str, ask) -> None:
             parts.append(card.get('card_no_mask', ''))
         if parts:
             st.caption(' › '.join(parts))
-        columns = st.columns(2)
-        columns[0].button('返回上次查询', key='scene-back', on_click=ask, args=('返回刚才的列表',))
-        columns[1].button('清除查询条件', key='scene-clear', on_click=ask, args=('重新来',))
         _selection(context, ask)
 
 

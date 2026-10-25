@@ -43,6 +43,12 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
     for index, message in enumerate(messages):
+        turn = message.get("turn") or {}
+        if (message["role"] == "assistant" and turn.get("intent") == "card_query"
+                and turn.get("tool_calls") == ["list_bound_cards"]
+                and (turn.get("facts") or {}).get("items")
+                and not turn.get("ask") and not turn.get("error_code")):
+            continue  # The bound-card gallery already presents this successful list.
         with st.chat_message(message["role"], avatar=":material/person:" if message["role"] == "user" else ":material/auto_awesome:"):
             turn = message.get("turn")
             drawn = (payee_card is not None and message["role"] == "assistant"
