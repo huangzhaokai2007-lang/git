@@ -66,7 +66,9 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
 def gift_intent(contact: str = CONTACT, date: str | None = DAY,
                 budget: str = BUDGET) -> dict:
     """一条送礼意图（槽位名与 `classifier.SLOT_SCHEMA['gift_plan']` 一致）。"""
-    slots: dict = {"contact": contact, "budget": budget}
+    # 2026-10-24：平台 / 收货地址 / 平台订单号必填（人类要求）
+    slots: dict = {"contact": contact, "budget": budget, "platform": "京东",
+                   "address": "上海市某某路 1 号", "order_no": "JD-PLAN-1"}
     if date is not None:
         slots["date"] = date
     return {"intent": "gift_plan", "confidence": 0.95, "slots": slots, "missing_slots": []}

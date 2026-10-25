@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 
 import pytest
@@ -38,13 +39,26 @@ def _money(wired) -> tuple[int, int]:
     return row["available"], row["balance"]
 
 
+_ORDER_SEQ = itertools.count(1)
+
+
+def _next_order_no() -> str:
+    """每笔订单一个**唯一**平台订单号（同一测试里要下多单，幂等键不能撞）。"""
+    return f"JD-OPS-{next(_ORDER_SEQ)}"
+
+
 def _created_order(wired, monkeypatch, budget: str = "500", date: str = "2026-10-30") -> str:
     """经编排层下一笔送礼订单（T16 锁款 + T38 落单），返回订单号。"""
     def chat_json(system: str, user: object, schema):
         if getattr(schema, "__name__", "") == "IntentOut":
+            # 2026-10-24：平台 / 收货地址 / 平台订单号必填（人类要求）
             return schema.model_validate({"intent": "gift_plan", "confidence": 0.95,
                                           "slots": {"contact": CONTACT, "date": date,
-                                                    "budget": budget}, "missing_slots": []})
+                                                    "budget": budget,
+                                                    "platform": "京东",
+                                                    "address": "上海市某某路 1 号",
+                                                    "order_no": _next_order_no()},
+                                          "missing_slots": []})
         return schema(reply=json.loads(user)["reply"])
 
     monkeypatch.setattr(llm, "chat_json", chat_json)

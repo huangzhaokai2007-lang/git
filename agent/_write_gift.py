@@ -30,6 +30,20 @@ from agent._write_common import Prepared, ShapeResult, _code_of, yuan_to_cents
 from tools import cross_scene
 from tools.schemas import ToolResult
 
+#: 2026-10-24（人类要求）：送礼的**平台 / 收货地址 / 平台订单号必填** ——
+#: 没有平台和单号就无法对账，没有地址就送不到。
+#: 想看「不强制」的老行为：把下面这个元组清空即可（`GIFT_REQUIRED = ()`）。
+GIFT_REQUIRED = ("platform", "address", "order_no")
+#: 缺槽时各字段的说法（追问语按**实际缺的**那几项拼，不一股脑全说）
+GIFT_SLOT_LABELS = {"platform": "平台（如「京东」）",
+                    "address": "收货地址",
+                    "order_no": "平台订单号（如 JD20261024001）"}
+
+
+def missing_hint(missing: list[str]) -> str:
+    """按实际缺的必填项拼追问语。"""
+    items = [GIFT_SLOT_LABELS[slot] for slot in GIFT_REQUIRED if slot in missing]
+    return ("请补充：" + "、".join(items) + "。") if items else ""
 GIFT_CN = "送礼计划"
 
 
@@ -98,7 +112,40 @@ def _shape_gift(slots: Mapping) -> ShapeResult:
             missing.append("budget")
         else:
             filled["amount_cents"] = cents
-    return ShapeResult(filled=filled, missing=missing)
+    _fill_required_gift_slots(filled, contact, missing)      # 平台 / 地址 / 订单号（见 GIFT_REQUIRED）
+    clarify = missing_hint(missing)
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+
+
+def _fill_required_gift_slots(filled: dict, contact: str, missing: list[str]) -> None:
+    """必填校验：`platform` / `address` / `order_no`。
+
+    收货地址是唯一能「省一次追问」的：该收货人下过单的话，**沿用上次地址**并在卡面标注
+    `address_reused`（真实银行 App 也这么做）。平台与订单号没有可继承的来源，缺就追问。
+    """
+    for slot in ("platform", "order_no"):
+        if slot in GIFT_REQUIRED and not str(filled.get(slot) or "").strip():
+            missing.append(slot)
+    if "address" in GIFT_REQUIRED and not str(filled.get("address") or "").strip():
+        reused = _last_address(contact)
+        if reused:
+            filled["address"] = reused
+            filled["address_reused"] = True
+        else:
+            missing.append("address")
+
+
+def _last_address(contact: str) -> str:
+    """该收货人**上一次**的收货地址（只读历史；取不到就返回空 → 追问）。"""
+    try:
+        from tools import _gift_order
+        listed = _gift_order.list_gift_orders()
+    except Exception:                                    # noqa: BLE001 —— 查不到就当没有
+        return ""
+    for item in listed.facts.get("items") or []:
+        if str(item.get("contact") or "") == str(contact) and item.get("address"):
+            return str(item["address"])
+    return ""
 
 
 def _prepare_gift(filled: dict) -> Prepared:
@@ -151,7 +198,9 @@ def _card_gift(intent: str, filled: dict, facts: Mapping, tier: str,
               ("可用余额", f"{facts['available_yuan']} 元"),
               ("账户余额", f"{facts['balance_yuan']} 元"),
               *([("平台", str(filled["platform"]))] if filled.get("platform") else []),
-              *([("收货地址", str(filled["address"]))] if filled.get("address") else []),
+              *([("收货地址", str(filled["address"])
+                              + ("（沿用上次）" if filled.get("address_reused") else ""))]
+                if filled.get("address") else []),
               *([("平台订单号", str(filled["order_no"]))] if filled.get("order_no") else []),
               ("资金说明", "锁定只减可用余额，账户余额不变（不是支出）")],
         tier=tier, requires_otp=requires_otp,

@@ -113,8 +113,12 @@ def record_gift_order(plan_id: str, lock_id: str, contact: str, gift_date: str,
                          intent="gift_plan", tool=RECORD_TOOL,
                          params_json={"order_id": order_id, "contact": contact, "total": int(total)},
                          risk_level="L2", permission_tier="L2", result="success", error_code=None)
+    #: 2026-10-24：平台订单号现在**必填**，回执里两个号都给（内部的 ord_* 与平台的 JD*），
+    #: 免得用户以为「我填的订单号不见了」。
+    label = f"订单号 {order_id}" + (f"（平台订单号 {order_no}）" if order_no else "")
     return _ok({"order_id": order_id, "status": "created", "total": int(total)},
-               {"order_id": order_id, "status_cn": STATUS_CN["created"]}, f"订单号 {order_id}")
+               {"order_id": order_id, "status_cn": STATUS_CN["created"],
+                "platform_order_no": order_no}, label)
 
 
 def list_gift_orders(status: str | None = None) -> ToolResult:

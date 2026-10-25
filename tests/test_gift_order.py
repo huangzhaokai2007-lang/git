@@ -21,6 +21,10 @@ from tools import _gift_order as orders
 SESSION = "sess-giftorder"
 CONTACT = "王五"
 
+#: 2026-10-24：平台 / 收货地址 / 平台订单号已改成**必填**（人类要求），夹具统一带上。
+_GIFT_EXTRA = {"platform": "京东", "address": "上海市某某路 1 号",
+               "order_no": "JD-TEST-1"}
+
 
 @pytest.fixture()
 def wired(seeded, monkeypatch, clock):
@@ -69,7 +73,8 @@ def test_list_orders_and_bad_status(wired) -> None:
 
 def test_orchestration_gift_creates_queryable_order(wired, monkeypatch) -> None:
     """送礼计划确认后：回执带订单号，且能被「查订单」查回来。"""
-    _fake(monkeypatch, "gift_plan", {"contact": CONTACT, "date": "2026-10-30", "budget": "500"})
+    _fake(monkeypatch, "gift_plan",
+          {"contact": CONTACT, "date": "2026-10-30", "budget": "500", **_GIFT_EXTRA})
     card = orchestrator.handle("给王五送个生日礼物，预算 500 元", session_id=SESSION)
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"
     otp_stage = orchestrator.handle("确认", session_id=SESSION)
@@ -105,7 +110,7 @@ def test_gift_rejects_blacklisted_contact(wired, monkeypatch) -> None:
     assert payee.set_payee_blacklist(pid, "总是赖账").ok is True
     before = count(wired, "gift_order")
     _fake(monkeypatch, "gift_plan",
-          {"contact": "拉黑的朋友", "date": "2026-10-30", "budget": "500"})
+          {"contact": "拉黑的朋友", "date": "2026-10-30", "budget": "500", **_GIFT_EXTRA})
     result = orchestrator.handle("给拉黑的朋友送个生日礼物，2026-10-30 送达，预算 500 元",
                                  session_id=SESSION)
     assert result.executed is False and "CONFIRM_CARD" not in result.states
