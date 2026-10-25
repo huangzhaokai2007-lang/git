@@ -11,6 +11,7 @@ import streamlit as st
 from interfaces.web.scenes import SCENES, SCENE_ICONS    # 场景文案拆出（本文件已贴 300 行红线）
 from interfaces.web.theme import CSS, load_css
 from interfaces.web import reply_animation
+from interfaces.web import chart_ui, spending_pie
 
 #: 顶部合规标注（卡 16 第 5 条）
 SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银行，无真实用户 / 账户 / 资金 / 卡号。"
@@ -56,8 +57,9 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                      and payee_card(message["text"]))
             if not drawn:
                 if message["role"] == "assistant":
-                    reply_animation.render(message["text"], f"{index}:{(turn or {}).get('trace_id', 'greeting')}",
-                                           animate=index == len(messages) - 1)
+                    key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
+                    if not spending_pie.render_reply(message["text"], turn or {}, key=key, animate=index == len(messages) - 1):
+                        reply_animation.render(message["text"], key, animate=index == len(messages) - 1)
                 else:
                     st.markdown(message["text"])
             if turn is not None:
@@ -211,7 +213,8 @@ def payee_form(defaults: dict | None = None) -> dict | None:
     **L2 确认卡 + 短信验证码**（`agent/payee_flow.py` → `write_flow` → T25）——
     白名单 = 转账免验证码的特权，不能靠一次表单点击就拿到。
     """
-    defaults = defaults or {}    with st.container(border=True):
+    defaults = defaults or {}
+    with st.container(border=True):
         st.markdown("##### ➕ 添加收款人")
         st.caption("填姓名和手机号即可（不收卡号）。手机号会脱敏保存，完整号码不入库、不回显。")
         with st.form("payee-form", clear_on_submit=True):
@@ -299,26 +302,12 @@ def latest_bill(messages: Sequence[Mapping[str, Any]]) -> dict:
 
 
 def bill_panel(series: Mapping[str, float], latest: Mapping[str, Any]) -> None:
-    """账单图表（卡 16 第 3 条）：分类占比 + 月度趋势，只用 streamlit 原生图表。"""
-    categories = list(latest.get("categories") or [])
-    left, right = st.columns(2)
-    with left:
-        st.markdown("**支出分类占比**")
-        if categories:
-            st.bar_chart({item["key"]: item["amount"] for item in categories}, height=280)
-            st.caption("分类与金额解析自编排层账单回执（已过数字校验器）。")
-        else:
-            st.caption("还没有分类明细 —— 让 agent 出一份账单报告（回执里带分类表）。")
-    with right:
-        st.markdown("**月度趋势（支出合计）**")
-        if series:
-            st.line_chart(dict(series), height=280)
-            st.caption("每个点 = 一次账单回执里的「支出合计」；点「拉取近 3 期」可补齐。")
-        else:
-            st.caption("还没有账期数据。")
-    if categories:
-        st.dataframe([{"支出分类": item["key"], "金额（元）": item["amount"], "占比": f"{item['pct']}%"}
-                      for item in categories], hide_index=True, width="stretch")
+    """分类已随聊天回复展示；此处只保留跨月趋势。"""
+    st.markdown("**月度趋势（支出合计）**")
+    if series:
+        chart_ui.trend(series)
+    else:
+        st.caption("还没有账期数据。")
 
 
 # ---------------- 审计时间轴 ----------------

@@ -82,14 +82,14 @@ def _text(at: AppTest) -> str:
 def test_analysis_reply_comes_with_a_chart_and_follow_up_buttons(monkeypatch: pytest.MonkeyPatch) -> None:
     """账单分析 → 回执（分类占比表）+ 图表 + 三个追问按钮，全在对话流里。"""
     at = _app(monkeypatch)
-    baseline = len(at.get("vega_lite_chart"))
     at.chat_input[0].set_value("上个月花了多少").run()
     assert not at.exception, at.exception
 
     page = _text(at)
-    assert "| 分类 | 金额（元） | 占比 |" in page                   # ① 分类明细进了回执
+    assert "| 分类 | 金额（元） | 占比 |" not in page              # 分类表替换为动画饼图
     assert insight_ui.CARD_MARK in page                              # ② 卡片真的画出来了
-    assert len(at.get("vega_lite_chart")) > baseline                 # ③ 图表比问之前多了一张
+    pies = [item for item in at.get('bidi_component') if item.proto.component_name.endswith('spending_pie')]
+    assert len(pies) == 1                                            # ③ 分类只画一份饼图
     labels = [button.label for button in at.button]
     assert "📄 看流水明细" in labels                                  # ④ 追问按钮在页面上
     assert "🧾 出一份账单总结" in labels
