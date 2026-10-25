@@ -34,12 +34,10 @@ import payee_picker_ui                                          # noqa: E402  �
 import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
 import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
-import audit_ui                                                 # noqa: E402  （审计回放：trace_id → 链路）
 import activity_ui                                              # noqa: E402  （main：活动流）
 
 load_dotenv(ROOT / ".env")
 
-DEMO_SCRIPT = ("查一下余额", "上个月的流水", "上个月花了多少", "上个月有没有异常交易", "上个月的账单总结")
 PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = "您好 请问我能为您提供什么帮助"
 
@@ -199,7 +197,7 @@ def _render_forms() -> None:
 # ---------------- 侧边栏 ----------------
 
 def _sidebar() -> None:
-    """侧边栏：账户余额 + 快捷场景 + 会话信息（页内动作全部回到编排层）。"""
+    """侧边栏：账户余额、快捷场景与重置会话。"""
     with st.sidebar:
         st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="AI Banking Agent"><span aria-hidden="true">AI Banking</span><span aria-hidden="true">Agent</span></div>', unsafe_allow_html=True)
         st.divider()
@@ -221,14 +219,6 @@ def _sidebar() -> None:
             else:
                 _ask(prompt)
         st.divider()
-        if st.button("🎬 一键演示（五连问 · 供录屏）", key="demo-run", width="stretch"):
-            from agent import scene_flow
-            _agent_executor().submit(scene_flow.clear, st.session_state["session_id"]).result()
-            st.session_state["demo-queue"] = list(DEMO_SCRIPT)
-            st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
-            st.session_state['workspace-start'] = 0
-            st.session_state['bound-card-query'] = False
-            st.rerun()
         if st.button("重置会话", icon=":material/restart_alt:", key="reset-session", width="stretch"):
             from agent import scene_flow
             _agent_executor().submit(scene_flow.clear, st.session_state["session_id"]).result()
@@ -246,13 +236,7 @@ def _sidebar() -> None:
 
 
 def _chat_page() -> None:
-    queue = list(st.session_state.get("demo-queue") or ())
-    if queue:
-        st.session_state["demo-queue"] = queue[1:]
-        _ask(queue[0])
-        st.rerun()
     messages = st.session_state["messages"]
-    audit_ui.render(_agent_executor())                            # 侧边栏：审计回放
     ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card)
     import scene_ui
     scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
