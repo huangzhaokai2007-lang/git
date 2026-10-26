@@ -95,13 +95,13 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
         else:
             for index in reversed(matching[1:]):
                 messages.pop(index)
-    st.rerun()
+    # Button callbacks run before the page renders, so the gallery marker and
+    # details agree on the first render instead of briefly restoring the deck.
 
 
 def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict) -> None:
     card_id = item["card_id"]
-    if gallery_ui.face(item):
-        _select(executor, card_id, state)
+    gallery_ui.face(item, on_click=lambda: _select(executor, card_id, state))
     st.caption('点击卡片查看详情')
     columns = st.columns([1, 2], vertical_alignment='center')
     with columns[0].container(horizontal=True, vertical_alignment='center'):
