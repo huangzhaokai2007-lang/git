@@ -111,7 +111,7 @@ CARD_TYPE_CN = {"savings": "储蓄卡", "credit": "信用卡"}
 #: F11 追加：**回执必须带产品明细**（产品名/风险等级/预期年化/期限），只报个数用户拿不到可比信息。
 #: 措辞里的「推荐」二字是**剧本契约**（`tests/cases/orchestrator.yaml` 的 wlt-001/wlt-002/sec-005
 #: 都有 `must_contain: 推荐`），不得改写成「筛选出」等同义词。
-T_WEALTH_CLEAN = "按您的风险等级 {risk_level}，为您推荐 {item_count} 个产品："
+T_WEALTH_CLEAN = "按您的风险等级「{risk_label}」，为您推荐 {item_count} 个产品："
 #: 空结果：自己的句子，不套列表头（与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径）；
 #: 措辞要**明确说清"没有放宽风险条件"**（F11 验收清单第 2 条）。同样保留「推荐」二字。
 T_WEALTH_EMPTY = "按您的风险等级没有可推荐的产品 —— 我没有放宽您的风险等级，您可以放宽期限或金额后再试。"

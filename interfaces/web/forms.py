@@ -33,7 +33,7 @@ def risk_form(questions: Mapping[str, tuple[str, tuple[str, ...]]]) -> dict[str,
     """
     answers: dict[str, int] = {}
     with st.container(border=True):
-        st.markdown("##### 📋 风险承受能力测评（5 题）")
+        st.markdown(f"##### 📋 风险承受能力测评（{len(questions)} 题）")
         st.caption("全部由代码计分，结果仅保存在本次会话中。未满 18 岁无法测评。")
         with st.form("risk-form", clear_on_submit=False):
             for key, (title, options) in questions.items():
