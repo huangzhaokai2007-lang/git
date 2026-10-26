@@ -116,8 +116,9 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict)
             st.rerun()
     visible = state["visible"].get(card_id, False)
     with columns[1]:
-        amount, button = st.columns([3, 2])
-        amount.text(f"{item['balance_yuan']} 元" if visible else "****** 元")
+        amount, button = st.columns([3, 2], gap=8, vertical_alignment="center")
+        amount.text(f"{item['balance_yuan']} 元" if visible else "****** 元",
+                    width="stretch", text_alignment="right")
         if button.button("隐藏" if visible else "显示", key=f"balance-{card_id}",
                          icon=":material/visibility:" if visible else ":material/visibility_off:",
                          help="隐藏余额" if visible else "显示余额"):
