@@ -24,7 +24,7 @@ import os
 import random
 import sqlite3
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 from data.db import TABLES, init_db, reset_db, transaction
@@ -218,17 +218,46 @@ def _month_drafts(index: int, rng: random.Random, prev_credit: int,
     return drafts, credit_cents
 
 
+def _ref_no(ts: str, account_id: str, seq: int) -> str:
+    """流水号（纯数字）：`YYYYMMDDHHMM` + 4 位账户内序号 + 账户位（1=储蓄 2=信用），全局不重号。"""
+    compact = ts[:16].replace("-", "").replace("T", "").replace(":", "")
+    return f"{compact}{seq:04d}{1 if account_id == SAVINGS_ID else 2}"
+
+
+#: 交易状态分布（F02 明细表）：绝大多数已完成；临近锚点的少量"待处理"（还没清算完），
+#: 少量"失败/退款"让状态列有信息量。
+#: **独立种子**的 Random（不扰动主流水的随机数序列），且**每次 finalize 现开一条流** ——
+#: 模块级单例会跨两次 seed 累积状态（`test_two_runs_are_row_by_row_identical` 当场抓到）。
+_PENDING_WINDOW = timedelta(days=7)
+
+
+def _status(ts: str, amount: int, rng: random.Random) -> str:
+    """一笔流水的交易状态：规则确定性分配（同一条流水永远同状态）。"""
+    roll = rng.random()
+    if date.fromisoformat(ts[:10]) > AS_OF - _PENDING_WINDOW and roll < 0.18:
+        return "pending"                       # 最近几天的交易可能还在清算
+    if roll < 0.035:
+        return "failed"
+    if amount < 0 and roll < 0.07:
+        return "refunded"                      # 支出后才谈得上退款
+    return "done"
+
+
 def _finalize(drafts: list[TxnDraft]) -> tuple[list[tuple], dict[str, int]]:
     """按 (ts, 生成顺序) 排列并逐笔累加得 balance_after；返回 (txn 行, 账户期末余额)。"""
     balances = dict(OPENING_BALANCES)
     seq: dict[str, int] = {}
     rows: list[tuple] = []
+    status_rng = random.Random(f"{SEED}:status")
     for _, draft in sorted(enumerate(drafts), key=lambda pair: (pair[1].ts, pair[0])):
         balances[draft.account_id] += draft.amount
         seq[draft.account_id] = seq.get(draft.account_id, 0) + 1
         rows.append((f"txn-{'s' if draft.account_id == SAVINGS_ID else 'c'}-{seq[draft.account_id]:04d}",
                      draft.account_id, draft.ts, draft.amount, "in" if draft.amount > 0 else "out",
-                     draft.counterparty, draft.category, draft.channel, draft.memo, balances[draft.account_id]))
+                     draft.counterparty, draft.category, draft.channel, draft.memo,
+                     balances[draft.account_id],
+                     _ref_no(draft.ts, draft.account_id, seq[draft.account_id]),
+                     _status(draft.ts, draft.amount, status_rng)))
     return rows, balances
 
 
@@ -265,7 +294,8 @@ def _write(conn: sqlite3.Connection, rows: list[tuple], balances: dict[str, int]
     counts["holding"] = _insert(conn, "holding", ("id", "user_id", "product_id", "amount", "purchase_date",
                                                  "status"), tuple((h[0], USER_ID, *h[1:]) for h in HOLDING_ROWS))
     counts["txn"] = _insert(conn, "txn", ("id", "account_id", "ts", "amount", "direction", "counterparty",
-                                          "category", "channel", "memo", "balance_after"), tuple(rows))
+                                          "category", "channel", "memo", "balance_after", "ref_no", "status"),
+                            tuple(rows))
     counts["audit_log"] = _insert(conn, "audit_log", ("id", "trace_id", "session_id", "ts", "actor", "intent",
                                                       "tool", "params_json", "risk_level", "permission_tier",
                                                       "result", "error_code"),

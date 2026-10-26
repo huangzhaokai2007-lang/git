@@ -109,7 +109,10 @@ def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch
 
     page = _text(at)
     assert "共查到" in page and "笔交易" in page                     # 真跑了 list_txn
-    assert "| 时间 | 交易对手 | 金额（元） | 分类 |" in page
+    #: 2026-10-26 二次验收：气泡只留头句，走势图与逐笔明细交给卡片（同一批数不印两遍）
+    assert insight_ui.CARD_MARK in page
+    assert "按日支出走势" in page and "逐笔明细" in page
+    assert "| 时间 | 交易对手 |" not in page
 
 
 def test_five_chat_queries_walk_all_five_tasks(monkeypatch: pytest.MonkeyPatch) -> None:

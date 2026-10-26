@@ -30,8 +30,10 @@ def _bulk_txn_rows(path: Path, count: int, ts: str = "2026-08-20T12:00:00") -> N
     """往僵尸窗口内的某个月灌 `count` 笔流水（直接写库，用于触发/验证单窗上限兜底）。"""
     write_sql(path, [
         ("INSERT INTO txn (id, account_id, ts, amount, direction, counterparty, category, channel,"
-         " memo, balance_after) VALUES (?, ?, ?, -100, 'out', '灌水订阅商户', '订阅', '代扣', NULL, 0)",
-         (f"txn-overflow-{index:04d}", SAVINGS_ID, ts)) for index in range(count)])
+         " memo, balance_after, ref_no)"
+         " VALUES (?, ?, ?, -100, 'out', '灌水订阅商户', '订阅', '代扣', NULL, 0, ?)",
+         (f"txn-overflow-{index:04d}", SAVINGS_ID, ts, f"202608201200{index:04d}1"))
+        for index in range(count)])
 
 
 def test_t10_zombie_window_within_the_dao_page_cap(seeded: Path) -> None:
