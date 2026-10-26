@@ -1,0 +1,145 @@
+"""「高级感」UI 组件（纯展示层，**不含任何业务判定**）。
+
+三件事：
+1. `pipeline()`：把本轮状态机的路径摊开 —— 让「等」变成「看得见的推理」；
+2. `evidence()`：确认卡下的「依据」折叠面板 —— 为什么是这一档，逐条列限额/额度/因子；
+3. `examples()` / `toast_for()` / `inject_css()`：示例胶囊、成功微反馈、卡片入场动效。
+
+数据来源一律是 `Turn` 与 `Confirmation.evidence`（由工具层事实包带入），界面不派生数字。
+"""
+
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+import streamlit as st
+
+#: 状态 → (图标, 中文)。没列到的状态原样显示，不猜。
+STATE_CN = {
+    "IDLE": ("💤", "待命"),
+    "CLASSIFY": ("🧠", "理解意图"),
+    "SLOT_FILL": ("🎯", "解析收款人 / 补槽"),
+    "CLARIFY": ("❓", "追问"),
+    "PRECHECK": ("🛡", "核对额度与档位"),
+    "CONFIRM_CARD": ("🧾", "生成确认卡"),
+    "PENDING_REVIEW": ("🕓", "转人工复核"),
+    "EXECUTE": ("⚙", "执行"),
+    "VERIFY_NUMBERS": ("🔍", "数字校验"),
+    "REPLY": ("💬", "回执"),
+    "AUDIT": ("📝", "写审计"),
+    "REFUSE": ("🚫", "拒绝"),
+}
+
+#: 事实包键 → 人话（依据面板用；只列有意义的几个）
+EVIDENCE_LABELS = (
+    ("limits_single_max_yuan", "单笔转账上限"),
+    ("limits_daily_remaining_yuan", "今日剩余额度"),
+    ("whitelist_quota", "白名单专属额度（分）"),
+    ("quota_remaining_yuan", "白名单额度剩余"),
+    ("remaining_quota_yuan", "白名单额度剩余"),
+    ("amount_yuan", "本笔金额"),
+    ("tier", "结论档位"),
+)
+
+CSS = """
+<style>
+/* 卡片入场：新出现的卡片轻微上浮 + 淡入（180ms，金融产品里"顺手"的来源） */
+@keyframes dsh-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+div[data-testid="stVerticalBlockBorderWrapper"] { animation: dsh-rise .18s ease-out both; }
+/* 金额一律等宽数字，纵向对齐（避免数字跳动时宽度抖动） */
+.dsh-num, table, [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
+/* 管线条：一行紧凑的「步骤 → 步骤」 */
+.dsh-pipe { font-size: .82rem; color: #9aa0ac; margin: .1rem 0 .4rem 0; letter-spacing: .2px; }
+.dsh-pipe b { color: #d1d4dc; font-weight: 600; }
+.dsh-pipe .dim { opacity: .55; }
+/* 卡头：左侧色条标语义（成功/等待/危险/草稿） */
+.dsh-head { border-left: 3px solid #6667C9; padding: .1rem 0 .1rem .6rem; margin-bottom: .35rem; }
+.dsh-head .t { font-size: 1.02rem; font-weight: 650; color: #E6E8EE; }
+.dsh-head .s { font-size: .78rem; color: #9aa0ac; margin-top: .1rem; }
+.dsh-tone-ok { border-left-color: #22C55E; }
+.dsh-tone-warn { border-left-color: #F59E0B; }
+.dsh-tone-danger { border-left-color: #EF4444; }
+.dsh-tone-draft { border-left-color: #6B7280; }
+</style>
+"""
+
+_TONE = {"ok": "dsh-tone-ok", "warn": "dsh-tone-warn", "danger": "dsh-tone-danger",
+         "draft": "dsh-tone-draft"}
+
+
+def inject_css() -> None:
+    """注入一次（幂等：Streamlit 每次 rerun 会重渲染，重复注入无害）。"""
+    st.markdown(CSS, unsafe_allow_html=True)
+
+
+def card_head(title: str, subtitle: str = "", tone: str = "") -> None:
+    """统一的卡头：左色条 + 标题 + 副标题（收款人卡/确认卡共用一套观感）。"""
+    cls = _TONE.get(tone, "")
+    sub = f'<div class="s">{subtitle}</div>' if subtitle else ""
+    st.markdown(f'<div class="dsh-head {cls}"><div class="t">{title}</div>{sub}</div>',
+                unsafe_allow_html=True)
+
+
+def pipeline(turn: Any) -> None:
+    """把本轮状态机的路径摊成一行：`🧠 理解意图 → 🎯 解析 → 🛡 定档 → 🧾 确认卡`。
+
+    只展示 `Turn.states` 里**真实经过**的状态（跳过 IDLE/AUDIT 这类噪声），
+    再加意图与档位 —— 这行同时是「五层架构在跑」的现场证据。
+    """
+    if turn is None:
+        return
+    states = [s for s in (getattr(turn, "states", None) or []) if s in STATE_CN and s != "IDLE"]
+    if not states:
+        return
+    parts = []
+    for state in states[-6:]:
+        icon, label = STATE_CN[state]
+        parts.append(f"{icon} {label}")
+    head = f"<b>{getattr(turn, 'intent', '') or '—'}</b>"
+    tier = getattr(turn, "tier", None)
+    if tier:
+        head += f" · 档位 <b>{tier}</b>"
+    st.markdown(f'<div class="dsh-pipe">{head} ｜ {" → ".join(parts)}</div>',
+                unsafe_allow_html=True)
+
+
+def evidence(confirmation: Any) -> None:
+    """确认卡下的「依据」折叠面板：为什么是这一档，逐条摊开（纯展示）。"""
+    facts: Mapping = getattr(confirmation, "evidence", None) or {}
+    rows: list[tuple[str, str]] = []
+    for key, label in EVIDENCE_LABELS:
+        if key in facts and facts[key] not in (None, ""):
+            rows.append((label, str(facts[key])))
+    factors = facts.get("factors")
+    if isinstance(factors, (list, tuple)) and factors:
+        rows.append(("命中因子", "、".join(str(f) for f in factors)))
+    if not rows:
+        return
+    with st.expander("▸ 依据：为什么是这个档位", expanded=False):
+        st.caption("以下数字全部来自工具层事实包（不是模型生成的）。")
+        for label, value in rows:
+            st.markdown(f"- {label}：`{value}`")
+        st.caption(f"判定：{'需要短信验证码' if getattr(confirmation, 'requires_otp', False) else '免验证码'}"
+                   f"（档位 {getattr(confirmation, 'tier', '—')}）")
+
+
+def toast_for(turn: Any) -> None:
+    """执行结果微反馈（成功/失败各一句）；只读回合不打扰。"""
+    if turn is None:
+        return
+    if getattr(turn, "executed", False) and not getattr(turn, "error_code", None):
+        st.toast("操作已完成", icon="✅")
+    elif getattr(turn, "error_code", None):
+        st.toast("这次没办成，看下面的说明", icon="⚠️")
+
+
+EXAMPLES = ("查一下余额", "给房东转 100 元", "向王五和赵六 AA 收款 300 元", "我的收款人有哪些")
+
+
+def examples() -> str | None:
+    """空会话时的示例胶囊：点一下就等于说那句话（新手 3 秒上手，录屏好看）。"""
+    if st.session_state.get("messages"):
+        return None
+    st.caption("可以这样说（点一下试试）：")
+    picked = st.pills("示例指令", EXAMPLES, key="premium-examples", label_visibility="collapsed")
+    return picked or None

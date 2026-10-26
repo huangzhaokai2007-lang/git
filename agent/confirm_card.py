@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import Field, BaseModel, ConfigDict
 
 from guard import permission
 from guard.permission import L3_DELAY_SECONDS
@@ -187,6 +187,9 @@ class Confirmation(BaseModel):
     #: 出卡那一轮的 trace_id —— 「一笔业务 = 一个 trace」，确认/执行沿用同一条，
     #: 审计回放（T52）才能把整条链摊开（2026-10-24 追加）。
     trace_id: str = ""
+    #: 出卡时的事实包快照（限额/额度/因子/档位）—— 供界面渲染「依据」面板，
+    #: 让用户看到档位**是算出来的**（2026-10-25 追加，纯展示，不参与任何判定）。
+    evidence: dict = Field(default_factory=dict)
     card_text: str = ""
     #: SLOT_FILL 补齐后的槽位快照，供描述符的 `execute` 取用（card-24 泛化后的补充）。
     #: **为什么需要它**：`target_id` 只装得下单主键 —— T9 `create_aa_request(payee_ids, amount)`
