@@ -40,7 +40,8 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money, _money_facts, _ok, _owned_account_ids, current_user_id,
     require_owned, set_current_user, set_session_id, current_session_id,
 )
-from tools._transfer_risk import (  # noqa: F401 —— 末行 apply_whitelist_quota 起别名 _quota
+from tools._transfer_risk import (  # noqa: F401 —— 末两行是白名单额度相关的两个入口
+    whitelist_quota_exempt as _quota_exempt,
     L1_MAX_CENTS, SINGLE_TX_MAX_CENTS, DAILY_MAX_CENTS, NIGHT_START_HOUR, VELOCITY_MINUTES_WRITE,
     VELOCITY_MIN_WRITES, AMOUNT_JUMP_RATIO, HISTORY_DAYS, TIER_ORDER, OTP_TIERS, _today_out_flows,
     _history_mean_cents, _factors, _assess, _limits, NIGHT_END_HOUR, apply_whitelist_quota as _quota,
@@ -130,8 +131,12 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
         return _dao_reject(exc)
 
     fee = 0                                                     # 规格未定义手续费口径（见文件头）
-    if amount > SINGLE_TX_MAX_CENTS:
-        return _fail(ErrorCode.OVER_LIMIT, "超过单笔转账上限")
+    #: 2026-10-26：白名单额度内**不受单笔上限约束**（额度即该收款人的天花板）。
+    #: 判定来自工具层（同一函数也用于执行阶段），避免「卡面能过、执行报错」。
+    exempt = _quota_exempt(payee, amount)
+    if amount > SINGLE_TX_MAX_CENTS and not exempt:
+        return _fail(ErrorCode.OVER_LIMIT,
+                     "超过单笔转账上限（把对方加入白名单并设额度后可突破此限）")
     if limits["daily_used"] + amount > limits["daily_max"]:
         return _fail(ErrorCode.OVER_LIMIT, "超过单日累计转账上限")
     if account["balance"] < amount + fee:
@@ -143,7 +148,9 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
     token = f"pt_{uuid.uuid4().hex}"
     trace_id = f"trace-{uuid.uuid4().hex[:12]}"
     limits_yuan = {f"limits_{key}_yuan": _money(value) for key, value in limits.items()}
-    facts = {"payee_id": payee["id"], "payee_name": payee["name"], "tier": judged["tier"],
+    facts = {"payee_id": payee["id"], "payee_name": payee["name"],
+             "single_max_exempt": bool(exempt),   # 白名单额度内 → 不受单笔上限
+             "tier": judged["tier"],
              "requires_otp": judged["requires_otp"], "factors": judged["factors"],
              "factor_count": len(judged["factors"]), "escalation": judged["escalation"],
              "to_human": judged["to_human"],
@@ -210,7 +217,10 @@ def _execute_locked(preview_token: str, otp: str | None) -> ToolResult:
         if account is None or account["id"] != account_id or account["user_id"] != current_user_id():
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
         limits = _restrict_card_daily(_limits(_today_out_flows(_now())), account_id)
-        if amount > SINGLE_TX_MAX_CENTS or limits["daily_used"] + amount > limits["daily_max"]:
+        payee_row = dao.get_payee(token["payee_id"]) if token.get("payee_id") else None
+        exempt = _quota_exempt(payee_row, amount)               # 与预检同一口径
+        if (amount > SINGLE_TX_MAX_CENTS and not exempt) \
+                or limits["daily_used"] + amount > limits["daily_max"]:
             return _fail(ErrorCode.OVER_LIMIT, "超过转账限额")
         if account["balance"] < amount + token["fee"]:
             return _fail(ErrorCode.INSUFFICIENT_FUNDS, "储蓄账户余额不足")
