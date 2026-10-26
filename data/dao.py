@@ -42,7 +42,6 @@ from data._dao_core import (
     _iso_date,
     _json_text,
     _many,
-    _new_ref_no,
     _one,
     _period_range,
     _stamp,
@@ -180,20 +179,21 @@ def insert_txn(account_id: str, ts: str, amount: int, direction: str, balance_af
                channel: str | None = None, memo: str | None = None, id: str | None = None,
                payee_id: str | None = None) -> dict:  # payee_id：v2 转账域回填，额度按 id 聚合
     """写一条流水（整数分；`in` 必须为正、`out` 必须为负），返回写入后整行。
-    `balance_after` 由**调用方**算好；`memo` 是不可信文本、原样入库（铁律 7）；`id` 缺省自动生成、传了即作为幂等键（流水号由它派生，重放同号）。
+    `balance_after` 由**调用方**算好；`memo` 是不可信文本、原样入库（铁律 7）；`id` 缺省自动生成、传了即作为幂等键。
     """
-    if (cents := _cents(amount, "amount")) == 0:
+    cents = _cents(amount, "amount")
+    if cents == 0:
         raise ValueError("amount 不能为 0（DDL：正=入账 负=出账）")
-    way, moment = _choice(direction, "direction", DIRECTIONS), _stamp(ts)
+    way = _choice(direction, "direction", DIRECTIONS)
     if (way == "in") != (cents > 0):
         raise ValueError(f"direction={way!r} 与 amount={cents} 符号不一致")
     values = (str(_text(id, "id")) if id is not None else f"txn_{uuid.uuid4().hex[:12]}",
-              _text(account_id, "account_id"), moment, cents, way,
+              _text(account_id, "account_id"), _stamp(ts), cents, way,
               _text(counterparty, "counterparty", allow_none=True),
               _text(category, "category", allow_none=True),
               _text(channel, "channel", allow_none=True),
               _text(memo, "memo", allow_none=True), _cents(balance_after, "balance_after"),
-              _new_ref_no(moment, str(id or "")), _text(payee_id, "payee_id", allow_none=True))
+              _text(payee_id, "payee_id", allow_none=True))
     return _insert("txn", _TXN_COLUMNS, values, str(values[0]), skip_ts=ts is None)
 
 

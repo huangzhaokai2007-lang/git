@@ -263,10 +263,6 @@ def test_no_real_pii_or_full_card_numbers(conn: sqlite3.Connection) -> None:
         for row in rows(conn, table):
             for column, value in row.items():
                 if isinstance(value, str):
-                    #: `ref_no` 是**流水号**（业务参考号，本就是一长串数字）—— 它长得像卡号，
-                    #: 但那是真银行流水号的样子；这条红线防的是"把真卡号写进合成数据"，不是防流水号。
-                    if column == "ref_no":
-                        continue
                     assert not LONG_DIGITS.search(value), f"{table}.{column}={value}"
     assert PHONE_MASK.fullmatch(rows(conn, "user")[0]["phone"])
 

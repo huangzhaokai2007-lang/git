@@ -117,10 +117,9 @@ def foreign(seeded: Path) -> Path:
                          " VALUES (?, ?, 'savings', ?, ?, 'active')",
                          (FOREIGN_ACCOUNT, FOREIGN_USER, FOREIGN_AMOUNT, FOREIGN_AMOUNT))
             conn.execute("INSERT INTO txn (id, account_id, ts, amount, direction, counterparty,"
-                         " category, channel, memo, balance_after, ref_no)"
-                         " VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, ?, ?)",
+                         " category, channel, memo, balance_after) VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, ?)",
                          (FOREIGN_TXN, FOREIGN_ACCOUNT, "2026-08-10T10:00:00", -FOREIGN_AMOUNT,
-                          "他人的商户", "餐饮", "卡", "他人的备注", 0, "20260810100000012"))
+                          "他人的商户", "餐饮", "卡", "他人的备注", 0))
             conn.execute("INSERT INTO card (id, user_id, account_id, card_no_mask, type,"
                          " single_limit, daily_limit, status) VALUES (?, ?, ?, ?, 'savings', ?, ?, ?)",
                          (FOREIGN_CARD, FOREIGN_USER, FOREIGN_ACCOUNT, "6222 **** **** 9999", 1, 1, "normal"))
@@ -293,11 +292,6 @@ def set_today_flows(path: Path, day: str, rows: list[tuple[str, int]]) -> None:
     """
     write_sql(path, [("DELETE FROM txn WHERE substr(ts, 1, 10) = ?", (day,))] + [
         ("INSERT INTO txn (id, account_id, ts, amount, direction, counterparty, category, channel,"
-         # `ref_no` 是 NOT NULL 且**无默认值**（`status` 有默认 'done' 可以省），漏它会让
-         # 依赖本 fixture 的用例整片报 `IntegrityError` —— 这些失败看起来像被测代码的锅，
-         # 实际是测试数据没跟上 schema。格式对齐 `data/seed._ref_no`：时间戳 + 4 位序号 + 账户位。
-         " memo, balance_after, ref_no) VALUES (?, ?, ?, ?, 'out', '灌水商户', '餐饮', '二维码', NULL, 0,"
-         " ?)",
-         (f"txn-fill-{index:03d}", SAVINGS_ID, ts, cents,
-          f"{ts[:16].replace('-', '').replace('T', '').replace(':', '')}{index:04d}1"))
+         " memo, balance_after) VALUES (?, ?, ?, ?, 'out', '灌水商户', '餐饮', '二维码', NULL, 0)",
+         (f"txn-fill-{index:03d}", SAVINGS_ID, ts, cents))
         for index, (ts, cents) in enumerate(rows)])

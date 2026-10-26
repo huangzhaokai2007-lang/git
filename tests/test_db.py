@@ -21,7 +21,7 @@ SPEC_PATH = REPO_ROOT / "docs" / "01-接口规格.md"
 EXPECTED_COLUMN_COUNTS: dict[str, int] = {
     "user": 4,
     "account": 6,
-    "txn": 13,          # v2：+payee_id（按收款人算白名单额度，不按名字）；F02：+ref_no / status
+    "txn": 11,          # v2：+payee_id（按收款人算白名单额度，不按名字）
     "card": 9,
     "subscription": 8,
     "wealth_product": 6,
@@ -182,8 +182,8 @@ def test_reset_db_leaves_all_tables_empty(db_path: Path) -> None:
                 " VALUES ('a1','u1','savings',123456,123456,'active')"
             )
             connection.execute(
-                "INSERT INTO txn (id, account_id, ts, amount, direction, balance_after, ref_no)"
-                " VALUES ('t1','a1','2026-08-01T12:00:00',-100,'out',123356,'20260801120000011')"
+                "INSERT INTO txn (id, account_id, ts, amount, direction, balance_after)"
+                " VALUES ('t1','a1','2026-08-01T12:00:00',-100,'out',123356)"
             )
         assert row_counts(connection)["txn"] == 1
     finally:
