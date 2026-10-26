@@ -12,6 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
+import premium_ui  # noqa: E402 —— 统一卡头观感
 
 from agent import aa_flow, confirm_card, write_flow
 
@@ -37,7 +38,8 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     items = executor.submit(aa_flow.active).result()
     if not items:
         return
-    st.markdown(f"##### 🧾 进行中的 AA（{len(items)} 笔）")
+    premium_ui.card_head(f"🧾 进行中的 AA（{len(items)} 笔）",
+                     "24 小时内有效；可登记已付 / 提醒 / 撤销", tone="")
     for item in items:
         request_id = str(item["request_id"])
         left, cancel_btn = st.columns([4, 1], vertical_alignment="center")

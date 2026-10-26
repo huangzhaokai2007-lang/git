@@ -270,6 +270,8 @@ def _chat_page() -> None:
     _render_confirm()
     premium_ui.pipeline(st.session_state["turns"][-1]["turn"]
                         if st.session_state.get("turns") else None)
+    if st.session_state.get("turns"):
+        premium_ui.trace_footer(st.session_state["turns"][-1]["turn"])
     if (picked := premium_ui.examples()) is not None:      # 空会话示例胶囊
         _ask(picked)
         st.rerun()

@@ -10,6 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
+import premium_ui  # noqa: E402 —— 统一卡头观感
 
 from agent import confirm_card, gift_flow, write_flow
 
@@ -35,7 +36,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """渲染送礼查询卡；没有订单就不画。"""
     if not executor.submit(gift_flow.orders).result():
         return
-    st.markdown("##### 🎁 送礼订单")
+    premium_ui.card_head("🎁 送礼订单", "未发货可取消；支付才真扣款", tone="ok")
     picked = st.radio("筛选", list(_FILTERS), horizontal=True, key="gift-filter",
                       label_visibility="collapsed")
     items = executor.submit(gift_flow.orders, _FILTERS[picked]).result()
