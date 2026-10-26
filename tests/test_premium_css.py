@@ -20,15 +20,18 @@ import premium_css                                                 # noqa: E402
 
 def test_key_animations_are_present() -> None:
     css = premium_css.CSS
-    for keyframe in ("dsh-rise", "dsh-row", "dsh-flash", "dsh-bar", "dsh-alert" if False else "dsh-slide",
-                     "dsh-step"):
+    #: 2026-10-26：`dsh-row`（表格逐行淡入）已移除 —— 回执是打字机式逐字渲染，
+    #: 行级动画会随每次刷新反复触发，看起来在抖（用户实测"生硬/闪一下"）。
+    for keyframe in ("dsh-rise", "dsh-flash", "dsh-bar", "dsh-slide", "dsh-step"):
         assert f"@keyframes {keyframe}" in css, f"缺少动画：{keyframe}"
+    assert "@keyframes dsh-row" not in css, "表格行淡入会让打字机回执抖动，不应存在"
 
 
 def test_targets_cards_tables_numbers_widgets() -> None:
     css = premium_css.CSS
     assert 'data-testid="stVerticalBlockBorderWrapper"' in css     # 卡片
-    assert 'data-testid="stMarkdownContainer"' in css              # 表格
+    assert 'data-testid="stMarkdownContainer"' in css              # 表格（裸 markdown）
+    assert 'stChatMessage"] table' in css                        # 表格（聊天回执里）
     assert 'data-testid="stMetricValue"' in css                    # 数字
     assert 'data-testid="stProgress"' in css                       # 进度条
     assert ".stButton > button" in css                             # 按钮

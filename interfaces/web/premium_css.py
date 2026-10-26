@@ -12,13 +12,14 @@ from __future__ import annotations
 
 #: 卡片入场 + 悬停 + 语义色条
 CARD_CSS = """
-@keyframes dsh-rise { from { opacity: 0; transform: translateY(8px) scale(.995); }
-                      to   { opacity: 1; transform: none; } }
+/* 只动 transform、不动 opacity：Streamlit 重渲染替换 DOM 时，opacity 动画会「闪一下」。 */
+@keyframes dsh-rise { from { transform: translateY(6px) scale(.997); }
+                      to   { transform: none; } }
 @keyframes dsh-glow { 0%,100% { box-shadow: 0 0 0 0 rgba(102,103,201,0); }
                       50%     { box-shadow: 0 0 0 3px rgba(102,103,201,.18); } }
 /* 任何带边框的容器（我们的"卡片"）入场 */
 div[data-testid="stVerticalBlockBorderWrapper"] {
-  animation: dsh-rise .18s ease-out both;
+  animation: dsh-rise .14s ease-out both;
   transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
 }
 div[data-testid="stVerticalBlockBorderWrapper"]:hover {
@@ -48,8 +49,9 @@ div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapp
 
 #: 表格：行入场错峰 / hover 高亮 / 表头吸顶 / 数字等宽右对齐
 TABLE_CSS = """
-@keyframes dsh-row { from { opacity: 0; transform: translateX(-4px); } to { opacity: 1; transform: none; } }
-div[data-testid="stMarkdownContainer"] table {
+div[data-testid="stMarkdownContainer"] table,
+div[data-testid="stChatMessage"] table,
+div[data-testid="stChatMessage"] div[data-testid="stMarkdownContainer"] table {
   border-collapse: separate; border-spacing: 0; width: 100%;
   font-variant-numeric: tabular-nums; font-size: .86rem;
   border: 1px solid #2C2D33; border-radius: 10px; overflow: hidden;
@@ -63,11 +65,7 @@ div[data-testid="stMarkdownContainer"] tbody td {
   padding: .45rem .6rem; border-bottom: 1px solid rgba(44,45,51,.6);
   transition: background-color .12s ease;
 }
-div[data-testid="stMarkdownContainer"] tbody tr { animation: dsh-row .16s ease-out both; }
-div[data-testid="stMarkdownContainer"] tbody tr:nth-child(2) { animation-delay: .03s; }
-div[data-testid="stMarkdownContainer"] tbody tr:nth-child(3) { animation-delay: .06s; }
-div[data-testid="stMarkdownContainer"] tbody tr:nth-child(4) { animation-delay: .09s; }
-div[data-testid="stMarkdownContainer"] tbody tr:nth-child(5) { animation-delay: .12s; }
+/* 注意：回执是**打字机式**逐字渲染的，行级淡入会随每次刷新反复触发 → 看起来在抖，故不做。 */
 div[data-testid="stMarkdownContainer"] tbody tr:nth-child(even) { background: rgba(255,255,255,.015); }
 div[data-testid="stMarkdownContainer"] tbody tr:hover { background: rgba(102,103,201,.10); }
 div[data-testid="stMarkdownContainer"] tbody tr:last-child td { border-bottom: none; }
