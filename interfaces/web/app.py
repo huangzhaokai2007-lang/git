@@ -36,6 +36,7 @@ import aa_card_ui                                               # noqa: E402  �
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
 import activity_ui                                              # noqa: E402  （main：活动流）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
+from agent import demo_info                                     # noqa: E402  （T53：演示预设）
 
 load_dotenv(ROOT / ".env")
 
@@ -304,6 +305,7 @@ def main() -> None:
     st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
     st.markdown(ui.load_css(), unsafe_allow_html=True)
     premium_ui.inject_css()                                 # 卡片入场 / 等宽数字 / 卡头色条
+    premium_ui.presets_panel(demo_info.presets())           # 侧边栏：演示预设（卡号/密码/收款人）
     if not _ensure_db():
         return
     if not st.get_option('global.appTest'):
