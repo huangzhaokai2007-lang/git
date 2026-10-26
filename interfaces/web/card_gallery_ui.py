@@ -79,9 +79,9 @@ def styles() -> None:
     st.markdown(CSS, unsafe_allow_html=True)
 
 
-def face(item: dict) -> bool:
+def face(item: dict, *, on_click=None) -> bool:
     return st.button(item['card_no_mask'], key=f"detail-{item['card_id']}",
-                     help='点击卡片查看详情', width='stretch')
+                     help='点击卡片查看详情', width='stretch', on_click=on_click)
 
 
 def deck(items: list[dict], selected: str | None, render_card, revision: int = 0) -> None:

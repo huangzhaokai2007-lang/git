@@ -95,13 +95,13 @@ def _select(executor: ThreadPoolExecutor, card_id: str, state: dict) -> None:
         else:
             for index in reversed(matching[1:]):
                 messages.pop(index)
-    st.rerun()
+    # Button callbacks run before the page renders, so the gallery marker and
+    # details agree on the first render instead of briefly restoring the deck.
 
 
 def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict) -> None:
     card_id = item["card_id"]
-    if gallery_ui.face(item):
-        _select(executor, card_id, state)
+    gallery_ui.face(item, on_click=lambda: _select(executor, card_id, state))
     st.caption('点击卡片查看详情')
     columns = st.columns([1, 2], vertical_alignment='center')
     with columns[0].container(horizontal=True, vertical_alignment='center'):
@@ -116,8 +116,9 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict, state: dict)
             st.rerun()
     visible = state["visible"].get(card_id, False)
     with columns[1]:
-        amount, button = st.columns([3, 2])
-        amount.text(f"{item['balance_yuan']} 元" if visible else "****** 元")
+        amount, button = st.columns([3, 2], gap=8, vertical_alignment="center")
+        amount.text(f"{item['balance_yuan']} 元" if visible else "****** 元",
+                    width="stretch", text_alignment="right")
         if button.button("隐藏" if visible else "显示", key=f"balance-{card_id}",
                          icon=":material/visibility:" if visible else ":material/visibility_off:",
                          help="隐藏余额" if visible else "显示余额"):
@@ -166,10 +167,14 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
     st.markdown(result["summary"])
     st.caption("此卡关联账户余额；信用卡余额与授信额度分别展示。")
     visible = state["detail_balance"]
-    st.text(f"{result['data']['balance_yuan']} 元" if visible else "****** 元")
-    if st.button("隐藏详情余额" if visible else "显示详情余额", key="detail-balance"):
-        state["detail_balance"] = not visible
-        st.rerun()
+    with st.container(horizontal=True, vertical_alignment='center', width='content', wrap=False,
+                      gap='small', key='detail-balance-row'):
+        st.text(f"{result['data']['balance_yuan']} 元" if visible else "****** 元")
+        if st.button('', key='detail-balance', type='tertiary', width=28,
+                     icon=':material/visibility:' if visible else ':material/visibility_off:',
+                     help='隐藏余额' if visible else '显示余额'):
+            state["detail_balance"] = not visible
+            st.rerun()
     _reveal(executor, session_id, state)
     if st.button("关闭详情", key="detail-close"):
         state['detail_revision'] = state.get('detail_revision', 0) + 1

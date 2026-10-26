@@ -36,6 +36,25 @@ def test_close_focus_restores_gallery_and_clears_sensitive_detail(monkeypatch, s
     assert '****** 元' in [item.value for item in at.text]
 
 
+def test_card_click_never_renders_previous_gallery_selection(monkeypatch, seeded):
+    at = app(monkeypatch, seeded)
+    import card_gallery_ui
+
+    click(at, '管卡')
+    bind(at)
+    selections = []
+    original = card_gallery_ui.deck
+
+    def record(items, selected, render_card, revision=0):
+        selections.append(selected)
+        return original(items, selected, render_card, revision)
+
+    monkeypatch.setattr(card_gallery_ui, 'deck', record)
+    click(at, '6222 **** **** 0001')
+    assert not at.exception
+    assert selections and all(selected == CARD for selected in selections)
+
+
 def test_reopening_same_card_does_not_repeat_detail_chat_message(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     click(at, '管卡')
