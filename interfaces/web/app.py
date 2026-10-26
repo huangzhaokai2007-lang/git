@@ -35,6 +35,7 @@ import schedule_card_ui                                         # noqa: E402  �
 import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
 import activity_ui                                              # noqa: E402  （main：活动流）
+import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
 
 load_dotenv(ROOT / ".env")
 
@@ -115,6 +116,7 @@ def _ask(text: str, *, display: str | None = None) -> None:
     locks_ui.accept_turn(_agent_executor(), state["session_id"], turn.ask)
     import scene_ui
     scene_ui.accept(_agent_executor(), state["session_id"], turn)
+    premium_ui.toast_for(turn)                    # 成功/失败微反馈（只读回合不打扰）
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
@@ -266,6 +268,11 @@ def _chat_page() -> None:
     #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
     #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
     _render_confirm()
+    premium_ui.pipeline(st.session_state["turns"][-1]["turn"]
+                        if st.session_state.get("turns") else None)
+    if (picked := premium_ui.examples()) is not None:      # 空会话示例胶囊
+        _ask(picked)
+        st.rerun()
     if (text := st.chat_input("")) and text.strip():
         _ask(text)
         st.rerun()
@@ -294,6 +301,7 @@ def _pull_bills() -> None:
 def main() -> None:
     st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
     st.markdown(ui.load_css(), unsafe_allow_html=True)
+    premium_ui.inject_css()                                 # 卡片入场 / 等宽数字 / 卡头色条
     if not _ensure_db():
         return
     if not st.get_option('global.appTest'):

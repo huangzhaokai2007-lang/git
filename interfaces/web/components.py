@@ -147,6 +147,15 @@ def _aa_table(confirmation: Any) -> None:
     st.markdown(f"**每人应收（{mode}）**\n\n| 收款人 | 应收金额（元） |\n| --- | --- |\n{rows}")
 
 
+def _evidence(confirmation: Any) -> None:
+    """确认卡的「依据」面板（实现在 `premium_ui`；单测按路径加载本模块时优雅跳过）。"""
+    try:
+        import premium_ui
+    except ModuleNotFoundError:
+        return
+    premium_ui.evidence(confirmation)
+
+
 def confirm_card(confirmation: Any) -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     intent = str(confirmation.intent)
@@ -173,6 +182,7 @@ def confirm_card(confirmation: Any) -> str | None:
             _aa_table(confirmation)
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")
+        _evidence(confirmation)                       # 「依据：为什么是这个档位」
         left, right, _rest = st.columns([1, 1, 3])
         if left.button("✅ 确认", type="primary", key="confirm-ok", width="stretch"):
             return "confirm"

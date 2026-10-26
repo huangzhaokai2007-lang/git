@@ -256,7 +256,8 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
         amount_yuan=str(prepared.facts.get("amount_yuan") or ""),
         amount_cents=context["amount_cents"], tier=verdict.tier,
         requires_otp=verdict.requires_otp, card_text=card_text, filled=dict(filled),
-        trace_id=str(context.get("trace_id") or "")))
+        trace_id=str(context.get("trace_id") or ""),
+        evidence=dict(prepared.facts or {})))     # 依据面板：限额/额度/因子的快照
     return Step(states=["CONFIRM_CARD"], result="pending_confirm", intent=context["intent"],
                 tier=verdict.tier, reply=card_text, ask=card_text, degraded=degraded)
 
