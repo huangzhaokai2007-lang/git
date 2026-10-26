@@ -18,8 +18,13 @@ class Element {
     } };
   }
   setAttribute(key, value) { this.attrs[key] = value; if (key === 'class') this.className = value; }
-  append(...nodes) { this.children.push(...nodes); }
-  replaceChildren(...nodes) { this.children = nodes; }
+  getAttribute(key) { return this.attrs[key]; }
+  append(...nodes) { nodes.forEach(n => { n.parent = this; }); this.children.push(...nodes); }
+  replaceChildren(...nodes) { this.children = []; this.append(...nodes); }
+  contains(node) { return walk(this).includes(node); }
+  querySelector(selector) { return byClass(this, selector.slice(1))[0] || null; }
+  remove() { if (this.parent) this.parent.children = this.parent.children.filter(n => n !== this); }
+  focus() { context.document.activeElement = this; }
 }
 const walk = root => [root, ...root.children.flatMap(walk)];
 const byClass = (root, cls) => walk(root).filter(node => node.className.split(' ').includes(cls));
@@ -30,6 +35,7 @@ const context = {
   document: { createElement: tag => new Element(tag), createElementNS: (_, tag) => new Element(tag) },
   window: { matchMedia: () => ({ matches: reduced }) },
   sessionStorage: { getItem: key => storage.get(key), setItem: (key, value) => storage.set(key, value) },
+  requestAnimationFrame: callback => callback(),
   IntersectionObserver: class {
     constructor(callback, options) { this.callback = callback; this.options = options; observers.push(this); }
     observe(root) { this.root = root; this.connected = true; }
@@ -40,7 +46,9 @@ vm.createContext(context);
 const source = fs.readFileSync('interfaces/web/spending_pie.js', 'utf8');
 vm.runInContext(source.replace('export default function', 'function render') + '\nthis.render = render;', context);
 const root = new Element('section');
-const mount = data => context.render({ parentElement: { querySelector: () => root }, data });
+const events = [];
+const mount = data => context.render({ parentElement: { querySelector: () => root }, data,
+  setStateValue: (key, value) => events.push({ key, value }) });
 const data = { animation_id: 'reply-1', total: '9,152.00', groups: [
   { key: '电商', amount_yuan: '4,370.00', pct: 48 },
   { key: '<img onerror=alert(1)>', amount_yuan: '52.00', pct: 0 },
@@ -79,4 +87,35 @@ mount({ animation_id: 'single', groups: [{ key: '餐饮', amount_yuan: '1.00', p
 assert.equal(root.dataset.phase, 'done');
 assert.equal(byClass(root, 'bank-pie-slice')[0].tagName, 'circle', 'one category fills a complete circle');
 assert.equal(observers.length, 1, 'reduced motion must skip animation observers');
+mount(data);
+byClass(root, 'bank-pie-slice')[0].onclick();
+assert.equal(events.at(-1).key, 'selected');
+assert.equal(events.at(-1).value, '电商');
+const detail = { ok: true, count: 8, amount_yuan: '4,370.00', items: Array.from({ length: 8 }, (_, i) => ({
+  id: `txn-${i}`, ts: '2026-08-05T12:00:00', counterparty: '<img onerror=alert(1)>',
+  channel: '卡', amount_yuan: '-546.25', memo: '订单说明' })) };
+mount({ ...data, selected: '电商', detail });
+assert.equal(byClass(root, 'bank-pie-ledger').length, 1);
+assert.equal(byClass(root, 'bank-pie-txn').length, 8, 'every returned transaction stays available for scrolling');
+assert(!walk(root).some(node => node.tagName === 'img'), 'transaction labels must also be safe text');
+assert.equal(byClass(root, 'bank-pie-slice')[0].attrs['aria-pressed'], 'true');
+const legendNow = byClass(root, 'bank-pie-legend')[0];
+let prevented = false;
+legendNow.children[1].onkeydown({ key: 'Enter', preventDefault: () => { prevented = true; } });
+assert(prevented);
+assert.equal(events.at(-1).value.category, '<img onerror=alert(1)>', 'keyboard switches category');
+const keyboardSelection = events.at(-1).value;
+mount({ ...data, ...keyboardSelection, selected: keyboardSelection.category, detail });
+assert.equal(context.document.activeElement, byClass(root, 'bank-pie-ledger-scroll')[0], 'keyboard focus enters loaded ledger');
+byClass(root, 'bank-pie-close')[0].onclick({ detail: 0 });
+const closeSelection = events.at(-1).value;
+mount({ ...data, ...closeSelection, selected: null });
+assert.equal(context.document.activeElement, byClass(root, 'bank-pie-slice')[1], 'keyboard collapse returns focus to the selected slice');
+mount({ ...data, selected: '电商', detail });
+byClass(root, 'bank-pie-slice')[0].onclick();
+assert.equal(events.at(-1).value, null, 'clicking the same slice collapses its ledger');
+mount({ ...data, selected: '电商', detail: { ok: true, count: 0, amount_yuan: '0.00', items: [] } });
+assert(walk(root).some(node => node.textContent === '该分类在此账期暂无支出明细。'));
+mount({ ...data, selected: '电商', detail: { ok: false, message: '查询暂不可用' } });
+assert(walk(root).some(node => node.textContent === '查询暂不可用'));
 console.log('spending pie lifecycle, safe labels, hover, and edge cases passed');
