@@ -52,6 +52,16 @@ else
   skip "app/cli.py 未实现（请做卡 09）"
 fi
 
+step "5.5/6 话术排雷（29 种说法走整条链路：意图/确认卡/回执/渲染）"
+# 走 pytest 而不是直调脚本：与第 2 步**同一个解释器**（venv）。
+# 直调曾踩到 PATH 上的系统 python（没有 pypinyin）而误报失败。
+if [ -f scripts/audit_phrases.py ]; then
+  $PY -m pytest tests/test_audit_phrases.py -q || FAIL=1
+  echo "   覆盖：意图命中 / 确认卡是否出现 / 回执非空 / 模板渲染，全绿才算过"
+else
+  skip "scripts/audit_phrases.py 不存在"
+fi
+
 step "5/6 红线检查（注入检测 + 数字校验器）"
 REDLINE_TESTS=""
 [ -f guard/injection.py ] && REDLINE_TESTS="$REDLINE_TESTS tests/test_injection.py"
