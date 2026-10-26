@@ -41,27 +41,11 @@ EVIDENCE_LABELS = (
     ("tier", "结论档位"),
 )
 
-CSS = """
-<style>
-/* 卡片入场：新出现的卡片轻微上浮 + 淡入（180ms，金融产品里"顺手"的来源） */
-@keyframes dsh-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
-div[data-testid="stVerticalBlockBorderWrapper"] { animation: dsh-rise .18s ease-out both; }
-/* 金额一律等宽数字，纵向对齐（避免数字跳动时宽度抖动） */
-.dsh-num, table, [data-testid="stMetricValue"] { font-variant-numeric: tabular-nums; }
-/* 管线条：一行紧凑的「步骤 → 步骤」 */
-.dsh-pipe { font-size: .82rem; color: #9aa0ac; margin: .1rem 0 .4rem 0; letter-spacing: .2px; }
-.dsh-pipe b { color: #d1d4dc; font-weight: 600; }
-.dsh-pipe .dim { opacity: .55; }
-/* 卡头：左侧色条标语义（成功/等待/危险/草稿） */
-.dsh-head { border-left: 3px solid #6667C9; padding: .1rem 0 .1rem .6rem; margin-bottom: .35rem; }
-.dsh-head .t { font-size: 1.02rem; font-weight: 650; color: #E6E8EE; }
-.dsh-head .s { font-size: .78rem; color: #9aa0ac; margin-top: .1rem; }
-.dsh-tone-ok { border-left-color: #22C55E; }
-.dsh-tone-warn { border-left-color: #F59E0B; }
-.dsh-tone-danger { border-left-color: #EF4444; }
-.dsh-tone-draft { border-left-color: #6B7280; }
-</style>
-"""
+def _css() -> str:
+    """动效层由 premium_css 提供（拆文件是为了两边都在 300 行内、职责也更清楚）。"""
+    import premium_css
+    return premium_css.CSS
+
 
 _TONE = {"ok": "dsh-tone-ok", "warn": "dsh-tone-warn", "danger": "dsh-tone-danger",
          "draft": "dsh-tone-draft"}
@@ -69,7 +53,7 @@ _TONE = {"ok": "dsh-tone-ok", "warn": "dsh-tone-warn", "danger": "dsh-tone-dange
 
 def inject_css() -> None:
     """注入一次（幂等：Streamlit 每次 rerun 会重渲染，重复注入无害）。"""
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(_css(), unsafe_allow_html=True)
 
 
 def card_head(title: str, subtitle: str = "", tone: str = "") -> None:
@@ -99,12 +83,22 @@ def pipeline_text(turn: Any) -> str:
 
 
 def pipeline(turn: Any) -> None:
-    """把本轮状态机的路径摊成一行（内容由 `pipeline_text` 决定）。"""
+    """把本轮状态机的路径摊成一行（内容由 `pipeline_text` 决定）。
+
+    每一步包一个 `<span class="dsh-step">` 并递增延迟 —— 视觉上"一步步想过去"，
+    比一整行同时出现更像在推理（纯 CSS 动画，不改变任何数据）。
+    """
     text = pipeline_text(turn)
     if not text:
         return
     head, _, rest = text.partition(" ｜ ")
-    st.markdown(f'<div class="dsh-pipe"><b>{head}</b> ｜ {rest}</div>', unsafe_allow_html=True)
+    steps = [step.strip() for step in rest.split(" → ") if step.strip()]
+    spans = "".join(
+        f'<span class="dsh-step" style="animation-delay:{index * 70}ms">'
+        f'{" → " if index else ""}{step}</span>'
+        for index, step in enumerate(steps))
+    st.markdown(f'<div class="dsh-pipe"><b>{head}</b> ｜ {spans}</div>',
+                unsafe_allow_html=True)
 
 
 def evidence_rows(confirmation: Any) -> list[tuple[str, str]]:

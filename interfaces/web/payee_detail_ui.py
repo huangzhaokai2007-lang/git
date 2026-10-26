@@ -13,7 +13,8 @@
 
 from __future__ import annotations
 
-from concurrent.futures import Future, ThreadPoolExecutor
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
@@ -35,13 +36,17 @@ def _kind_of(person: dict) -> str:
 
 def _dispatch(executor: ThreadPoolExecutor, session_id: str, intent: str,
               slots: dict, text: str) -> None:
-    """与聊天框同一套：先清在途卡，再起写流程（按钮直达，不再走意图识别）。"""
+    """按钮直达：清在途卡 → `write_flow.start` → 把回执记进会话（与 `app._ask` 同口径）。
+
+    ⚠️ 2026-10-26 修：此前写的是 `last-turn` / `pending-*` 这些**不存在的会话键**，
+    界面读的是 `messages` / `turns` —— 于是点「转账」看起来**完全没反应**（用户实测）。
+    """
     confirm_card.clear(session_id)
-    future: Future = executor.submit(write_flow.start, intent, slots, session_id)
-    st.session_state["last-turn"] = future.result()
-    st.session_state["last-turn-text"] = text
-    for key in ("pending-payees", "pending-schedules", "pending-aa", "pending-gift"):
-        st.session_state[key] = True
+    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    state = st.session_state
+    state["messages"].append({"role": "assistant",
+                              "text": step.reply or step.ask or "", "turn": None})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": text, "turn": None})
     st.rerun()
 
 
