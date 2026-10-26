@@ -83,7 +83,7 @@ T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yu
 #: 风险测评结果（F10）：facts 键见 T13（risk_level / total_score / max_score / valid_until）。
 #: 回执**必须报出总分与满分**（验收清单第 1 条要求"由代码计算"，把总分亮出来才可核验），
 #: 并说清**结果只存本次会话**（验收清单第 3 条：当前仅存进程内）。
-T_RISK_RESULT = ("根据问卷计分（{total_score}/{max_score} 分），您的风险承受等级为 {risk_level}，"
+T_RISK_RESULT = ("根据问卷计分（{total_score} 分），您的风险承受能力为「{risk_label}」，"
                  "有效期至 {valid_until}。（测评结果仅保存在本次会话中）")
 #: 数字校验未通过时的降级措辞（不含任何数字；口径同 `T_DEGRADED_NOTE`）。
 T_RISK_RESULT_FALLBACK = "您的风险测评已完成，具体等级与有效期请看测评结果。（测评结果仅保存在本次会话中）"

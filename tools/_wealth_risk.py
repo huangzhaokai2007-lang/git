@@ -187,10 +187,11 @@ def assess_risk(answers: dict) -> ToolResult:
     valid_until = (AS_OF + timedelta(days=RISK_VALID_DAYS)).isoformat()
     _ASSESSMENTS[current_user_id()] = {"risk_level": level, "valid_until": valid_until}
     data = AssessRiskData(risk_level=level, valid_until=valid_until)
-    facts = {"risk_level": level, "valid_until": valid_until, "total_score": total,
-             "max_score": MAX_SCORE, "valid_days": RISK_VALID_DAYS, "answers": dict(answers)}
-    message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」"
-               f"（{level}），有效期至 {valid_until}。")
+    facts = {"risk_level": level, "risk_label": risk_label(level), "valid_until": valid_until,
+             "total_score": total, "max_score": MAX_SCORE, "valid_days": RISK_VALID_DAYS,
+             "answers": dict(answers)}
+    message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」，"
+               f"有效期至 {valid_until}。")
     return _ok(data.model_dump(), facts, message)
 
 
@@ -223,7 +224,8 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                            yield_=_yield_text(row["expected_yield"]), term=row["term_days"])
              for row in products]
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
-    facts = {"risk_level": level, "ceiling_rank": ceiling, "item_count": len(items),
+    facts = {"risk_level": level, "risk_label": risk_label(level),
+             "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
              "items": [{**item.model_dump(by_alias=True),
                         **_money_facts(next(row["min_amount"] for row in products
@@ -231,5 +233,5 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                        for item in items]}
     if not items:
         return _ok(data, facts, "按您的风险等级筛选后没有合适的产品。")
-    message = f"按风险等级 {level} 筛出 {len(items)} 个产品，按预期年化从高到低推荐。"
+    message = f"按风险等级「{risk_label(level)}」筛出 {len(items)} 个产品，按预期年化从高到低推荐。"
     return _ok(data, facts, message)
