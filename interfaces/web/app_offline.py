@@ -23,6 +23,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+#: 日期槽位抽取**只有一份实现**，住在 `app/cli.py`（网页端、CLI、API、IM 四个入口共用）。
+#: 此前本文件留了一份同名副本，于是"整月说法"这类能力加在哪边、另一边就缺一块 —— 双份口径必漂移。
+def dates_from_text(text: str) -> dict:
+    """转发到 `app.cli.dates_from_text`（离线演示用，**非**业务实现）。"""
+    from app import cli
+
+    return cli.dates_from_text(text)
+
+
 def activate() -> None:
     """装配离线替身，并让它在进程生命周期内持续生效。"""
     import sys as _sys
@@ -35,10 +44,17 @@ def activate() -> None:
 
     from app import cli
 
-    # 本文件**刻意不改 `offline_verdict`**：此前在这里把「一个关键词都没命中但给出了时间区间」
-    # 的说法兜成 `txn_query`（「查一下五月份」），那份逻辑已**下沉**到 `app/cli.offline_verdict`
-    # —— 留在网页端的下场是 CLI/API/IM 三个入口同一句话一律答「没太理解」，
-    # 正是本文件开头记下的"双份口径必漂移"教训的第二次应验。这里只负责把替身挂上。
+    original_verdict = cli.offline_verdict
+
+    def verdict_with_dates(text: str) -> tuple[str, dict]:
+        intent, slots = original_verdict(text)
+        if intent == "out_of_scope" and dates_from_text(text):
+            intent = "txn_query"                     # 追问后只回日期 → 续接流水查询
+        if intent == "txn_query":
+            slots = dict(slots, **dates_from_text(text))
+        return intent, slots
+
+    cli.offline_verdict = verdict_with_dates
 
     # ⚠️ 必须保住生成器引用！写成 `offline_llm().__enter__()` 的话，临时生成器会被 GC 回收
     # → 在 yield 处抛 GeneratorExit → `with mock.patch` 的 __exit__ 执行 → patch **静默撤销**，
