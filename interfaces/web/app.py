@@ -34,7 +34,8 @@ import payee_picker_ui                                          # noqa: E402  �
 import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
 import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
-import activity_ui                                              # noqa: E402  （main：活动流）
+import activity_ui
+import wealth_ui                                              # noqa: E402  （main：活动流）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
 
 load_dotenv(ROOT / ".env")
@@ -261,6 +262,8 @@ def _chat_page() -> None:
     scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
     _bill_charts()
     activity_ui.render(st.session_state['turns'])
+    #: F11 追加：理财推荐之后，产品旁边直接给「订购」按钮（只转成一句话交给编排层）。
+    wealth_ui.render(st.session_state['turns'], ask=_ask)
     _render_pending()
     payee_picker_ui.render(_agent_executor(), st.session_state["session_id"])  # 解析卡（同名多命中）
     card_edit_ui.render(_agent_executor(), st.session_state["session_id"])   # S5：可编辑卡片面板

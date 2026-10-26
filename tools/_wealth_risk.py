@@ -50,6 +50,12 @@ RISK_DESC = {
     "R4": "本金风险较高，可能出现 10%-20% 的波动",
     "R5": "本金风险高，可能出现 20% 以上的波动，可能损失大部分本金",
 }
+#: 【参考波动幅度】按风险等级给「一年内可能的最大涨跌幅」（百分比，正数）。
+#: 来源：与 `RISK_DESC` 的文字口径逐条对齐（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
+#: R5「20% 以上」取 30%）。**这是历史波动区间的经验值，不是收益承诺** ——
+#: 回执里必须写「参考」，不能写成「保证」或「预期」。
+RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
+
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
 
@@ -124,6 +130,14 @@ def _rank(level: str) -> int:
     if level not in RISK_LEVELS:
         raise ToolError(ErrorCode.INVALID_ARGUMENT, f"风险等级只能是 {'/'.join(RISK_LEVELS)}")
     return RISK_LEVELS.index(level) + 1
+
+
+def _range_text(pct: float) -> str:
+    """百分比数值 → 带符号的两位小数字符串（如 `+38.50` / `-30.00` / `0.00`）。
+
+    用于「参考区间」：正数显式带 `+`，让用户一眼分清赚和亏。
+    """
+    return f"{pct:+.2f}" if pct else "0.00"
 
 
 def _yield_text(value: float) -> str:
@@ -223,14 +237,25 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     items = [RecommendItem(product_id=row["id"], name=row["name"], risk_level=row["risk_level"],
                            yield_=_yield_text(row["expected_yield"]), term=row["term_days"])
              for row in products]
+    #: 参考区间：最高收益 = 预期年化 + 波动上限；最大亏损 = -波动上限。
+    #: 只进 facts（不进 data —— data 字段是冻结契约），渲染层据此展示。
+    swings = {row["id"]: RISK_SWING.get(row["risk_level"], 0.0) for row in products}
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
     facts = {"risk_level": level, "risk_label": risk_label(level),
              "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
              "items": [{**item.model_dump(by_alias=True),
                         **_money_facts(next(row["min_amount"] for row in products
-                                            if row["id"] == item.product_id), "min_amount")}
-                       for item in items]}
+                                            if row["id"] == item.product_id), "min_amount"),
+                        "max_gain_pct": _range_text(
+                            next(row["expected_yield"] for row in products
+                                 if row["id"] == item.product_id) + swings[item.product_id]),
+                        "max_loss_pct": _range_text(-swings[item.product_id])}
+                       for item in items],
+             "portfolio_max_gain_pct": _range_text(
+                 max((row["expected_yield"] + swings[row["id"]]) for row in products)
+                 if products else 0.0),
+             "portfolio_max_loss_pct": _range_text(-max(swings.values()) if swings else 0.0)}
     if not items:
         return _ok(data, facts, "按您的风险等级筛选后没有合适的产品。")
     message = f"按风险等级「{risk_label(level)}」筛出 {len(items)} 个产品，按预期年化从高到低推荐。"

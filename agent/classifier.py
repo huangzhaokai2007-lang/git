@@ -64,7 +64,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "aa_collect": ("payee_ids", "amount", "amounts"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
     "subscription_cancel": ("sub_id", "merchant"),                          # T11 cancel_subscription（card-24 扩 merchant）
-    "subscription_remind": (),                                             # §3 有此意图、§2 无对应工具 → 留空待定
+    "subscription_remind": ("within_days",),                               # F18 T53 list_due_subscriptions（可选，缺省 7 天）
     "card_query": ("status",),                                              # T18 list_cards（卡 23：status 可选，不传=全部）
     "card_apply": ("card_type",),                                          # T12 apply 的 kw
     "card_limit_adjust": ("card_id", "credit_limit", "single_limit", "daily_limit"),   # T12 kw
