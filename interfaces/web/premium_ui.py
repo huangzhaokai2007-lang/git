@@ -113,7 +113,11 @@ def evidence_rows(confirmation: Any) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     for key, label in EVIDENCE_LABELS:
         if key in facts and facts[key] not in (None, ""):
-            rows.append((label, str(facts[key])))
+            value = str(facts[key])
+            if key == "limits_single_max_yuan" and facts.get("single_max_exempt"):
+                #: 白名单额度内不受单笔上限约束（额度即该收款人的天花板）——别让用户以为被限额卡住
+                value = f"{value}（白名单额度内不适用）"
+            rows.append((label, value))
     factors = facts.get("factors")
     if isinstance(factors, (list, tuple)) and factors:
         rows.append(("命中因子", "、".join(str(f) for f in factors)))
