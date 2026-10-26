@@ -175,3 +175,48 @@ def test_repeat_without_until_keeps_going(wired, monkeypatch) -> None:
 def test_repeat_until_bad_date_rejected(wired, monkeypatch) -> None:
     sid = _make_schedule(wired, monkeypatch, repeat="每个月")
     assert ops.set_schedule_repeat(sid, "monthly", "下个月三十二号").ok is False
+
+
+# ---------------- 2026-10-26：循环续期的两个实测坑 ----------------
+
+def test_next_occurrence_keeps_month_end_alignment(seeded) -> None:
+    """「每个月末」不能漂移：10-31 → 11-30 → **12-31**（此前会变成 12-30）。"""
+    from tools._transfer_schedule_ops import _next_occurrence
+
+    assert _next_occurrence("2026-10-31T09:00", "monthly") == "2026-11-30T09:00"
+    assert _next_occurrence("2026-11-30T09:00", "monthly") == "2026-12-31T09:00"
+    assert _next_occurrence("2026-01-31T09:00", "monthly") == "2026-02-28T09:00"   # 2 月夹紧
+    assert _next_occurrence("2026-10-15T09:00", "monthly") == "2026-11-15T09:00"   # 非月末按同日
+
+
+def test_next_occurrence_weekly_is_plus_seven(seeded) -> None:
+    from tools._transfer_schedule_ops import _next_occurrence
+
+    assert _next_occurrence("2026-10-31T09:00", "weekly") == "2026-11-07T09:00"
+
+
+def test_next_period_keeps_the_end_date(seeded, clock) -> None:
+    """续出来的下一期**必须带结束日**，否则「循环到年底」在首期之后就失效。"""
+    from data import dao
+    from tools import _transfer_schedule, _transfer_schedule_ops
+
+    made = _transfer_schedule.schedule_transfer(
+        _preview_for_repeat(), None) if False else None
+    del made
+    # 直接用工具造一条已到期、带结束日的循环预约，再走续期
+    row_id = "sch_test_repeat"
+    dao.connection().execute(
+        "INSERT INTO scheduled_transfer (id, user_id, payee_id, amount, execute_at, status,"
+        " tier, token, created_at, repeat_cycle, repeat_until)"
+        " VALUES (?, 'u_zhangsan_0001', 'payee_0003', 50000, '2026-09-30T09:00', 'success',"
+        " 'L1', NULL, '2026-09-01T09:00', 'monthly', '2026-12-31')", (row_id,))
+    dao.connection().commit()
+
+    out = _transfer_schedule_ops.schedule_next_occurrence(row_id)
+    assert out.ok is True and out.data.get("next_id"), out.message
+    nxt = dao.connection().execute(
+        "SELECT execute_at, repeat_cycle, repeat_until FROM scheduled_transfer WHERE id = ?",
+        (out.data["next_id"],)).fetchone()
+    assert nxt["execute_at"] == "2026-10-31T09:00"        # 月末对齐
+    assert nxt["repeat_cycle"] == "monthly"
+    assert nxt["repeat_until"] == "2026-12-31"            # ← 结束日必须继承

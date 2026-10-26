@@ -78,9 +78,19 @@ def list_scheduled(status: str | None = None) -> ToolResult:
     items = []
     for row in rows:
         payee = dao.get_payee(row["payee_id"])
+        cycle = str(row.get("repeat_cycle") or "")
+        #: 2026-10-26：循环信息要看得见，否则「每个月末」执行一次后就"消失"了 ——
+        #: `next_run_at` 是**预测**（续期在本次执行后才落库），仅用于展示。
+        nxt = ""
+        if cycle and row["status"] == "pending":
+            from tools._transfer_schedule_ops import _next_occurrence
+            nxt = _next_occurrence(str(row["execute_at"]), cycle)
         items.append({"schedule_id": row["id"], "payee_id": row["payee_id"],
                       "payee_name": (payee or {}).get("name") or "",
                       "execute_at": row["execute_at"], "status": row["status"],
+                      "repeat_cycle": cycle,
+                      "repeat_until": str(row.get("repeat_until") or ""),
+                      "next_run_at": nxt,
                       "tier": row["tier"], **_money_facts(row["amount"], "amount")})
     return _ok({"items": items, "total_count": len(items)},
                {"total_count": len(items), "items": items}, f"共 {len(items)} 条预约。")

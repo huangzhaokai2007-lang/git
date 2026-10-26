@@ -93,8 +93,24 @@ def render_payees(facts: Mapping) -> str:
 
 T_SCHEDULE_EMPTY = "您还没有待执行的预约。说清「哪天、给谁、转多少」，我就帮您预约。"
 T_SCHEDULE_HEAD = "您共有 {total_count} 条预约："
-T_SCHEDULE_TABLE_HEAD = "| 预约时间 | 收款人 | 金额（元） | 状态 |"
-T_SCHEDULE_TABLE_SEP = "| --- | --- | --- | --- |"
+def _repeat_cell(item: Mapping) -> str:
+    """循环列：`每月（至 2026-12-31）· 下次 2026-11-30` / `一次性`。**纯排版，不算新数字**。"""
+    cycle = str(item.get("repeat_cycle") or "")
+    if not cycle:
+        return "一次性"
+    label = {"monthly": "每月", "weekly": "每周"}.get(cycle, cycle)
+    until = str(item.get("repeat_until") or "")
+    nxt = str(item.get("next_run_at") or "").replace("T", " ")
+    parts = [label]
+    if until:
+        parts.append(f"（至 {until}）")
+    if nxt:
+        parts.append(f" · 下次 {nxt}")
+    return "".join(parts)
+
+
+T_SCHEDULE_TABLE_HEAD = "| 预约时间 | 收款人 | 金额（元） | 状态 | 循环 |"
+T_SCHEDULE_TABLE_SEP = "| --- | --- | --- | --- | --- |"
 
 T_GIFT_ORDER_EMPTY = "您还没有送礼订单。说清送给谁、什么场合、预算多少，我就帮您挑礼物下单。"
 
@@ -146,7 +162,8 @@ def render_schedules(facts: Mapping) -> str:
         return T_SCHEDULE_EMPTY
     rows = [f"| {str(item['execute_at']).replace('T', ' ')} | {item['payee_name']} | "
             f"{item['amount_yuan']} | "
-            f"{badge(item['status'], _SCHEDULE_STATUS_CN.get(str(item['status']), item['status']))} |"
+            f"{badge(item['status'], _SCHEDULE_STATUS_CN.get(str(item['status']), item['status']))} | "
+            f"{_repeat_cell(item)} |"
             for item in facts["items"]]
     return "\n".join([T_SCHEDULE_HEAD.format(total_count=count), "",
                       T_SCHEDULE_TABLE_HEAD, T_SCHEDULE_TABLE_SEP, *rows])
