@@ -32,12 +32,16 @@ def test_whitelist_shape_resolves_by_tag(wired) -> None:
     assert got.filled["masked_phone"] == "137****2003"
 
 
-def test_whitelist_shape_rejects_blacklisted_person(wired) -> None:
-    """加白一个已拉黑的人 → FORBIDDEN（黑白互斥，先解除再谈加白）。"""
-    payee.set_payee_blacklist(_pid(wired, ZHANG), "诈骗")
+def test_whitelist_shape_accepts_blacklisted_person(wired) -> None:
+    """2026-10-26 口径：加白**要能**解析已拉黑的人（三态可自由切换）。
+
+    互斥由工具层保证：T25 置 `is_whitelist=1` 时会把 `blacklist` 清零。
+    """
+    person_id = _pid(wired, ZHANG)
+    payee.set_payee_blacklist(person_id, "诈骗")
     got = _shape_whitelist({"payee": ZHANG})
-    assert got.error_code == "FORBIDDEN"
-    assert "黑名单" in got.message
+    assert got.error_code is None and got.missing == []
+    assert got.filled["payee_id"] == person_id
 
 
 def test_blacklist_shape_resolves_blacklisted_person(wired) -> None:

@@ -28,6 +28,12 @@ for item in listing.facts["items"]:
     print(f"{item['name']:6s} {item['masked_phone']}  {kind:4s} 额度 {quota_txt:12s} "
           f"有效期 {extra['whitelist_expire'] or '长期':10s} 标签 {','.join(extra['tags']) or '—'}")
 print()
+print()
+print("预置银行卡（绑卡 / 查看完整卡号时用）：")
+from data.card_binding_seed import DEMO_CREDENTIALS
+for _card_id, _number, _pin in DEMO_CREDENTIALS:
+    print(f"  {_number}  密码 {_pin}")
+print()
 row = dao.connection().execute("SELECT balance, available FROM account WHERE type = 'savings'").fetchone()
 print(f"储蓄余额 {row['balance'] / 100:,.2f} 元 · 可用 {row['available'] / 100:,.2f} 元")
 PY
