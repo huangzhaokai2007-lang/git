@@ -198,18 +198,32 @@ def _render_forms() -> None:
 
 # ---------------- 侧边栏 ----------------
 
+def _refresh_sidebar_balance():
+    turn = _agent_executor().submit(balance_flow.refresh, st.session_state["session_id"]).result()
+    if not turn.error_code:
+        st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
+    return turn
+
+
 def _sidebar() -> None:
     """侧边栏：账户余额、快捷场景与重置会话。"""
     with st.sidebar:
         st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="AI Banking Agent"><span aria-hidden="true">AI Banking</span><span aria-hidden="true">Agent</span></div>', unsafe_allow_html=True)
         st.divider()
         st.markdown("#### 账户余额")
+        scope = (st.session_state["session_id"], _agent_executor().submit(card_binding_flow.owner_key).result())
+        if st.session_state.get("sidebar-balance-scope") != scope:
+            # Record the attempt even on failure; ordinary reruns must not retry.
+            st.session_state["sidebar-balance-scope"] = scope
+            st.session_state["balance"] = []
+            turn = _refresh_sidebar_balance()
+            if turn.error_code:
+                st.error(turn.reply)
         if ui.balance_box(st.session_state["balance"]):
-            turn = _agent_executor().submit(balance_flow.refresh, st.session_state["session_id"]).result()
+            turn = _refresh_sidebar_balance()
             if turn.error_code:
                 st.error(turn.reply)
             else:
-                st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
                 st.rerun()
         st.divider()
         st.markdown("#### 快捷场景")
@@ -231,6 +245,7 @@ def _sidebar() -> None:
             lost_ui.reset()
             st.session_state["bound-card-query"] = False
             st.session_state['operation-records-open'] = False
+            st.session_state.pop("sidebar-balance-scope", None)
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0), ('workspace-start', 0)):
                 st.session_state[key] = value
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
