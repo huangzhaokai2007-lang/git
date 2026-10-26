@@ -150,9 +150,9 @@ def _insert_foreign(path: Path) -> None:
                          " VALUES (?, ?, 'savings', ?, ?, 'active')",
                          (FOREIGN_ACCOUNT, FOREIGN_USER, FOREIGN_BALANCE, FOREIGN_BALANCE))
             conn.execute("INSERT INTO txn (id, account_id, ts, amount, direction, counterparty, category,"
-                         " channel, memo, balance_after) VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, 0)",
+                         " channel, memo, balance_after, ref_no) VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, 0, ?)",
                          (FOREIGN_TXN, FOREIGN_ACCOUNT, "2026-08-10T10:00:00", -FOREIGN_BALANCE,
-                          "他人的商户", "餐饮", "卡", "他人的备注"))
+                          "他人的商户", "餐饮", "卡", "他人的备注", "20260810100000012"))
     finally:
         conn.close()
 

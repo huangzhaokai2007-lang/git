@@ -69,10 +69,13 @@ def test_channel_grouping_uses_channel_and_excludes_income(seeded):
 
 def test_month_end_is_included_and_next_month_is_excluded(seeded):
     from data import dao
-    for suffix, ts in [('last', '2026-08-31T23:59:59'), ('next', '2026-09-01T00:00:00')]:
-        dao.connection().execute('INSERT INTO txn (id,account_id,ts,amount,direction,category,balance_after) '
-                                 'VALUES (?,?,?,?,?,?,?)',
-                                 ('boundary-' + suffix, 'acc_savings_0001', ts, -100, 'out', '边界', 0))
+    #: `ref_no` 是 NOT NULL 且无默认值，手写裸 SQL 漏它会直接 `IntegrityError`（看着像被测代码的锅）。
+    for index, (suffix, ts) in enumerate([('last', '2026-08-31T23:59:59'), ('next', '2026-09-01T00:00:00')]):
+        digits = ''.join(char for char in ts if char.isdigit())
+        dao.connection().execute('INSERT INTO txn (id,account_id,ts,amount,direction,category,'
+                                 'balance_after,ref_no) VALUES (?,?,?,?,?,?,?,?)',
+                                 ('boundary-' + suffix, 'acc_savings_0001', ts, -100, 'out', '边界', 0,
+                                  f'{digits}{index:03d}'))
     dao.connection().commit()
     result = bill_detail_flow.load('boundary', source(category='边界'), '边界')
     assert result['ok'] and [r['id'] for r in result['items']] == ['boundary-last']
