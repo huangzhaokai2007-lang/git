@@ -158,8 +158,14 @@ def wealth_line(item: Mapping) -> str:
     项目红线「金额一律整数分、禁浮点」），期限取 `term` 整数经 `term_cn` 换成文案。
     """
     level = str(item["risk_level"])
-    return (f"- {item['name']}：{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
+    line = (f"- {item['name']}：{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
             f"期限 {term_cn(item['term'])}")
+    #: 参考区间（用户需求「给出参考的最高亏损和最高收益」）。**必须写「参考」**：
+    #: 数字来自 `RISK_SWING` 的经验波动区间，不是承诺。老 facts 没这两个键时降级为不展示。
+    if item.get("max_gain_pct") is not None and item.get("max_loss_pct") is not None:
+        line += (f"\n  （参考区间：↑ 最高 {item['max_gain_pct']}%"
+                 f" / ↓ 最大亏损 {item['max_loss_pct']}%）")
+    return line
 
 
 def render_wealth(facts: Mapping) -> str:

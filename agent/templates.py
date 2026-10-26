@@ -149,6 +149,9 @@ TEMPLATES: dict[str, str] = {
 }
 
 
+from agent._render_remind import render_reminders
+
+
 def render(intent: str, facts: Mapping[str, object]) -> str:
     """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
     if intent == "anomaly_check":                            # F03：汇总 + 每条命中一行（交易 + 依据）
@@ -165,6 +168,8 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_wealth(facts)
     if intent == "payee_list":                               # SPEC-CHANGE：白名单 / 非白名单分组
         return render_payees(facts)
+    if intent == "subscription_remind":                      # F18：N 天内要扣费的订阅
+        return render_reminders(facts)
     if intent == "wealth_holdings":                          # T21：持仓明细
         return render_holdings(facts)
     if intent == "wealth_all_products":                      # T22：全部产品，按等级分组

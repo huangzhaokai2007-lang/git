@@ -80,6 +80,7 @@ def styles() -> None:
 
 
 def face(item: dict, *, on_click=None) -> bool:
+    """卡片按钮。`on_click` 可选：传入时按 Streamlit 的 on_click 回调语义执行。"""
     return st.button(item['card_no_mask'], key=f"detail-{item['card_id']}",
                      help='点击卡片查看详情', width='stretch', on_click=on_click)
 
