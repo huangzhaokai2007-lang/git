@@ -63,13 +63,19 @@ def test_blacklist_is_idempotent(wired) -> None:
     assert len(raw(wired, "SELECT 1 FROM audit_log WHERE tool = 'set_payee_blacklist'")) == before
 
 
-def test_blacklist_rejects_whitelisted_payee(wired, monkeypatch) -> None:
-    """人类口径：只有**普通**收款人能拉黑 —— 白名单的人要先移出白名单（编排层直接拒，不出卡）。"""
+def test_blacklist_accepts_whitelisted_payee(wired, monkeypatch) -> None:
+    """2026-10-26 口径（人类要求）：**三态可自由切换** —— 白名单也能直接拉黑。
+
+    此前这里断言「编排层直接拒、不出卡」；现在改为：出卡、卡面说明「并移出白名单」，
+    确认后黑名单生效且白名单被自动清除（互斥不变量仍成立）。
+    """
     _fake_with(monkeypatch, "王五")                       # 王五是种子里的白名单
     card = orchestrator.handle("把王五加入黑名单", session_id=SESSION)
-    assert card.executed is False and card.tier is None
-    assert "白名单收款人不能直接拉黑" in card.reply
-    assert confirm_card.current(SESSION) is None          # 不出确认卡
+    assert "CONFIRM_CARD" in card.states and card.tier == "L1"
+    assert "并移出白名单" in card.reply
+    orchestrator.handle("确认", session_id=SESSION)
+    stored = raw(wired, "SELECT is_whitelist, blacklist FROM payee WHERE name = ?", ("王五",))[0]
+    assert bool(stored["blacklist"]) is True and bool(stored["is_whitelist"]) is False
 
 
 def _fake_with(monkeypatch, name: str) -> None:

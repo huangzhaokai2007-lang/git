@@ -46,14 +46,15 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
 
 
 def _shape_whitelist(slots: Mapping) -> ShapeResult:
-    """加白：统一解析关卡。**已黑名单的人 → FORBIDDEN**（黑白互斥，先解除再谈加白）。
+    """加白：统一解析关卡。**黑名单里的人也能直接加白**（置白时工具层会解除黑名单）。
 
     2026-10-24（人类原文「要为白名单人员设置有效时间与额度」）：可选 `quota`（元）/`expire`
     （日期或「月底」这类相对说法）两个槽位 —— 在本步归一化；缺了不报错
     （额度未设 = 一律要验证码；有效期空 = 长期有效）。
     """
-    shaped = _resolve_shape(slots)
-    if shaped.error_code:                              # 黑名单等硬拒绝：原样透传（不吞错误码）
+    #: 2026-10-26（人类要求）：三种身份可自由切换 —— 黑名单 → 白名单一步到位。
+    shaped = _resolve_shape(slots, allow_blacklisted=True)
+    if shaped.error_code:                              # 其它硬拒绝：原样透传（不吞错误码）
         return shaped
     filled = dict(shaped.filled)
     if filled.get("quota") is not None and filled.get("quota_cents") is None:
@@ -176,21 +177,28 @@ def _prepare_blacklist(filled: dict) -> Prepared:
     profile = (listed.facts.get("profiles") or {}).get(str(row["payee_id"])) or {}
     if profile.get("blacklist"):
         return Prepared(ok=False, error_code="INVALID_STATE", message="该收款人已经在黑名单里了")
-    if row.get("is_whitelist"):                           # 人类口径：只有普通收款人能拉黑
-        return Prepared(ok=False, error_code="INVALID_STATE",
-                        message="白名单收款人不能直接拉黑，请先把他移出白名单")
-    return Prepared(ok=True, facts={**row, "tier": BLACKLIST_TIER}, credential="")
+    #: 2026-10-26（人类要求）：**三种身份可自由切换** —— 白名单也能直接拉黑。
+    #: 工具层 T28 置 blacklist=1 时本来就会把 is_whitelist 清零（互斥），这里只把
+    #: 「原本是白名单」带进事实包，让卡面能说清「白名单专属额度同时失效」。
+    was_whitelist = bool(row.get("is_whitelist"))
+    return Prepared(ok=True, facts={**row, "tier": BLACKLIST_TIER,
+                                    "was_whitelist": was_whitelist}, credential="")
 
 
 def _card_blacklist(intent: str, filled: dict, facts: Mapping, tier: str,
                     requires_otp: bool) -> confirm_card.CardInput:
-    """黑名单确认卡：谁 + 变更 + **影响**（之后转账/AA/送礼都会被拒，这句必须说清）。"""
+    """黑名单确认卡：谁 + 变更 + **影响**（之后转账/AA/送礼都会被拒，这句必须说清）。
+
+    2026-10-26：白名单也能直接拉黑（三态自由切换），必须明说**白名单特权同时失效**。
+    """
+    was_whitelist = bool(facts.get("was_whitelist") or facts.get("is_whitelist"))
     return confirm_card.CardInput(
         title="黑名单确认卡", intent_cn="加入黑名单",
         rows=[("收款人", str(facts["name"])),
               ("手机号", str(facts["masked_phone"])),
-              ("变更", "加入黑名单"),
-              ("影响", "之后给该收款人转账、AA、送礼都会被拒绝")],
+              ("变更", "加入黑名单" + ("并移出白名单" if was_whitelist else "")),
+              ("影响", "之后给该收款人转账、AA、送礼都会被拒绝"
+                      + ("；白名单专属额度同时失效" if was_whitelist else ""))],
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], "加入黑名单"))
 

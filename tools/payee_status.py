@@ -152,14 +152,21 @@ def set_payee_whitelist(payee_id: str, enable: bool, confirm_ref: str) -> ToolRe
         from data.db import transaction                    # 局部 import：与 tools 其余模块同口径
         conn = dao.connection()
         with transaction(conn):
-            conn.execute("UPDATE payee SET is_whitelist = ? WHERE id = ? AND user_id = ?",
-                         (flag, payee_id, user_id))
+            #: 2026-10-26（人类要求）：三种身份**互斥且可自由切换** ——
+            #: 设为白名单时顺带解除黑名单（并清原因），否则会出现「既白又黑」的矛盾状态。
+            conn.execute(
+                "UPDATE payee SET is_whitelist = ?,"
+                " blacklist = CASE WHEN ? = 1 THEN 0 ELSE blacklist END,"
+                " blacklist_reason = CASE WHEN ? = 1 THEN NULL ELSE blacklist_reason END"
+                " WHERE id = ? AND user_id = ?",
+                (flag, flag, flag, payee_id, user_id))
             dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
                              intent="payee_whitelist", tool=WHITELIST_ACTION,
                              params_json={"payee_id": payee_id, "is_whitelist": bool(flag)},
                              risk_level=WHITELIST_TIER, permission_tier=WHITELIST_TIER,
                              result="success", error_code=None)
-        rec["snapshot"] = {"is_whitelist": bool(flag)}
+        rec["snapshot"] = {"is_whitelist": bool(flag),
+                           "cleared_blacklist": bool(flag and row.get("blacklist"))}
     data, facts = _whitelist_payload(row, bool(flag))
     word = "已加入白名单" if flag else "已移出白名单"
     return _ok(data, facts, f"{row['name']}（{row['phone']}）{word}")

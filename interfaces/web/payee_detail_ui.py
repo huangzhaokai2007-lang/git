@@ -111,7 +111,7 @@ def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) ->
                                                 width="stretch"):
                 _dispatch(executor, session_id, "payee_whitelist_remove", who,
                           f"（按钮）把{name}移出白名单")
-            if kind == "normal" and b.button("拉黑", key=f"d-bl-{person['payee_id']}",
+            if kind != "blacklist" and b.button("拉黑", key=f"d-bl-{person['payee_id']}",
                                              width="stretch"):
                 _dispatch(executor, session_id, "payee_blacklist", who,
                           f"（按钮）把{name}加入黑名单")
@@ -119,6 +119,11 @@ def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) ->
                                                 width="stretch"):
                 _dispatch(executor, session_id, "payee_unblacklist", who,
                           f"（按钮）把{name}移出黑名单")
+            if kind == "blacklist" and a.button("加白名单", key=f"d-wl2-{person['payee_id']}",
+                                                width="stretch",
+                                                help="直接设为白名单（黑名单会自动解除）"):
+                _dispatch(executor, session_id, "payee_whitelist", who,
+                          f"（按钮）把{name}加入白名单")
             if d.button("删除", key=f"d-del-{person['payee_id']}", width="stretch"):
                 _dispatch(executor, session_id, "payee_delete", who, f"（按钮）删除收款人{name}")
 
