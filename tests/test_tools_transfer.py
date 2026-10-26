@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from data import payee_dao
 from data.seed import SAVINGS_ID
 from tools import _transfer_risk, query, transfer
 
@@ -187,7 +188,8 @@ def test_preview_reports_remaining_limits_from_today(seeded: Path) -> None:
 
 def test_preview_enforces_single_and_daily_hard_limits(seeded: Path) -> None:
     set_today_flows(seeded, "2026-09-12", [])                                 # 从"当天零支出"起步
-    over_single = transfer.preview_transfer(PAYEE, 50_001)
+    # 2026-10-26 口径：白名单额度内不受单笔上限约束 → 硬上限用**非白名单**验证
+    over_single = transfer.preview_transfer(PAYEE_NEW, 50_001)
     assert over_single.error_code == "OVER_LIMIT" and over_single.data is None
     assert transfer.preview_transfer(PAYEE, 50_000).ok                       # 恰好上限：放行
     set_today_flows(seeded, "2026-09-12", [("2026-09-12T09:00:00", -160_000)])
@@ -229,3 +231,38 @@ def test_preview_rejects_illegal_arguments(seeded: Path, args: tuple, kwargs: di
     result = transfer.preview_transfer(*args, **kwargs)
     assert result.ok is False and result.error_code == "INVALID_ARGUMENT"
     assert result.data is None and result.facts == {} and not re.search(r"\d", result.message)
+
+
+# ---------------- 2026-10-26：白名单额度内不受单笔上限约束 ----------------
+
+def test_whitelist_within_quota_bypasses_single_cap(seeded: Path) -> None:
+    """用户实测：`给王五转1000`（白名单、额度 1000）不该被「单笔上限 500」拒。
+
+    600 元 / 300 元都必须能出预览；事实包里带 `single_max_exempt=True`。
+    """
+    for amount in (60_000, 30_000):
+        result = preview_ok(PAYEE, amount)
+        assert result.facts["single_max_exempt"] is True
+    assert preview_ok(PAYEE, 60_000).facts["tier"] == "L1"
+
+
+def test_whitelist_within_quota_stays_otp_free(seeded: Path) -> None:
+    """额度内不仅免限额，也免验证码（只有其它异常因子命中时才升档）。"""
+    result = preview_ok(PAYEE, 100_000)
+    assert result.facts["single_max_exempt"] is True
+    assert result.facts["requires_otp"] is False and result.facts["tier"] == "L1"
+
+
+def test_non_whitelist_still_hits_the_single_cap(seeded: Path) -> None:
+    """非白名单照旧受单笔上限；报错文案要给出**可操作**的建议。"""
+    failed = transfer.preview_transfer(PAYEE_NEW, 60_000)
+    assert failed.ok is False and failed.error_code == "OVER_LIMIT"
+    assert "白名单" in failed.message            # 告诉用户怎么突破（设额度）
+
+
+def test_expired_whitelist_loses_the_exemption(seeded: Path, clock: Clock) -> None:
+    """白名单过期 → 豁免失效，600 元重新受单笔上限约束。"""
+    payee_dao.update_payee(PAYEE, "u_zhangsan_0001", whitelist_expire="2020-01-01")
+    clock.moment = datetime(2026, 9, 12, 12, 0, 0)
+    failed = transfer.preview_transfer(PAYEE, 60_000)
+    assert failed.ok is False and failed.error_code == "OVER_LIMIT"

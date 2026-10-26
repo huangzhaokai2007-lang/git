@@ -110,6 +110,34 @@ def _limits(flows: list[dict]) -> dict:
 
 # ---------------- 白名单专属额度（工具层唯一实现，2026-10-24） ----------------
 
+def whitelist_quota_exempt(payee: dict, amount: int) -> bool:
+    """白名单 + 未过期 + **本月剩余额度够** → True（不受全局单笔上限约束）。
+
+    为什么要有它：白名单的「专属额度」（如 1000 元/月）本身就是该收款人的单笔天花板；
+    再套一层全局 500 元单笔上限，就会出现「额度 1000 却转不出 1000」的矛盾（用户实测）。
+    日累计 2000 元仍然生效 —— 那是**账户级**风控，不因收款人是谁而豁免。
+    """
+    if not payee or not payee.get("is_whitelist") or payee.get("blacklist"):
+        return False
+    expire = str(payee.get("whitelist_expire") or "")[:10]
+    today = datetime.today().date()
+    if expire:
+        try:
+            if today > datetime.fromisoformat(expire).date():
+                return False                         # 过期 → 按普通处理
+        except ValueError:
+            pass
+    quota = payee.get("whitelist_quota")
+    if quota is None:
+        return False
+    try:
+        from data import payee_dao
+        remaining = payee_dao.remaining_quota_cents(dict(payee), today.strftime("%Y-%m"))
+    except Exception:                                # noqa: BLE001 —— 算不出就按普通处理（保守）
+        return False
+    return remaining is not None and int(amount) <= remaining
+
+
 def apply_whitelist_quota(payee: dict, amount: int, judged: dict) -> dict:
     """白名单 + 未过期 + 剩余额度够 + **只有夜间因子** → 免验证码（tier L1）。
 
