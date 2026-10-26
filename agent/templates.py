@@ -274,7 +274,9 @@ def polish(text: str, facts: Mapping) -> str | None:
     except llm.LLMUnavailable:
         logger.warning("润色不可用（LLM 不可用），改用模板原样回执")
         return None
-    return out.reply.strip() or None
+    #: `chat_json` 也可能返回 `None`（替身 / mock / 上游无内容），此时按「润色失败」处理，
+    #: 绝不能让 `_polish` 内部炸到调用方 —— 读请求不因润色失败而失败。
+    return (out.reply.strip() or None) if out else None
 
 
 def _template_values(intent: str, slots: Mapping, result: ToolResult) -> dict:

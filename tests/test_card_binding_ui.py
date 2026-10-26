@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -10,6 +11,18 @@ from tests.conftest import raw
 
 APP = Path(__file__).resolve().parents[1] / "interfaces/web/app.py"
 NUMBER, PIN, CARD = "6222000000000001", "314159", "card_savings_0001"
+
+
+def without_sidebar_refresh(monkeypatch):
+    """把「开页自动刷新侧边栏余额」这条旁路短路掉，只留被测的主对话链路。
+
+    那条旁路（→ `balance_flow.refresh` → `orchestrator.handle('查一下余额')`）同样要走 LLM，
+    会把一次与本次输入无关的调用记进 `seen`，污染「凭证有没有被送进模型」这类断言。
+    `error_code` 非空 → UI 侧跳过落库（`app._refresh_sidebar_balance`）。
+    """
+    from agent import balance_flow
+    monkeypatch.setattr(balance_flow, "refresh",
+                        lambda session_id: SimpleNamespace(error_code="offline", reply="", facts={}))
 
 
 def app(monkeypatch, seeded):
@@ -194,6 +207,7 @@ def test_pasted_credentials_are_never_kept_or_sent_to_model(monkeypatch, seeded,
         raise llm.LLMUnavailable("测试不调用模型")
 
     monkeypatch.setattr(llm, "chat_json", record)
+    without_sidebar_refresh(monkeypatch)
     at = app(monkeypatch, seeded)
     at.chat_input[0].set_value(f"绑定银行卡 {number}").run()
     text = str(at.session_state["messages"]) + str(at.session_state["turns"]) + str(seen)
@@ -206,6 +220,7 @@ def test_chat_password_is_hidden_even_without_a_card_number(monkeypatch, seeded)
 
     seen = []
     monkeypatch.setattr(llm, "chat_json", lambda *args: seen.append(args))
+    without_sidebar_refresh(monkeypatch)
     at = app(monkeypatch, seeded)
     at.chat_input[0].set_value(f"银行卡密码 {PIN}").run()
     assert PIN not in str(at.session_state["messages"]) + str(at.session_state["turns"])
