@@ -166,10 +166,14 @@ def _details(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None
     st.markdown(result["summary"])
     st.caption("此卡关联账户余额；信用卡余额与授信额度分别展示。")
     visible = state["detail_balance"]
-    st.text(f"{result['data']['balance_yuan']} 元" if visible else "****** 元")
-    if st.button("隐藏详情余额" if visible else "显示详情余额", key="detail-balance"):
-        state["detail_balance"] = not visible
-        st.rerun()
+    with st.container(horizontal=True, vertical_alignment='center', width='content', wrap=False,
+                      gap='small', key='detail-balance-row'):
+        st.text(f"{result['data']['balance_yuan']} 元" if visible else "****** 元")
+        if st.button('', key='detail-balance', type='tertiary', width=28,
+                     icon=':material/visibility:' if visible else ':material/visibility_off:',
+                     help='隐藏余额' if visible else '显示余额'):
+            state["detail_balance"] = not visible
+            st.rerun()
     _reveal(executor, session_id, state)
     if st.button("关闭详情", key="detail-close"):
         state['detail_revision'] = state.get('detail_revision', 0) + 1
