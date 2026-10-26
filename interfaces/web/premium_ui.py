@@ -80,39 +80,53 @@ def card_head(title: str, subtitle: str = "", tone: str = "") -> None:
                 unsafe_allow_html=True)
 
 
-def pipeline(turn: Any) -> None:
-    """把本轮状态机的路径摊成一行：`🧠 理解意图 → 🎯 解析 → 🛡 定档 → 🧾 确认卡`。
+def pipeline_text(turn: Any) -> str:
+    """管线条的**纯文本**部分（不含 HTML），空串表示不该显示。
 
-    只展示 `Turn.states` 里**真实经过**的状态（跳过 IDLE/AUDIT 这类噪声），
-    再加意图与档位 —— 这行同时是「五层架构在跑」的现场证据。
+    只取 `Turn.states` 里**真实经过**的状态（跳过 IDLE 这类噪声），再加意图与档位 ——
+    这行同时是「五层架构在跑」的现场证据。拆成纯函数是为了可单测（渲染层不做逻辑）。
     """
     if turn is None:
-        return
+        return ""
     states = [s for s in (getattr(turn, "states", None) or []) if s in STATE_CN and s != "IDLE"]
     if not states:
+        return ""
+    parts = [f"{STATE_CN[s][0]} {STATE_CN[s][1]}" for s in states[-6:]]
+    head = f"{getattr(turn, 'intent', '') or '—'}"
+    if getattr(turn, "tier", None):
+        head += f" · 档位 {turn.tier}"
+    return f"{head} ｜ {' → '.join(parts)}"
+
+
+def pipeline(turn: Any) -> None:
+    """把本轮状态机的路径摊成一行（内容由 `pipeline_text` 决定）。"""
+    text = pipeline_text(turn)
+    if not text:
         return
-    parts = []
-    for state in states[-6:]:
-        icon, label = STATE_CN[state]
-        parts.append(f"{icon} {label}")
-    head = f"<b>{getattr(turn, 'intent', '') or '—'}</b>"
-    tier = getattr(turn, "tier", None)
-    if tier:
-        head += f" · 档位 <b>{tier}</b>"
-    st.markdown(f'<div class="dsh-pipe">{head} ｜ {" → ".join(parts)}</div>',
-                unsafe_allow_html=True)
+    head, _, rest = text.partition(" ｜ ")
+    st.markdown(f'<div class="dsh-pipe"><b>{head}</b> ｜ {rest}</div>', unsafe_allow_html=True)
 
 
-def evidence(confirmation: Any) -> None:
-    """确认卡下的「依据」折叠面板：为什么是这一档，逐条摊开（纯展示）。"""
+def evidence_rows(confirmation: Any) -> list[tuple[str, str]]:
+    """「依据」面板要显示的 `(标签, 值)` 列表（纯函数，可单测；空列表表示不显示）。"""
     facts: Mapping = getattr(confirmation, "evidence", None) or {}
     rows: list[tuple[str, str]] = []
     for key, label in EVIDENCE_LABELS:
         if key in facts and facts[key] not in (None, ""):
-            rows.append((label, str(facts[key])))
+            value = str(facts[key])
+            if key == "limits_single_max_yuan" and facts.get("single_max_exempt"):
+                #: 白名单额度内不受单笔上限约束（额度即该收款人的天花板）——别让用户以为被限额卡住
+                value = f"{value}（白名单额度内不适用）"
+            rows.append((label, value))
     factors = facts.get("factors")
     if isinstance(factors, (list, tuple)) and factors:
         rows.append(("命中因子", "、".join(str(f) for f in factors)))
+    return rows
+
+
+def evidence(confirmation: Any) -> None:
+    """确认卡下的「依据」折叠面板：为什么是这一档，逐条摊开（纯展示）。"""
+    rows = evidence_rows(confirmation)
     if not rows:
         return
     with st.expander("▸ 依据：为什么是这个档位", expanded=False):
@@ -143,3 +157,30 @@ def examples() -> str | None:
     st.caption("可以这样说（点一下试试）：")
     picked = st.pills("示例指令", EXAMPLES, key="premium-examples", label_visibility="collapsed")
     return picked or None
+
+
+def trace_footer(turn: Any) -> None:
+    """回执下的「可追溯」页脚：trace_id 可复制，指向侧边栏的审计回放。
+
+    **为什么值得有**：金融场景里「这句话到底改了什么」必须查得到。
+    把 trace_id 摆在回执下方（而不是藏在日志里），用户/评委可以直接拿去回放整条链路。
+    """
+    trace = getattr(turn, "trace_id", None)
+    if not trace:
+        return
+    with st.expander("🔎 这一笔可追溯", expanded=False):
+        st.caption("复制这条编号，粘贴到侧边栏「审计回放」即可看到完整链路"
+                   "（意图 → 解析 → 档位 → 工具入参 → 结果）。")
+        st.code(trace, language="text")
+        st.caption(trace_bits(turn))
+
+
+def trace_bits(turn: Any) -> str:
+    """「可追溯」页脚的一句话摘要（纯函数，可单测）。"""
+    bits = [f"意图 {getattr(turn, 'intent', '—') or '—'}"]
+    if getattr(turn, "tier", None):
+        bits.append(f"档位 {turn.tier}")
+    bits.append("已执行" if getattr(turn, "executed", False) else "未执行")
+    if getattr(turn, "error_code", None):
+        bits.append(f"错误码 {turn.error_code}")
+    return " · ".join(bits)

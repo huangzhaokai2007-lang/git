@@ -13,6 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
+import premium_ui  # noqa: E402 —— 统一卡头观感
 
 from agent import confirm_card, schedule_flow, write_flow
 
@@ -38,7 +39,8 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     items = executor.submit(schedule_flow.pending_schedules).result()
     if not items:
         return
-    st.markdown(f"##### ⏰ 待执行的预约（{len(items)} 笔）")
+    premium_ui.card_head(f"⏰ 待执行的预约（{len(items)} 笔）",
+                     "到点才会扣款；可在卡片上执行 / 改时间 / 取消", tone="warn")
     for item in items:
         schedule_id = str(item["schedule_id"])
         when = str(item["execute_at"]).replace("T", " ")
