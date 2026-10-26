@@ -8,8 +8,9 @@
    这里用**独立复算**核对分组总和、笔数与占比 —— 界面与回执读同一份数（铁律 2）；
 2. **回执**（`agent/render_query`）：新增的分类汇总、大额榜里的每个数字必须能在 facts 里
    找到出处（`guard.facts_check` 复跑一遍），多打印一个数字就算幻觉；
-3. **网页卡**（`interfaces/web/txn_card_ui`）：四个指标 + 每个分类一块占比条 + 「逐笔展开」
-   折叠 + 按日走势 + 全量明细，全部用真实 `AppTest` 断言“**真的画出来了**”。
+3. **网页卡**（`interfaces/web/txn_card_ui`）：按日走势**置顶** + 一张带流水号/交易状态的全量
+   明细表（指标、占比条、分类折叠已按 2026-10-26 二次验收口径移除），用真实 `AppTest`
+   断言“**真的画出来了**”，并断言旧的那几块**确实不再出现**。
 """
 
 from __future__ import annotations
@@ -42,6 +43,18 @@ def test_facts_carry_the_whole_insight(txns) -> None:
     assert facts["categories"] and facts["daily"] and facts["largest"]
     assert [item["id"] for item in facts["items"]] == [row["id"] for row in txns.data["items"]]
     assert facts["out_count"] + facts["in_count"] == facts["total_count"]
+
+
+def test_every_item_carries_a_ref_no_and_a_status(txns) -> None:
+    """每笔流水都带**流水号**与**交易状态**（2026-10-26 用户点名要的两列）。
+
+    流水号必须全局不重号（对账靠它，重号就是错账）；状态只能是四种机器值之一
+    —— 界面靠这张表翻译成中文，冒出一个认不到的值就会退化成灰色 `—`。
+    """
+    items = txns.facts["items"]
+    assert all(item["ref_no"] for item in items)
+    assert len({item["ref_no"] for item in items}) == len(items)          # 全局不重号
+    assert all(item["status"] in {"done", "pending", "failed", "refunded"} for item in items)
 
 
 def test_category_groups_add_up_to_the_page_expense(txns) -> None:
@@ -95,17 +108,26 @@ def test_empty_range_invents_nothing(seeded: Path) -> None:  # noqa: ARG001
 # ---------------- 回执：多出来的句子必须在 facts 里有出处 ----------------
 
 
-def test_reply_carries_groups_largest_and_stays_verifiable(txns) -> None:
-    """回执 = 区间 + 分类汇总 + 大额榜 + 明细表；`facts_check` 复跑一遍不许有 extra 数字。"""
+def test_reply_carries_refno_status_and_stays_verifiable(txns) -> None:
+    """回执 = 区间 + **全量明细表（含流水号/交易状态）**；`facts_check` 复跑不许有 extra 数字。"""
     from guard import facts_check
 
     reply = templates.render("txn_query", txns.facts)
     assert PERIOD[0] in reply and PERIOD[1] in reply              # 点明查的是哪一段
-    assert "| 分类 | 笔数 | 金额（元） | 占比 |" in reply
-    assert "金额最大的几笔" in reply
-    assert "| 时间 | 交易对手 | 金额（元） | 分类 |" in reply
+    assert "| 时间 | 流水号 | 交易对手 | 金额（元） | 状态 | 分类 |" in reply
+    first = txns.facts["items"][0]
+    assert first["ref_no"] in reply                               # 每笔都带流水号
+    assert len(items_rows(reply)) == txns.facts["returned_count"]  # 一笔不截断
     ok, offenders = facts_check.verify_numbers(reply, txns.facts)
     assert ok, f"回执出现了事实包里查不到的数字：{offenders}"
+
+
+def items_rows(reply: str) -> list[str]:
+    """明细表的行（以 `| YYYY-MM-` 开头的行）—— 用来数"到底列了几笔"。"""
+    import re
+
+    return [line for line in reply.splitlines()
+            if re.match(r"^\| \d{4}-\d{2}-\d{2} ", line)]
 
 
 def test_reply_degrades_without_the_new_facts() -> None:
@@ -144,33 +166,37 @@ def json_dumps(obj: object) -> str:
     return json.dumps(obj, ensure_ascii=False, default=str)
 
 
-def test_card_draws_metrics_groups_and_expanders(txns) -> None:
-    """指标 + 占比条 + 每个分类一个「展开 N 笔明细」折叠 + 大额榜 + 全量明细，都要真出来。"""
+def test_card_drops_the_old_summary_blocks(txns) -> None:
+    """2026-10-26 二次验收：指标 / 占比条 / 分类折叠 / 大额榜**整块移除** —— 走势图在前，表格为主。"""
     at = _run_card(dict(txns.facts))
 
-    metrics = {metric.label: metric.value for metric in at.metric}
-    assert metrics["支出合计（元）"] == txns.facts["out_sum_yuan"]
-    assert metrics["收入合计（元）"] == txns.facts["in_sum_yuan"]
-    assert metrics["交易笔数"] == str(txns.facts["total_count"])
-
-    first = txns.facts["categories"][0]
-    labels = [str(expander.label) for expander in at.expander]
-    assert any(f"展开「{first['key']}」" in label for label in labels)
-    assert any("金额最大的" in label for label in labels)
-    assert any("查看本区间全部" in label for label in labels)
-    bars = at.get("progress")                                     # AppTest 用 `get` 取非列表属性的元素
-    assert len(bars) == len(txns.facts["categories"])             # 每个分类一根占比条
-    assert bars[0].value == pytest.approx(first["pct"])            # AppTest 给的是百分数（不是 0~1）
+    assert not at.metric                                          # 四个指标没了
+    assert not at.expander                                        # 分类折叠与「查看全部」没了
+    assert not at.get("progress")                                 # 每分类一根的占比条没了
 
 
 def test_card_rows_echo_the_facts_and_nothing_else(txns) -> None:
-    """卡片上的明细表：金额/对手方照抄 facts，界面**不求和、不改数**。"""
+    """卡片上的明细表：金额/对手方/余额照抄 facts，界面**不求和、不改数**。"""
     at = _run_card(dict(txns.facts))
     rendered = "\n".join(str(markdown.value) for markdown in at.markdown)
     first_item = txns.facts["items"][0]
     for text in (first_item["amount_yuan"], first_item["counterparty"],
-                 str(first_item["ts"])[:16].replace("T", " ")):
+                 str(first_item["ts"])[:16].replace("T", " "),
+                 first_item.get("balance_after_yuan") or ""):
         assert text in rendered, f"明细表里缺这笔：{text}"
+
+
+def test_card_ledger_shows_ref_no_and_status_for_every_row(txns) -> None:
+    """**每笔**都要有流水号和交易状态徽标（用户点名要的两列；`—` 占位也算缺数据 → 不许）。"""
+    from agent.render_query import TXN_STATUS_LABELS
+
+    at = _run_card(dict(txns.facts))
+    rendered = "\n".join(str(markdown.value) for markdown in at.markdown)
+    assert "流水号" in rendered and "交易状态" in rendered
+    for item in txns.facts["items"]:
+        assert item["ref_no"] in rendered, f"明细表缺流水号：{item['id']}"
+        assert TXN_STATUS_LABELS[item["status"]] in rendered, f"缺状态：{item['status']}"
+    assert rendered.count("<tr>") >= len(txns.facts["items"])      # 一笔不截断（+1 是表头行）
 
 
 def test_card_draws_the_daily_trend(txns) -> None:

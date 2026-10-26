@@ -29,6 +29,7 @@ import io
 from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
+from agent.render_query import TXN_STATUS_LABELS      # 交易状态改名表（agent 层单一出处，界面不另抄一份）
 from interfaces.web import chart_ui, txn_card_ui
 
 #: 有富卡片的意图（其余意图一律不画 —— 宁可朴素，也不许拿半截数据凑图）。
@@ -91,12 +92,15 @@ def _draw_balance(facts: Mapping[str, Any]) -> None:
 
 
 def _draw_txns(facts: Mapping[str, Any]) -> None:
-    """F02：流水 —— 交给 `txn_card_ui` 画**分类折叠 + 逐笔展开 + 按日走势**。
+    """F02：流水 —— 交给 `txn_card_ui` 画**按日走势（置顶）+ 带流水号/交易状态的全量明细表**。
 
     2026-10-26 改：原先只给两个指标 + 「每根柱子 = 一笔」的柱图 —— 五十笔流水压成十根柱子，
     既看不清分类也点不到具体一笔，用户拿到的是张"看着像图表、实际没信息"的图，
     这是 F02 验收里最刺眼的一处。**详情卡已迁往 `interfaces/web/txn_card_ui.py`**
     （本文件够了 300 行红线），这里只做一行转发，调用点与页面桩全部不变。
+
+    2026-10-26 二次验收：气泡里的回执只留头句（`components.LEDGER_CARD_INTENTS`），
+    曲线与明细由这张卡统一呈现 —— 走势置顶，同一批数不再印两遍。
     """
     txn_card_ui.render(facts, key="txn")
 
@@ -160,10 +164,12 @@ def _table(facts: Mapping[str, Any], intent: str) -> tuple[str, Sequence[str], S
                   "占比": f"{item.get('pct')}%"} for item in groups])
     items = list(facts.get("items") or [])
     if intent == "txn_query" and items:
-        return ("流水明细", ["时间", "交易对手", "分类", "金额（元）"],
+        return ("流水明细", ["时间", "流水号", "交易对手", "分类", "交易状态", "金额（元）"],
                 [{"时间": str(item.get("ts"))[:16].replace("T", " "),
+                  "流水号": item.get("ref_no") or "",
                   "交易对手": item.get("counterparty") or "",
                   "分类": item.get("category") or "",
+                  "交易状态": TXN_STATUS_LABELS.get(str(item.get("status") or ""), "—"),
                   "金额（元）": item.get("amount_yuan")} for item in items])
     if intent == "anomaly_check" and items:
         return ("异常清单", ["时间", "交易对手", "金额（元）", "等级", "依据"],

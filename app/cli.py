@@ -77,9 +77,53 @@ _SPAN_MONTHS = re.compile(r"(?:最近|近)\s*(?:(\d+|[一二三四五六七八�
 _CN_NUM = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
            "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 _HALF_YEAR_MONTHS = 6
+
+# ---------------- 中文月/日说法（为什么要单独认：见 `_BARE_CN_MONTH` 的注释） ----------------
+_CN_ONES = "一二三四五六七八九"
+
+
+def _cn_day(number: int) -> str:
+    """阿拉伯日 → 中文写法（`1`→「一」、`21`→「二十一」）；只用于拼正则交替串。"""
+    tens, ones = divmod(number, 10)
+    if not tens:
+        return _CN_ONES[ones - 1]
+    head = {1: "十", 2: "二十", 3: "三十"}.get(tens, "")
+    return head + (_CN_ONES[ones - 1] if ones else "")
+
+
+#: **月份词** → 数字。除「一月~十二月」外，农历口语也算（正月/元月=1、冬月=11、腊月=12）——
+#: 这些说法在转账/账单场景里出现频率不低，认不出就静默回落当月，代价太大。
+_CN_MONTH_NUM = {**_CN_NUM, "十一": 11, "十二": 12,
+                 "正月": 1, "元月": 1, "冬月": 11, "腊月": 12}
+#: 交替串**长的必须在前**：否则「十二月份」会被「十」先截走 → 答成 10 月（又一次静默错月）。
+#: 这里只收**不带「月」字**的数词，月份后缀统一由调用方拼：
+_CN_MONTH_ALT = "|".join(("十一", "十二", "十", *_CN_ONES))
+#: **自带「月」字**的农历写法：「正月/元月/冬月/腊月」后面不会再跟第二个「月」，只能单列一支
+#: （合进上面的数词表就会出现「正月月」这种永远匹配不上的写法 → 又回到静默回落当月）。
+_CN_MONTH_WORD_ALT = "正月|元月|冬月|腊月"
+#: 「(): 数词 + 月份后缀」或「自带月字的写法」——**两种必须并列**，缺一种就漏一类说法。
+_CN_MONTH_PAT = rf"(?:(?:{_CN_MONTH_ALT})\s*月份?|{_CN_MONTH_WORD_ALT})"
+#: 连同阿拉伯月份一起的整体刀：给 `dates_from_text` 抽「5月1日」「五月一日」这种"月+日"用。
+_CN_MONTH_GRP = rf"(?P<month>(?:{_CN_MONTH_ALT})\s*月份?|{_CN_MONTH_WORD_ALT}|\d{{1,2}}\s*月份?)"
+#: 中文日期 1~31（倒序同样是为了「三十一」不被「三」抢走）。
+#: **必须排在 `_CN_DATE_PAT` 之前**：那个正则的 f-string 在这里就要展开它，
+#: 定义在后面会直接 `NameError`（模块一 import 就炸，连测试收集都过不去）。
+_CN_DAY_ALT = "|".join(_cn_day(n) for n in range(31, 0, -1))
+_CN_DATE_PAT = re.compile(rf"{_CN_MONTH_GRP}\s*(?P<day>{_CN_DAY_ALT}|\d{{1,2}})\s*[日号]")
+#: 「2026年五月的流水」：`_EXPLICIT_MONTH` 只认阿拉伯月份，这里补中文月份。
+_EXPLICIT_CN_MONTH = re.compile(rf"(\d{{4}})\s*[-/年.]\s*(?:({_CN_MONTH_ALT})\s*月份?|({_CN_MONTH_WORD_ALT}))")
+#: 「五月份的流水」「十二月花了多少」——**用户的原话就是这么说的**，要求他改写成
+#: 「2026-05-01 到 2026-05-31」既不现实也不该发生：月份本身就是一段闭区间。
+#: 两个负向前瞻是**必需的**，各挡一类误伤：
+#: ①「三个月**前**」说的是相对偏移，不能被认成三月；
+#: ②「五月**一日**」说的是某一天，整月会把它盖成 05-01~05-31。
+#: 挡掉之后它们会落到各自的处理分支（相对词 / 单日），宁可被追问，也不许静默答错月份。
+_BARE_CN_MONTH = re.compile(rf"(?<!\d)(?:({_CN_MONTH_ALT})\s*月份?|({_CN_MONTH_WORD_ALT}))"
+                            rf"(?!\s*(?:前|后|内|以内|以来|起|这|那)"
+                            rf"|\s*(?:{_CN_DAY_ALT}|\d{{1,2}})\s*[日号])")
 #: 只给了**年**没给月（「2026年的账单」）：负向前瞻排掉「2026年9月」——那种由 `_EXPLICIT_MONTH`
-#: 先接走。工具层认 `YYYY` 年度账期，故这里原样给年份，不缩成某一个月。
-_YEAR_ONLY = re.compile(r"(?<!\d)(\d{4})\s*年(?!\s*\d{1,2}\s*月)")
+#: 先接走。**中文月份同样要排**（「2026年五月」），否则会被这里抢先认成整年。
+_YEAR_ONLY = re.compile(rf"(?<!\d)(\d{{4}})\s*年(?!\s*(?:\d{{1,2}}\s*月|{_CN_MONTH_PAT}))")
 #: 「最近一年」/「近 12 个月」→ **年度账期**：工具层 `analyze_spending` 原生认 `YYYY`（全年聚合），
 #: 比缩成单月诚实得多，也正好是"数据扩到一年"后用得上的说法。
 _YEAR_SPAN = re.compile(r"(?:最近|近)\s*(?:一\s*年|12\s*个?月|十二\s*个?月)")
@@ -95,12 +139,49 @@ def _strip_date_context(text: str) -> str:
     return _DATE_CONTEXT.sub("", text).strip()
 
 
+def _cn_month(match: re.Match | None, *, skip: int = 0) -> int:
+    """从中文月份正则的匹配里取月份（两个分支各占一组，取**第一个非空**的）。
+
+    `skip` 用来跳过前面的捕获组（如 `_EXPLICIT_CN_MONTH` 的第 1 组是年份）。取不到 → 0。
+    """
+    if match is None:
+        return 0
+    raw = next((group for group in match.groups()[skip:] if group), None)
+    return _CN_MONTH_NUM.get(raw, 0) if raw else 0
+
+
+def _month_from_text(raw: str) -> int:
+    """「5月」「五月」「五月份」「正月」→ 月份数字；认不出 → 0。"""
+    for word, month in (("正月", 1), ("元月", 1), ("冬月", 11), ("腊月", 12)):
+        if raw.startswith(word):
+            return month
+    key = raw.replace("月份", "").replace("月", "")
+    if key.isdigit():
+        return int(key)
+    return _CN_MONTH_NUM.get(key, 0)
+
+
+def _cn_number(raw: str) -> int:
+    """中文/阿拉伯数词 → int（`十二`→12、`三十一`→31）；认不出给 0，由调用方决定 fallback。"""
+    if raw.isdigit():
+        return int(raw)
+    if len(raw) == 1:
+        return _CN_NUM.get(raw, 0)
+    if len(raw) == 2:                                            # 「十二」「二十」
+        tens, ones = _CN_NUM.get(raw[0], 0), _CN_NUM.get(raw[1], 0)
+        return tens * 10 + ones if tens >= 1 else 0
+    if len(raw) == 3 and raw[1] == "十":                          # 「三十一」
+        tens, ones = _CN_NUM.get(raw[0], 0), _CN_NUM.get(raw[2], 0)
+        return tens * 10 + ones if tens >= 2 else 0
+    return 0
+
+
 def _span_months(match: re.Match) -> int:
     """「最近 N 个月」→ N；「最近半年」→ 6；都不匹配 → 0（调用方据此决定要不要拦）。"""
     raw = match.group(1)
     if raw is None:                                          # 命中「半年」支（无数字）
         return _HALF_YEAR_MONTHS
-    return int(raw) if raw.isdigit() else _CN_NUM.get(raw, 0)
+    return _cn_number(raw)                                   # 「最近十二个月」→ 12（此前 `_CN_NUM` 查表为 0）
 
 
 def period_from_text(text: str) -> str:
@@ -131,12 +212,19 @@ def period_from_text(text: str) -> str:
     found = _EXPLICIT_MONTH.search(text)
     if found and 1 <= int(found.group(2)) <= 12:
         return f"{int(found.group(1)):04d}-{int(found.group(2)):02d}"
+    found_cn = _EXPLICIT_CN_MONTH.search(text)
+    if found_cn and (month := _cn_month(found_cn, skip=1)):   # 「2026年五月的流水」
+        return f"{int(found_cn.group(1)):04d}-{month:02d}"
     year_only = _YEAR_ONLY.search(text)
     if year_only:
         return year_only.group(1)
     bare = _BARE_MONTH.search(text)
     if bare and 1 <= int(bare.group(1)) <= 12:
         month = int(bare.group(1))
+        year = today.year - 1 if (today.year, month) > (today.year, today.month) else today.year
+        return f"{year:04d}-{month:02d}"
+    bare_cn = _BARE_CN_MONTH.search(text)
+    if bare_cn and (month := _cn_month(bare_cn)):
         year = today.year - 1 if (today.year, month) > (today.year, today.month) else today.year
         return f"{year:04d}-{month:02d}"
     by_length = sorted(PERIOD_WORDS, key=len, reverse=True)
@@ -164,12 +252,15 @@ def dates_from_text(text: str) -> dict:
         return {"date_from": f"{y1}-{int(m1):02d}-{int(d1):02d}",
                 "date_to": f"{y2}-{int(m2):02d}-{int(d2):02d}"}
 
-    cn = re.findall(r"(\d{1,2})\s*月\s*(\d{1,2})\s*[日号]", text)  # 「8月1日到8月31日」
-    if len(cn) >= 2:
+    cn = [(_month_from_text(m.group("month")), _cn_number(m.group("day")))
+          for m in _CN_DATE_PAT.finditer(text)]                   # 「8月1日」/「五月一日」
+    cn = [(month, day) for month, day in cn if month and day]     # 认不出的写法不参与成对判断
+    if len(cn) >= 2:                                             # 「8月1日到8月31日」/「五月一日到五月三十日」
         year = int(iso[0][0]) if iso else anchor_date().year
-        (m1, d1), (m2, d2) = cn[0], cn[-1]
-        return {"date_from": f"{year}-{int(m1):02d}-{int(d1):02d}",
-                "date_to": f"{year}-{int(m2):02d}-{int(d2):02d}"}
+        m1, d1 = cn[0]
+        m2, d2 = cn[-1]
+        return {"date_from": f"{year}-{m1:02d}-{d1:02d}",
+                "date_to": f"{year}-{m2:02d}-{d2:02d}"}
 
     def whole_month(y: int, m: int) -> dict:
         return {"date_from": f"{y}-{m:02d}-01",
@@ -207,10 +298,10 @@ def dates_from_text(text: str) -> dict:
         y, m, d = iso[0]
         day = f"{y}-{int(m):02d}-{int(d):02d}"
         return {"date_from": day, "date_to": day}
-    if len(cn) == 1:                                             # 单个「8月1日」→ 当天（锚点年）
-        m, d = cn[0]
-        day = f"{today.year}-{int(m):02d}-{int(d):02d}"
-        return {"date_from": day, "date_to": day}
+    if len(cn) == 1:                                             # 「8月1日」/「五月一日」→ 当天（锚点年）
+        month, day = cn[0]
+        single = f"{today.year}-{month:02d}-{day:02d}"
+        return {"date_from": single, "date_to": single}
 
     #: 整月说法（「2026-09 的流水」「9月的明细」）：月份交给 `period_from_text` 统一认，
     #: 这里只把它摊成首末日 —— 不再各写一份 `YYYY-MM` 正则，避免两边口径漂移。
@@ -242,6 +333,12 @@ def offline_verdict(text: str) -> tuple[str, dict]:
             if intent == "txn_query":                    # F02 要的日期槽位（替身抽，非业务实现）
                 filled.update(dates_from_text(text))
             return intent, filled
+
+    #: 一个关键词都没命中，**但话里给得出来时间区间** → 用户要的几乎肯定是流水
+    #: （「查一下五月份」「2025-09 的明细」）。不让它在四个入口里变 orphan-reply「没太理解」。
+    dates = dates_from_text(text)
+    if dates:
+        return "txn_query", dict(dates)
     return "out_of_scope", {}
 
 
