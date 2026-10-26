@@ -121,17 +121,20 @@ def reschedule_scheduled(schedule_id: str, execute_at: str) -> ToolResult:
 # ---------------- T34/T35：循环预约（设周期 / 续下一期） ----------------
 
 def _next_occurrence(execute_at: str, cycle: str) -> str:
-    """下一期的时间：weekly = +7 天；monthly = 下月**同日**，当月没有那一天就取**月末**。
+    """下一期的时间：weekly = +7 天；monthly = 下月同日（当月没有则取月末）。
 
-    「每个月月末给房东转账」= 某月 30/31 号 + monthly → 2 月自动落到 28/29 号（不报错、不漏期）。
+    **月末对齐**（2026-10-26 修）：源日期若正好是它所在月的**最后一天**，下一期也取
+    「下个月的最后一天」—— 否则会漂移：10-31 → 11-30 → **12-30**（应为 12-31），
+    用户「每个月末」的语义就丢了。
     """
     moment = datetime.datetime.fromisoformat(execute_at)
     if cycle == "weekly":
         return (moment + datetime.timedelta(days=7)).isoformat(timespec="minutes")
     year, month = (moment.year + 1, 1) if moment.month == 12 else (moment.year, moment.month + 1)
     last_day = calendar.monthrange(year, month)[1]
-    return moment.replace(year=year, month=month, day=min(moment.day, last_day)).isoformat(
-        timespec="minutes")
+    is_month_end = moment.day == calendar.monthrange(moment.year, moment.month)[1]
+    day = last_day if is_month_end else min(moment.day, last_day)
+    return moment.replace(year=year, month=month, day=day).isoformat(timespec="minutes")
 
 
 def set_schedule_repeat(schedule_id: str, cycle: str, until: str = "") -> ToolResult:
@@ -202,11 +205,14 @@ def schedule_next_occurrence(schedule_id: str) -> ToolResult:
     next_id = f"sch_{uuid.uuid4().hex[:12]}"
     now = datetime.datetime.now().isoformat(timespec="minutes")
     with transaction(conn):
+        #: 2026-10-26 修：**必须带上 `repeat_until`** —— 之前漏了，续出来的下一期结束日为空，
+        #: 用户说的「循环到年底」在第一次执行后就失效（实测：12-31 之后还会继续排）。
         conn.execute(
             "INSERT INTO scheduled_transfer (id, user_id, payee_id, amount, execute_at, status,"
-            " tier, token, created_at, repeat_cycle) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            " tier, token, created_at, repeat_cycle, repeat_until)"
+            " VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?)",
             (next_id, row["user_id"], row["payee_id"], row["amount"], when,
-             row["tier"], None, now, cycle))
+             row["tier"], None, now, cycle, (end or None)))
         dao.insert_audit(f"trace-{uuid.uuid4().hex[:12]}", current_session_id(), actor="agent",
                          intent="transfer_scheduled", tool=NEXT_TOOL,
                          params_json={"from": schedule_id, "next": next_id, "execute_at": when},
