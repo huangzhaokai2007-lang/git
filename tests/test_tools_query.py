@@ -111,10 +111,9 @@ def test_month_with_more_rows_than_the_page_limit_is_refused(seeded: Path) -> No
         with transaction(conn):
             conn.executemany(
                 "INSERT INTO txn (id, account_id, ts, amount, direction, counterparty, category,"
-                " channel, memo, balance_after, ref_no) VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, ?, ?)",
+                " channel, memo, balance_after) VALUES (?, ?, ?, ?, 'out', ?, ?, ?, ?, ?)",
                 [(f"txn-bulk-{index:04d}", ACCOUNT, f"2026-09-{index % 28 + 1:02d}T12:00:00", -100,
-                  "灌水商户", "餐饮", "二维码", None, 0, f"202609{index % 28 + 1:02d}1200{index:04d}1")
-                 for index in range(floor)])
+                  "灌水商户", "餐饮", "二维码", None, 0) for index in range(floor)])
     finally:
         conn.close()
     for name, args in (("list_txn", ("2026-09-01", "2026-09-30")), ("analyze_spending", ("2026-09",))):

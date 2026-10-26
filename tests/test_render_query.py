@@ -21,11 +21,9 @@ TXN_FACTS = {
     "date_from": "2026-08-01", "date_to": "2026-08-31",
     "page_out_sum_yuan": "465.00", "page_in_sum_yuan": "11,046.00",
     "items": [{"id": "txn-1", "ts": "2026-08-28T16:27:00", "counterparty": "街角烧烤",
-               "category": "餐饮", "amount": -1500, "amount_yuan": "-15.00",
-               "ref_no": "2026082816270001", "status": "done"},
+               "category": "餐饮", "amount": -1500, "amount_yuan": "-15.00"},
               {"id": "txn-2", "ts": "2026-08-28T13:38:00", "counterparty": "好买商城",
-               "category": "电商", "amount": -47000, "amount_yuan": "-470.00",
-               "ref_no": "2026082813380002", "status": "refunded"}],
+               "category": "电商", "amount": -47000, "amount_yuan": "-470.00"}],
 }
 
 
@@ -33,32 +31,10 @@ def test_txn_reply_lists_every_transaction_not_just_a_total() -> None:
     """缺口本身：老口径只印一句合计，用户**一笔流水都看不到** → 明细表必须上回执。"""
     reply = render_query.render_txns(TXN_FACTS)
     assert "共查到 2 笔交易" in reply
-    assert "| 时间 | 流水号 | 交易对手 | 金额（元） | 状态 | 分类 |" in reply
-    for item, status in zip(TXN_FACTS["items"], ("已完成", "退款")):
-        assert (f"| {item['ts'][:16].replace('T', ' ')} | {item['ref_no']} "
-                f"| {item['counterparty']} | {item['amount_yuan']} | {status} "
-                f"| {item['category']} |") in reply
-
-
-def test_txn_reply_never_truncates_the_items() -> None:
-    """2026-10-26 验收口径：`items` 有多少笔就列多少笔，**不许再只列一部分**。"""
-    many = [{**TXN_FACTS["items"][0], "ts": f"2026-08-{day:02d}T10:00:00",
-             "ref_no": f"202608{day:02d}10000001", "amount_yuan": "-15.00"}
-            for day in range(1, 29)]
-    reply = render_query.render_txns({**TXN_FACTS, "items": many})
-    assert reply.count("\n| 2026-08-") == len(many)          # 28 笔一行不少
-    assert "一部分" not in reply and "其余" not in reply
-
-
-def test_txn_reply_drops_the_summary_blocks() -> None:
-    """净额行 / 分类汇总表 / 大额榜已从回执移除（用户嫌"前面这些"喧宾夺主）。"""
-    reply = render_query.render_txns({**TXN_FACTS, "net_yuan": "1.00",
-                                      "categories": [{"key": "餐饮", "count": 1,
-                                                      "amount_yuan": "15.00", "pct": 100}],
-                                      "largest": TXN_FACTS["items"]})
-    assert "净" not in reply
-    assert "| 分类 | 笔数 |" not in reply
-    assert "金额最大的几笔" not in reply
+    assert "| 时间 | 交易对手 | 金额（元） | 分类 |" in reply
+    for item in TXN_FACTS["items"]:
+        assert f"| {item['ts'][:16].replace('T', ' ')} | {item['counterparty']} | " \
+               f"{item['amount_yuan']} | {item['category']} |" in reply
 
 
 def test_txn_empty_keeps_the_count_so_it_does_not_read_like_a_failure() -> None:

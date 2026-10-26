@@ -85,8 +85,6 @@ class TxnItem(BaseModel):
     channel: str | None = None
     memo: str | None = None
     balance_after: int
-    ref_no: str | None = None                       # F02：流水号（业务参考号）
-    status: str | None = None                       # F02：done | pending | failed | refunded
 
 
 class ListTxnData(BaseModel):
