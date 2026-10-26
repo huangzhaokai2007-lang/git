@@ -59,3 +59,36 @@ def test_pie_is_retained_in_chat_history_without_repeating_in_bill_panel(monkeyp
     assert len(pies) == 1
     assert json.loads(pies[0].proto.json)['animation_id'] == identity
     assert '| 分类 | 金额（元） | 占比 |' not in _text(at)
+
+
+def test_pie_selection_loads_details_without_appending_chat_and_caches_redraw(monkeypatch):
+    from agent import bill_detail_flow
+    at = _app(monkeypatch)
+    at.chat_input[0].set_value('上个月的账单总结').run()
+    messages = list(at.session_state['messages'])
+    turn = messages[-1]['turn']
+    key = f"pie-{len(messages) - 1}:{turn['trace_id']}"
+    calls = []
+    original = bill_detail_flow.load
+    def load(session, source, category):
+        calls.append((source['facts']['period'], category))
+        return original(session, source, category)
+    monkeypatch.setattr(bill_detail_flow, 'load', load)
+    at.session_state[key] = {'selected': '电商'}
+    at.run()
+    assert not at.exception
+    pie = next(e for e in at.get('bidi_component') if e.proto.component_name.endswith('spending_pie'))
+    payload = json.loads(pie.proto.json)
+    assert payload['selected'] == '电商'
+    assert payload['detail']['ok'] and payload['detail']['items']
+    assert all(item['category'] == '电商' and item['amount'] < 0 for item in payload['detail']['items'])
+    assert calls == [('2026-08', '电商')]
+    at.run()
+    assert calls == [('2026-08', '电商')]
+    assert at.session_state['messages'] == messages
+    at.session_state[key] = {'selected': {'category': '餐饮', 'focus_target': 'ledger', 'focus_id': 'kbd-1'}}
+    at.run()
+    pie = next(e for e in at.get('bidi_component') if e.proto.component_name.endswith('spending_pie'))
+    payload = json.loads(pie.proto.json)
+    assert payload['selected'] == '餐饮' and payload['focus_target'] == 'ledger'
+    assert payload['focus_id'] == 'kbd-1'

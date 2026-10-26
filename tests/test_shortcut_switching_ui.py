@@ -10,7 +10,7 @@ def offline(monkeypatch):
     routes = {'我买了哪些理财': ('wealth_holdings', {}),
               '我有哪些订阅': ('subscription_list', {}),
               '看看还有哪些理财产品': ('wealth_all_products', {}),
-              '我的白名单有哪些': ('payee_list', {}),
+              '我的收款人有哪些': ('payee_list', {}),
               '给王五转 100 元': ('transfer_single', {'payee': '王五', 'amount': '100'}),
               '出一份上个月的账单报告': ('bill_report', {'period': '2026-08', 'kind': 'monthly'})}
     def resolve(text, history=None):

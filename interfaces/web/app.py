@@ -19,7 +19,7 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import balance_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
+from agent import balance_flow, bill_detail_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -240,7 +240,9 @@ def _sidebar() -> None:
 
 def _chat_page() -> None:
     messages = st.session_state["messages"]
-    ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card)
+    ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card,
+                  bill_details=lambda source, category: _agent_executor().submit(
+                      bill_detail_flow.load, st.session_state['session_id'], source, category).result())
     import scene_ui
     scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
     _bill_charts()

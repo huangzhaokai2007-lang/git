@@ -1,6 +1,51 @@
 // All numeric labels are verbatim facts. Arithmetic only positions SVG geometry.
-export default function ({ parentElement, data }) {
+function ledgerRow(item, element) {
+  const row = element('li', 'bank-pie-txn');
+  const main = element('div', 'bank-pie-txn-main');
+  main.append(element('span', 'bank-pie-merchant', item.counterparty || '未注明交易对手'),
+    element('strong', 'bank-pie-txn-amount', `${item.amount_yuan} 元`));
+  const meta = element('div', 'bank-pie-txn-meta');
+  meta.append(element('time', '', String(item.ts || '').replace('T', ' ')),
+    element('span', '', item.channel || ''));
+  row.append(main, meta);
+  if (item.memo) row.title = String(item.memo);
+  return row;
+}
+
+function renderLedger(root, data, select, element) {
+  root.querySelector?.('.bank-pie-ledger')?.remove();
+  if (!data.selected) return;
+  const panel = element('section', 'bank-pie-ledger');
+  panel.setAttribute('aria-label', `${data.selected}支出明细`);
+  const header = element('div', 'bank-pie-ledger-head');
+  header.append(element('strong', '', `${data.selected} · 支出明细`));
+  const close = element('button', 'bank-pie-close', '收起');
+  close.type = 'button';
+  close.onclick = event => select(null, event?.detail === 0);
+  header.append(close);
+  panel.append(header);
+  const detail = data.detail;
+  if (!detail) panel.append(element('p', 'bank-pie-ledger-note', '正在读取明细…'));
+  else if (!detail.ok) panel.append(element('p', 'bank-pie-ledger-note', detail.message || '暂时无法读取明细。'));
+  else {
+    panel.append(element('p', 'bank-pie-ledger-note', `${data.period} · ${detail.count} 笔 · 支出 ${detail.amount_yuan} 元`));
+    if (!detail.items?.length) panel.append(element('p', 'bank-pie-ledger-note', '该分类在此账期暂无支出明细。'));
+    else {
+      const list = element('ul', 'bank-pie-ledger-scroll');
+      list.tabIndex = 0;
+      list.setAttribute('aria-label', '交易明细，可上下滚动');
+      detail.items.forEach(item => list.append(ledgerRow(item, element)));
+      panel.append(list);
+    }
+  }
+  root.append(panel);
+}
+
+export default function ({ parentElement, data, setStateValue = () => {} }) {
   const root = parentElement.querySelector('.bank-pie');
+  const active = document.activeElement;
+  const restoreFocus = root.dataset.focusTarget || (root.contains?.(active) && active?.getAttribute('aria-label'));
+  delete root.dataset.focusTarget;
   const ns = 'http://www.w3.org/2000/svg';
   const colors = ['#a49be0', '#7e9fac', '#b3bda0', '#c5a888', '#8b9bc5', '#b08f9e', '#8caeaa'];
   const element = (tag, cls, text) => {
@@ -28,7 +73,7 @@ export default function ({ parentElement, data }) {
   }
   const layout = element('div', 'bank-pie-layout');
   const figure = element('figure', 'bank-pie-figure');
-  const svg = svgElement('svg', { viewBox: '0 0 240 240', role: 'img', 'aria-label': '支出分类饼图' });
+  const svg = svgElement('svg', { viewBox: '0 0 240 240', role: 'group', 'aria-label': '支出分类饼图' });
   const defs = svgElement('defs');
   const maskId = `pie-mask-${data.animation_id}`;
   const mask = svgElement('mask', { id: maskId, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 240, height: 240 });
@@ -60,12 +105,24 @@ export default function ({ parentElement, data }) {
   const legend = element('ul', 'bank-pie-legend');
   legend.setAttribute('aria-label', '分类金额与占比');
   const entries = [];
+  let selected = data.selected || null;
+  const selectedIndex = () => rows.find(row => row.group.key === selected)?.index ?? null;
   const highlight = index => {
     paths.forEach(item => {
       item.path.classList.toggle('is-muted', index !== null && item.index !== index);
       item.path.classList.toggle('is-highlighted', item.index === index);
     });
     entries.forEach(item => item.node.classList.toggle('is-muted', index !== null && item.index !== index));
+  };
+  const select = (category, keyboard = false) => {
+    const previous = selected;
+    selected = category === selected ? null : category;
+    if (keyboard) root.dataset.focusTarget = selected ? 'ledger' : `查看${previous}支出明细`;
+    highlight(selectedIndex());
+    renderLedger(root, { ...data, selected, detail: null }, select, element);
+    setStateValue('selected', keyboard ? { category: selected,
+      focus_target: selected ? 'ledger' : `查看${previous}支出明细`,
+      focus_id: `${Date.now()}:${Math.random()}` } : selected);
   };
   rows.forEach(({ group, index }) => {
     const row = element('li');
@@ -77,8 +134,18 @@ export default function ({ parentElement, data }) {
     entries.push({ node: row, index });
     const targets = [row, paths.find(item => item.index === index)?.path].filter(Boolean);
     targets.forEach(node => {
+      node.setAttribute('role', 'button');
+      node.setAttribute('aria-label', `查看${group.key}支出明细`);
+      node.setAttribute('aria-pressed', String(selected === group.key));
+      node.onclick = () => select(group.key);
+      node.onkeydown = event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          select(group.key, true);
+        }
+      };
       node.onpointerenter = node.onfocus = () => highlight(index);
-      node.onpointerleave = node.onblur = () => highlight(null);
+      node.onpointerleave = node.onblur = () => highlight(selectedIndex());
     });
     legend.append(row);
   });
@@ -90,6 +157,21 @@ export default function ({ parentElement, data }) {
   }
   layout.append(figure, details);
   root.append(layout);
+  highlight(selectedIndex());
+  renderLedger(root, data, select, element);
+  const focusKey = `bank-pie-focus:${data.animation_id}`;
+  let needsFocus = Boolean(data.focus_id);
+  try { needsFocus &&= sessionStorage.getItem(focusKey) !== data.focus_id; } catch (_) { /* optional storage */ }
+  const focusTarget = needsFocus ? data.focus_target : restoreFocus;
+  if (focusTarget) {
+    const target = ['ledger', '交易明细，可上下滚动'].includes(focusTarget)
+      ? root.querySelector('.bank-pie-ledger-scroll') || root.querySelector('.bank-pie-close')
+      : paths.find(item => item.path.getAttribute('aria-label') === focusTarget)?.path;
+    requestAnimationFrame(() => {
+      target?.focus({ preventScroll: true });
+      if (needsFocus) try { sessionStorage.setItem(focusKey, data.focus_id); } catch (_) { /* optional storage */ }
+    });
+  }
   const storageKey = `bank-pie-played:${data.animation_id}`;
   let played = false;
   try { played = sessionStorage.getItem(storageKey) === '1'; } catch (_) { /* storage may be unavailable */ }

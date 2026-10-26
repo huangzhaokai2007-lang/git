@@ -41,7 +41,8 @@ def sim_banner() -> None:
 
 def transcript(messages: Sequence[Mapping[str, Any]],
                *, payee_card: Callable[[str], bool] | None = None,
-               insight_card: Callable[[Mapping[str, Any], str], bool] | None = None) -> None:
+               insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
+               bill_details: Callable[[dict, str], dict] | None = None) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
@@ -58,7 +59,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
             if not drawn:
                 if message["role"] == "assistant":
                     key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
-                    if not spending_pie.render_reply(message["text"], turn or {}, key=key, animate=index == len(messages) - 1):
+                    if not spending_pie.render_reply(message["text"], turn or {}, key=key,
+                            animate=index == len(messages) - 1, detail_loader=bill_details):
                         reply_animation.render(message["text"], key, animate=index == len(messages) - 1)
                 else:
                     st.markdown(message["text"])
