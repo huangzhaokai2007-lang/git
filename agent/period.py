@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import calendar
+import datetime
 import re
 from datetime import date
 
@@ -76,11 +77,38 @@ def resolve_period(value: object) -> str | None:
     return None if canonical is None else month_shift(RELATIVE_PERIOD_OFFSETS[canonical])
 
 
+def _absolute_day(text: str) -> str | None:
+    """把「绝对日期」的几种常见写法归一成 `YYYY-MM-DD`；认不出 → None。
+
+    2026-10-27（用户实测）：「2027.10.10」被判成缺日期 —— 此前只认连字符 ISO。
+    现在支持：`2027-10-10` / `2027.10.10` / `2027/10/10` / `2027年10月10日` /
+    `2027年10月10号`，以及省略年份的 `10月10日`（按「今年；已过则明年」补）。
+    """
+    cleaned = text.replace(" ", "")
+    match = re.fullmatch(r"(\d{4})[年./-](\d{1,2})[月./-](\d{1,2})[日号]?", cleaned)
+    if match is None:
+        match = re.fullmatch(r"(\d{4})(\d{2})(\d{2})", cleaned)
+    if match is not None:
+        year, month, day = (int(part) for part in match.groups())
+    else:
+        partial = re.fullmatch(r"(\d{1,2})[月./-](\d{1,2})[日号]?", cleaned)
+        if partial is None:
+            return None
+        today = datetime.date.today()
+        year, month, day = today.year, int(partial.group(1)), int(partial.group(2))
+        if (month, day) < (today.month, today.day):
+            year += 1
+    try:
+        return datetime.date(year, month, day).isoformat()
+    except ValueError:
+        return None
+
+
 def resolve_day(value: object, *, edge: str) -> str | None:
-    """日期槽位 → `YYYY-MM-DD`：ISO 原样；相对说法 → 该月首/末日；其它 → `None`（判为缺失）。"""
+    """日期槽位 → `YYYY-MM-DD`：绝对日期（多种写法）/ 相对说法（该月首末日）；认不出 → `None`。"""
     text = str(value or "").strip()
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        return text
+    if (absolute := _absolute_day(text)) is not None:
+        return absolute
     canonical = normalize_relative_period(text)
     if canonical is None:
         return None

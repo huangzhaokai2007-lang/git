@@ -39,6 +39,7 @@ import activity_ui
 import wealth_ui                                              # noqa: E402  （main：活动流）
 import subscription_ui                                          # noqa: E402  （F18：订阅行内取消）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
+import slot_form_ui                                             # noqa: E402  （缺槽填表卡）
 
 load_dotenv(ROOT / ".env")
 
@@ -295,6 +296,8 @@ def _chat_page() -> None:
         aa_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-gift-query"):                  # F20：送礼查询卡 + 支付/取消
         gift_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    #: 缺槽 → 直接弹「填表卡」（比打字快；文字补槽仍然可用）。
+    slot_form_ui.render(_agent_executor(), st.session_state["session_id"])
     #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
     #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
     _render_confirm()

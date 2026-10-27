@@ -301,3 +301,18 @@ def set_today_flows(path: Path, day: str, rows: list[tuple[str, int]]) -> None:
          (f"txn-fill-{index:03d}", SAVINGS_ID, ts, cents,
           f"{ts[:16].replace('-', '').replace('T', '').replace(':', '')}{index:04d}1"))
         for index, (ts, cents) in enumerate(rows)])
+
+
+@pytest.fixture(autouse=True)
+def _reset_pending_slots():
+    """每个用例前清空「缺槽续接」登记（`agent/pending_slots` 是模块级全局）。
+
+    **为什么需要**：缺槽追问会登记 `(intent, slots, missing)`，供下一句短答续接。
+    测试里多个用例共用一个 session 名，上一个用例的登记会泄漏到下一个用例，
+    表现为「明明没说话却被合并了槽位」（实测：两条 clarify 用例因此变红）。
+    """
+    from agent import pending_slots
+
+    pending_slots.clear()
+    yield
+    pending_slots.clear()
