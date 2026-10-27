@@ -227,7 +227,7 @@ def test_card_questions_reach_list_cards(seeded: Path, monkeypatch: pytest.Monke
     # 只读路径按 §5 恒 L0：`Turn.tier` 只在写路径回填（占位点不变），L0 落在审计行里（见下一条用例）
     assert turn.tier is None and turn.executed is False and turn.error_code is None
     assert turn.states == HAPPY_STATES
-    assert "还没接通" not in turn.reply and turn.reply.startswith("您名下")
+    assert "还没接通" not in turn.reply and _body(turn.reply).startswith("您名下")
 
 
 def test_routed_lost_question_only_lists_that_state(seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -259,3 +259,14 @@ def test_dao_module_still_has_no_card_read_helper(seeded: Path) -> None:
     """`data/dao.py` 顶格 300 行 → 读卡原语住 `_dao_core`，没有反向把 dao.py 撑破。"""
     assert not hasattr(dao, "list_cards")
     assert len(Path(dao.__file__).read_text(encoding="utf-8").splitlines()) <= 300
+
+def _body(reply: str) -> str:
+    """去掉回执开头的「【订阅提醒】/【预约转账已执行】…」这类**附注行**，返回正文。
+
+    2026-10-27：F18 起，提醒会拼在回执**前面**（设计如此），于是 `startswith("找…")` /
+    `startswith("您名下")` 这类断言会被附注挡掉。断言正文前先剥附注，不改产品行为。
+    """
+    lines = [line for line in str(reply).splitlines()]
+    while lines and (not lines[0].strip() or lines[0].lstrip().startswith("【")):
+        lines.pop(0)
+    return "\n".join(lines)

@@ -66,7 +66,7 @@ def test_ambiguous_payee_lists_every_masked_candidate(wired, monkeypatch) -> Non
     facts = transfer.resolve_payee("李四").facts
     turn = turn_for(monkeypatch, "给李四转 100 元", [intent({"payee": "李四", "amount": "100.00"})])
     assert turn.executed is False and turn.missing_slots == ["payee"]
-    assert turn.reply.startswith(f"找到 {facts['candidate_count']} 个")        # 条数来自 facts
+    assert _body(turn.reply).startswith(f"找到 {facts['candidate_count']} 个")   # 条数来自 facts
     for cand in facts["candidates"]:                                          # 逐个候选都在回执里
         assert cand["name"] in turn.reply and cand["phone"] in turn.reply
     assert transfer.resolve_payee("李四").data["ambiguous"] is True            # 确实歧义，不是唯一命中
@@ -151,3 +151,14 @@ def test_write_path_without_payee_query_keeps_the_generic_prompt(wired, monkeypa
     turn = turn_for(monkeypatch, "转 100 元", [intent({"amount": "100.00"})])
     assert turn.missing_slots == ["payee"]
     assert turn.reply == templates.clarify_missing(["payee"])
+
+def _body(reply: str) -> str:
+    """去掉回执开头的「【订阅提醒】/【预约转账已执行】…」这类**附注行**，返回正文。
+
+    2026-10-27：F18 起，提醒会拼在回执**前面**（设计如此），于是 `startswith("找…")` /
+    `startswith("您名下")` 这类断言会被附注挡掉。断言正文前先剥附注，不改产品行为。
+    """
+    lines = [line for line in str(reply).splitlines()]
+    while lines and (not lines[0].strip() or lines[0].lstrip().startswith("【")):
+        lines.pop(0)
+    return "\n".join(lines)

@@ -72,7 +72,10 @@ def parse_payee_reply(reply: str) -> PayeeCard | None:
         index += 1
     if not rows:
         return None
-    head = next((line for line in lines[:start] if line), "")
+    #: 2026-10-27 修：回执开头可能是「【订阅提醒】…」「【预约转账已执行】…」这类**附注**，
+    #: 它们抢到 head 就会让卡片副标题显示成"订阅提醒"（实测）。附注一律不当汇总句。
+    head = next((line for line in lines[:start]
+                 if line and not line.startswith("【")), "")
     foot = next((line for line in lines[index:] if line), "")
     return PayeeCard(head=head, rows=tuple(rows), foot=foot)
 
