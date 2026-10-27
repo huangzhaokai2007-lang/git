@@ -42,10 +42,16 @@ def sim_banner() -> None:
 def transcript(messages: Sequence[Mapping[str, Any]],
                *, payee_card: Callable[[str], bool] | None = None,
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
-               bill_details: Callable[[dict, str], dict] | None = None) -> None:
+               bill_details: Callable[[dict, str], dict] | None = None,
+               compact: bool = False) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
+        if compact:
+            from interfaces.web.workspace_ui import summary
+            with st.chat_message(message['role']):
+                st.markdown(message['text'] if message['role'] == 'user' else summary(message))
+            continue
         if (message["role"] == "assistant" and turn.get("intent") == "card_query"
                 and turn.get("tool_calls") == ["list_bound_cards"]
                 and (turn.get("facts") or {}).get("items")

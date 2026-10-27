@@ -1,0 +1,123 @@
+"""One current workspace; history never owns live business widgets."""
+import pytest
+from agent import confirm_card, orchestrator
+from tests.test_card_binding_ui import app, bind, click, CARD
+
+
+def test_same_card_shortcut_keeps_existing_detail_and_history(monkeypatch, seeded):
+    at = app(monkeypatch, seeded)
+    click(at, '管卡')
+    bind(at)
+    click(at, '6222 **** **** 0001')
+    before = list(at.session_state['messages'])
+    click(at, '管卡')
+    assert list(at.session_state['messages']) == before
+    assert at.session_state['cards-view']['selected'] == CARD
+    assert sum(button.label == '关闭详情' for button in at.button) == 1
+
+
+def test_switch_from_card_details_to_transfer_has_single_business_view(monkeypatch, seeded):
+    from agent import classifier
+    monkeypatch.setattr(classifier, 'classify', lambda *a, **kw: classifier.IntentOut(
+        intent='transfer_single', confidence=1, slots={'payee': '王五', 'amount': 100}))
+    at = app(monkeypatch, seeded)
+    click(at, '管卡')
+    bind(at)
+    click(at, '6222 **** **** 0001')
+    click(at, '临时锁卡')
+    click(at, '转账')
+    assert not at.exception
+    assert not any(button.label in ('关闭详情', '查看完整卡号', '确认锁卡') for button in at.button)
+    assert not any('我的银行卡' in item.value for item in at.markdown)
+    current = confirm_card.current(at.session_state['session_id'])
+    assert current and current.intent == 'transfer_single'
+    credential = current.credential
+    before = list(at.session_state['messages'])
+    click(at, '转账')
+    assert list(at.session_state['messages']) == before
+    assert confirm_card.current(at.session_state['session_id']).credential == credential
+
+
+@pytest.mark.parametrize('raises', [False, True])
+def test_failed_read_keeps_previous_bill_and_retries_in_place(monkeypatch, seeded, raises):
+    from agent import card_binding_flow
+    responses = [orchestrator.Turn(trace_id='bill-one', intent='bill_analysis',
+                 reply='2026-08 共支出 5.00 元', facts={'period':'2026-08', 'total_yuan':'5.00'}),
+                 orchestrator.Turn(trace_id='bill-error', intent='bill_analysis',
+                 reply='暂时读取失败', error_code='INTERNAL_ERROR'),
+                 orchestrator.Turn(trace_id='bill-two', intent='bill_analysis', reply='2026-09 共支出 8.00 元',
+                                  facts={'period':'2026-09', 'total_yuan':'8.00'})]
+    def respond(*args, **kwargs):
+        response = responses.pop(0)
+        if raises and response.error_code:
+            raise RuntimeError('offline')
+        return response
+    monkeypatch.setattr(card_binding_flow, 'handle', respond)
+    at = app(monkeypatch, seeded)
+    at.chat_input[0].set_value('八月账单').run()
+    at.chat_input[0].set_value('九月呢').run()
+    assert at.session_state['workspace-result']['turn']['trace_id'] == 'bill-one'
+    assert len(at.error) == 1
+    if raises:
+        assert not any(button.label == '重试查询' for button in at.button)
+        at.chat_input[0].set_value('九月呢').run()
+    else:
+        click(at, '重试查询')
+    assert at.session_state['workspace-result']['turn']['trace_id'] == 'bill-two'
+    assert not at.error
+
+
+def test_new_query_replaces_operation_records(monkeypatch, seeded):
+    from agent import card_binding_flow
+    monkeypatch.setattr(card_binding_flow, 'handle', lambda *a, **kw:
+        orchestrator.Turn(trace_id='after-records', intent='bill_analysis', reply='八月账单',
+                          facts={'period': '2026-08', 'total_yuan': '5.00'}))
+    at = app(monkeypatch, seeded)
+    click(at, '操作记录')
+    at.chat_input[0].set_value('八月账单').run()
+    assert not at.session_state['operation-records-open']
+    assert any(button.label == '最大的一笔' for button in at.button)
+
+
+def test_unknown_financial_exception_never_offers_read_retry(monkeypatch, seeded):
+    from agent import card_binding_flow
+    at = app(monkeypatch, seeded)
+    at.session_state['workspace-result'] = {'turn': {'intent': 'bill_analysis'}, 'scene': 'bills'}
+    def fail(*args, **kwargs):
+        raise RuntimeError('unknown execution outcome')
+    monkeypatch.setattr(card_binding_flow, 'handle', fail)
+    at.chat_input[0].set_value('给王五转100元').run()
+    assert at.error
+    assert not any(button.label == '重试查询' for button in at.button)
+
+
+def test_clear_category_preserves_cross_month_date_range(monkeypatch, seeded):
+    from agent import scene_context
+    at = app(monkeypatch, seeded)
+    session = at.session_state['session_id']
+    scene_context.update(session, intent='txn_query', period=None, category='电商',
+                         read_request={'date_from': '2026-07-31', 'date_to': '2026-08-03'})
+    at.session_state['workspace-result'] = {'scene': 'bills', 'prompt': '最近的交易',
+        'turn': {'intent': 'txn_query', 'reply': '当前范围的交易', 'facts': {'items': []}}}
+    at.run()
+    click(at, '清除分类')
+    context = scene_context.snapshot(session)
+    assert context.get('category') is None
+    assert context['read_request']['date_from'] == '2026-07-31'
+    assert context['read_request']['date_to'] == '2026-08-03'
+
+
+def test_transaction_workspace_shows_readable_fields_without_internal_ids(monkeypatch, seeded):
+    from agent import card_binding_flow
+    turn = orchestrator.Turn(trace_id='ledger-result', intent='txn_query',
+        reply='当前范围共 1 笔交易。\n流水 txn-internal-001｜合成商户｜-5.00 元',
+        facts={'items': [{'id': 'txn-internal-001', 'ts': '2026-08-10T12:00:00',
+                         'counterparty': '合成商户', 'category': '电商', 'amount_yuan': '-5.00'}]})
+    monkeypatch.setattr(card_binding_flow, 'handle', lambda *a, **kw: turn)
+    at = app(monkeypatch, seeded)
+    at.chat_input[0].set_value('看看这笔交易').run()
+    assert not at.exception
+    assert not any('txn-internal-001' in item.value for item in at.markdown)
+    assert len(at.dataframe) == 1
+    row = at.dataframe[0].value.iloc[0]
+    assert row['交易对手'] == '合成商户' and row['金额（元）'] == '-5.00'

@@ -88,3 +88,11 @@ ul.tl .v{color:var(--bank-text);font-size:14px;word-break:break-word}
 .st-key-credit-limit-panel h3{font-size:20px;padding:.15rem 0 .5rem}
 @media(max-width:760px){[data-testid="stMainBlockContainer"]{padding:1.5rem 1rem 6rem}[data-testid="stBottomBlockContainer"]{padding:1rem}[data-testid="stChatMessage"]{padding:1rem .25rem}[data-testid="stForm"]{padding:14px}}
 @media(prefers-reduced-motion:reduce){button[kind]{transition:none}}
+:root{--bank-space:16px;--bank-radius:12px;--bank-motion:240ms;--bank-amount-font:Georgia,"Times New Roman",serif}
+.st-key-current-business{border-top:1px solid var(--bank-border);padding-top:var(--bank-space);margin-top:8px}
+.st-key-current-business>[data-testid="stVerticalBlock"]{gap:var(--bank-space)}
+.st-key-current-business [data-testid="stMetricValue"]{font-family:var(--bank-amount-font);font-weight:400;font-variant-numeric:tabular-nums}
+.st-key-workspace-scope{border:1px solid var(--bank-border);border-radius:var(--bank-radius);background:var(--bank-surface);padding:12px 16px}
+.st-key-workspace-scope [data-testid="stCaptionContainer"] p{font-size:14px;color:var(--bank-text)}
+[class*="st-key-workspace-next-"] button[kind],.st-key-workspace-retry button[kind]{min-height:40px}
+.st-key-current-business [data-testid="stMarkdownContainer"] table{font-family:"Segoe UI","Microsoft YaHei",sans-serif;font-size:14px;font-variant-numeric:tabular-nums}

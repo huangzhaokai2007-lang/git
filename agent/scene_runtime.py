@@ -12,9 +12,11 @@ def plan(ctx, text: str):
     ctx.scene_request = (decision or {}).get('read_request')
     if ctx.scene_request:
         inherited = ('period', 'category', 'direction') if ctx.scene_request.get('all_cards') else ('period', 'card_id', 'category', 'direction')
+        if ctx.scene_request.get('period') and ctx.scene_request['period'] != state.get('period'):
+            inherited = tuple(k for k in inherited if k not in ('category', 'direction'))
         ctx.scene_request = {**{k: state[k] for k in inherited if state.get(k)},
                              **ctx.scene_request}
-        if ctx.scene_request.get('period') is None:
+        if ctx.scene_request.get('period') is None and not (ctx.scene_request.get('date_from') and ctx.scene_request.get('date_to')):
             from agent.period import anchor_period
             ctx.scene_request['period'] = state.get('period') or anchor_period()
     if decision:
@@ -106,6 +108,8 @@ def remember(ctx, status: str, reply: str) -> None:
     if status == 'success' and result is not None:
         views = scene_context.snapshot(ctx.session_id).get('views', [])
         scene_context.remember_result(ctx.session_id, ctx.intent, ctx.slots, result, getattr(ctx, 'scene_request', None))
+        if ctx.intent in ('bill_report', 'bill_analysis') and 'groups' in result.facts:
+            scene_context.update(ctx.session_id, bill_source_trace_id=ctx.trace_id)
         if getattr(ctx, 'scene_plan', {}).get('action') == 'back':
             scene_context.update(ctx.session_id, views=views)
     if ctx.intent in write_flow.WRITE_INTENTS and (ctx.executed or status == 'pending_confirm'):

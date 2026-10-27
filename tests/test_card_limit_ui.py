@@ -23,19 +23,19 @@ def test_sidebar_limit_shortcut_opens_inline_panel_after_other_shortcuts(monkeyp
     assert not raw(seeded, "SELECT * FROM agent_card_limit_application")
 
 
-def test_inline_limit_draft_allows_card_shortcut_and_operation_records(monkeypatch, seeded):
+def test_shortcuts_hide_inactive_limit_draft_and_operation_records(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     click(at, "调整额度")
     click(at, "固定授信额度")
     click(at, "管卡")
     assert not at.exception and at.chat_input
-    assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
+    assert not any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
     click(at, "操作记录")
     assert any("操作记录" in item.value for item in at.main.markdown)
-    assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
+    assert not any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
     click(at, "收起操作记录")
     assert not at.exception
-    assert any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
+    assert not any("请选择已绑定银行卡" in item.value for item in at.main.markdown)
     assert not raw(seeded, "SELECT * FROM agent_card_limit_application")
 
 

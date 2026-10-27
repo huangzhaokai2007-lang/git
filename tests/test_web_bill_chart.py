@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import sys
+import json
 from pathlib import Path
 
 import pytest
@@ -116,14 +117,18 @@ def test_chat_page_charts_the_facts(monkeypatch: pytest.MonkeyPatch) -> None:
     at.chat_input[0].set_value("上个月的账单总结").run()
     assert not at.exception, at.exception
 
-    charts = len(at.get("vega_lite_chart"))
-    assert charts > 0                                        # 洞察卡 + 账单图表都出图
-    captions = "\n".join(str(element.value) for element in at.caption)
-    assert "事实包" in captions                              # 页面自己说明：数据取自 Turn.facts
+    charts = [item for item in at.get('bidi_component')
+              if item.proto.component_name.endswith('spending_pie')]
+    assert len(charts) == 1
+    payload = json.loads(charts[0].proto.json)
+    assert payload['groups'] == at.session_state['messages'][-1]['turn']['facts']['groups']
 
     for message in at.session_state["messages"]:             # 抹掉所有回执正文（含全部数字）
         if message["role"] == "assistant":
             message["text"] = "好的，已经整理好了。"
     at.run()
     assert not at.exception, at.exception
-    assert len(at.get("vega_lite_chart")) == charts          # 图还在 → 坐标不来自回执文案
+    charts = [item for item in at.get('bidi_component')
+              if item.proto.component_name.endswith('spending_pie')]
+    assert len(charts) == 1
+    assert json.loads(charts[0].proto.json)['groups'] == payload['groups']

@@ -108,9 +108,9 @@ def test_whitelist_reply_is_drawn_as_a_card(monkeypatch: pytest.MonkeyPatch) -> 
     at.chat_input[0].set_value("我的白名单有哪些").run()
     assert not at.exception, at.exception
     page = _markdown(at)
-    assert 'class="payee-card"' in page                        # 卡片本体（CSS 里只有 `.payee-card{`）
-    assert "李四" in page and "139****1001" in page            # 干净库种子里白名单第一位
-    assert 'class="payee-badge on"' in page                     # 白名单徽章
-    assert 'class="payee-badge off"' in page                    # 非白名单徽章
+    assert at.session_state['workspace-result']['scene'] == 'payee_list'
+    assert sum('##### 👥 收款人' == item.value for item in at.markdown) == 1
+    assert '139****1001' in page
+    assert 'class="payee-card"' not in page
     assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page     # 裸 Markdown 表格没有跟着上屏
-    assert "trace_id" in "\n".join(str(e.value) for e in at.caption)   # 回执元信息照旧
+    assert "trace_id" not in "\n".join(str(e.value) for e in at.caption)

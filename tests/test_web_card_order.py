@@ -1,56 +1,45 @@
-"""排版回归：页面渲染顺序必须是「解析卡 → 表单 → 各查询卡 → **确认卡** → 聊天框」。
-
-用户实测过：「查看收款人后改备注，修改备注确认卡出现在聊天框**上方**」——根因是
-`_render_confirm()` 排在收款人卡之前。确认卡属于「当前这一步要你确认的东西」，
-必须贴着聊天输入框（页面最下方），否则看起来像上一条消息的回执。
-
-用**源码顺序断言**（比 AppTest 稳、快）：读 `interfaces/web/app.py` 的 `_chat_page()` 函数体，
-取各渲染调用的行号，钉住相对次序。改坏顺序这条就红。
-"""
-
-from __future__ import annotations
-
-import re
+"""The active business panel precedes confirmation, then the chat input."""
 from pathlib import Path
+from types import SimpleNamespace
+import ast
+import sys
 
 import pytest
 
-APP = Path(__file__).resolve().parents[1] / "interfaces" / "web" / "app.py"
-
-#: 从上到下的期望顺序（只列有先后要求的）
-EXPECTED = ("payee_picker_ui.render", "payee_ui.render", "schedule_card_ui.render",
-            "aa_card_ui.render", "gift_card_ui.render", "_render_confirm()")
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'interfaces/web'))
+from interfaces.web import workspace_ui
 
 
-def _chat_page_body() -> str:
-    """取 `def _chat_page(...)` 到下一个顶层 `def ` 之间的源码。"""
-    source = APP.read_text(encoding="utf-8")
-    start = source.index("def _chat_page(")
-    rest = source[start + 1:]
-    end = rest.index("\ndef ")
-    return rest[:end]
+@pytest.mark.parametrize(('scene', 'expected'), [
+    ('payee_list', 'payee'), ('scheduled_list', 'schedule'),
+    ('aa_list', 'aa'), ('gift_order_list', 'gift'), ('cards', 'cards'),
+])
+def test_active_panel_is_the_only_query_panel_and_precedes_confirmation(monkeypatch, scene, expected):
+    calls = []
+    state = {f'bound-{domain}-query': True for domain in ('payee', 'schedule', 'aa', 'gift', 'card')}
+    monkeypatch.setattr(workspace_ui, 'st', SimpleNamespace(session_state=state))
+    monkeypatch.setattr(workspace_ui, 'current', lambda: scene)
+    for name in ('scope', 'error', 'result'):
+        monkeypatch.setattr(workspace_ui, name, lambda *a, **kw: None)
+    modules = (('activity_ui', 'activity'), ('payee_picker_ui', 'picker'), ('card_edit_ui', 'edit'),
+               ('card_binding_ui', 'cards'), ('payee_card_ui', 'payee'),
+               ('schedule_card_ui', 'schedule'), ('aa_card_ui', 'aa'), ('gift_card_ui', 'gift'),
+               ('scene_ui', 'selection'))
+    for name, label in modules:
+        monkeypatch.setattr(getattr(workspace_ui, name), 'render',
+                            lambda *a, _label=label, **kw: calls.append(_label))
+    state['turns'] = []
+    workspace_ui.panels(None, 'order-test', None,
+                        lambda: calls.append('pending'), lambda: calls.append('forms'),
+                        lambda: calls.append('confirm'))
+    assert calls[-1] == 'confirm'
+    assert calls.index('picker') < calls.index('forms') < calls.index(expected) < calls.index('confirm')
+    assert [name for name in calls if name in ('cards', 'payee', 'schedule', 'aa', 'gift')] == [expected]
 
 
-def _line_of(body: str, needle: str) -> int:
-    pattern = re.compile(r"^\s*" + re.escape(needle), re.MULTILINE)
-    match = pattern.search(body)
-    if match is None:
-        raise AssertionError(f"_chat_page() 里找不到渲染调用：{needle}")
-    return body[: match.start()].count("\n")
-
-
-@pytest.mark.parametrize("first,second", list(zip(EXPECTED, EXPECTED[1:])))
-def test_render_order(first: str, second: str) -> None:
-    """前者必须排在后者之前（`_render_confirm` 是最后一个）。"""
-    body = _chat_page_body()
-    assert _line_of(body, first) < _line_of(body, second), (
-        f"渲染顺序不对：{first} 应排在 {second} 之前")
-
-
-def test_confirm_card_is_the_last_card_on_the_chat_page() -> None:
-    """确认卡之后只剩聊天输入框（不能再有别的卡片）。"""
-    body = _chat_page_body()
-    tail = body.splitlines()[_line_of(body, "_render_confirm()") + 1:]
-    offenders = [line.strip() for line in tail if ".render(" in line]
-    assert not offenders, f"确认卡之后还渲染了别的卡片：{offenders}"
-    assert any("chat_input" in line for line in tail), "确认卡之后应当紧跟聊天输入框"
+def test_business_panel_completes_before_chat_input():
+    tree = ast.parse((ROOT / 'interfaces/web/app.py').read_text(encoding='utf-8'))
+    page = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == '_chat_page')
+    calls = {ast.unparse(node.func): node.lineno for node in ast.walk(page) if isinstance(node, ast.Call)}
+    assert calls['workspace_ui.panels'] < calls['st.chat_input']

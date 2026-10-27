@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Mapping
 
 from pydantic import BaseModel, ConfigDict
@@ -240,6 +242,19 @@ POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重�
 #:   标题层级与表格都是结构，交给润色有可能被压平成一串文字。
 #: 列表类（刷卡/订阅/理财）口径不变，以免顺手改掉别人的回执行为。
 NO_POLISH_INTENTS = frozenset({"payee_list", "txn_query", "bill_analysis", "bill_report"})
+_TEMPLATE_ONLY = ContextVar('bank_template_only', default=False)
+
+
+@contextmanager
+def template_only():
+    """Use fact-backed templates for this read context and restore on exit."""
+    token = _TEMPLATE_ONLY.set(True)
+    try:
+        yield
+    finally:
+        _TEMPLATE_ONLY.reset(token)
+
+
 def verify_numbers(text: str, facts: Mapping) -> set[str]:
     """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。
 
@@ -274,7 +289,8 @@ def polish(text: str, facts: Mapping) -> str | None:
     except llm.LLMUnavailable:
         logger.warning("润色不可用（LLM 不可用），改用模板原样回执")
         return None
-    return out.reply.strip() or None
+    reply = getattr(out, 'reply', None)
+    return (reply.strip() or None) if isinstance(reply, str) else None
 
 
 def _template_values(intent: str, slots: Mapping, result: ToolResult) -> dict:
@@ -297,7 +313,7 @@ def compose_reply(intent: str, slots: Mapping, result: ToolResult) -> tuple[str,
     reply = render(intent, _template_values(intent, slots, result))
     if intent == "bill_report" and result.data.get("markdown"):
         reply = f"{reply}\n\n{result.data['markdown']}"
-    if intent in NO_POLISH_INTENTS:                            # 表格是结构，不是措辞 → 不进润色
+    if intent in NO_POLISH_INTENTS or _TEMPLATE_ONLY.get():    # 结构化或后台回执保持事实模板
         return reply, False, 0
     hallucinated, attempts = False, 0
     for _ in range(POLISH_ATTEMPTS):

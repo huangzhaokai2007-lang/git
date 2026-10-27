@@ -20,6 +20,11 @@ def offline(monkeypatch):
     monkeypatch.setattr(llm, 'chat_json', lambda *a, **kw: (_ for _ in ()).throw(llm.LLMUnavailable('offline')))
 
 
+def pies(at):
+    return [item for item in at.get('bidi_component')
+            if item.proto.component_name.endswith('spending_pie')]
+
+
 @pytest.mark.parametrize(('label', 'intent'), [
     ('我的理财', 'wealth_holdings'), ('管订阅', 'subscription_list'),
     ('全部产品', 'wealth_all_products'), ('收款人', 'payee_list'),
@@ -54,14 +59,14 @@ def test_bill_workspace_does_not_follow_another_shortcut(monkeypatch, seeded):
     offline(monkeypatch)
     at = app(monkeypatch, seeded)
     click(at, '看账单')
-    assert any(item.label == '📊 这份账单的图表' for item in at.expander)
+    assert len(pies(at)) == 1
     messages = list(at.session_state['messages'])
     click(at, '管卡')
     assert any('我的银行卡' in item.value for item in at.markdown)
-    assert not any(item.label == '📊 这份账单的图表' for item in at.expander)
+    assert not pies(at)
     click(at, '我的理财')
     assert not any(button.label == '绑定银行卡' for button in at.button)
-    assert not any(item.label == '📊 这份账单的图表' for item in at.expander)
+    assert not pies(at)
     assert at.session_state['messages'][:len(messages)] == messages
 
 
@@ -73,7 +78,7 @@ def test_session_reset_restores_a_fresh_chat_workspace(monkeypatch, seeded):
     click(at, '重置会话')
     at.chat_input[0].set_value('出一份上个月的账单报告').run()
     assert not at.exception
-    assert any(item.label == '📊 这份账单的图表' for item in at.expander)
+    assert len(pies(at)) == 1
 
 
 def test_switching_from_transfer_to_holdings_cancels_only_unsubmitted_draft(monkeypatch, seeded):

@@ -12,9 +12,12 @@ function ledgerRow(item, element) {
   return row;
 }
 
-function renderLedger(root, data, select, element) {
+function renderLedger(root, data, select, element, retry) {
   root.querySelector?.('.bank-pie-ledger')?.remove();
-  if (!data.selected) return;
+  if (!data.selected) {
+    delete root.dataset.ledgerIdentity;
+    return;
+  }
   const panel = element('section', 'bank-pie-ledger');
   panel.setAttribute('aria-label', `${data.selected}支出明细`);
   const header = element('div', 'bank-pie-ledger-head');
@@ -25,8 +28,21 @@ function renderLedger(root, data, select, element) {
   header.append(close);
   panel.append(header);
   const detail = data.detail;
+  panel.setAttribute('aria-live', 'polite');
+  panel.setAttribute('aria-busy', String(!detail));
+  panel.dataset.status = !detail ? 'loading' : !detail.ok ? 'error' : !detail.items?.length ? 'empty' : 'success';
+  const identity = `${data.animation_id}:${data.selected}:${panel.dataset.status}`;
+  panel.classList.toggle('is-new', root.dataset.ledgerIdentity !== identity);
+  root.dataset.ledgerIdentity = identity;
   if (!detail) panel.append(element('p', 'bank-pie-ledger-note', '正在读取明细…'));
-  else if (!detail.ok) panel.append(element('p', 'bank-pie-ledger-note', detail.message || '暂时无法读取明细。'));
+  else if (!detail.ok) {
+    panel.append(element('p', 'bank-pie-ledger-note', detail.message || '暂时无法读取明细。'));
+    const button = element('button', 'bank-pie-retry', '重试');
+    button.type = 'button';
+    button.setAttribute('aria-label', `重试读取${data.selected}支出明细`);
+    button.onclick = event => retry(event?.detail === 0);
+    panel.append(button);
+  }
   else {
     panel.append(element('p', 'bank-pie-ledger-note', `${data.period} · ${detail.count} 笔 · 支出 ${detail.amount_yuan} 元`));
     if (!detail.items?.length) panel.append(element('p', 'bank-pie-ledger-note', '该分类在此账期暂无支出明细。'));
@@ -43,6 +59,10 @@ function renderLedger(root, data, select, element) {
 
 export default function ({ parentElement, data, setStateValue = () => {} }) {
   const root = parentElement.querySelector('.bank-pie');
+  const oldLedger = root.querySelector('.bank-pie-ledger-scroll');
+  const oldSelected = root.dataset.selected;
+  const scrollTop = oldSelected === data.selected ? oldLedger?.scrollTop || 0 : 0;
+  root.dataset.selected = data.selected || '';
   const active = document.activeElement;
   const restoreFocus = root.dataset.focusTarget || (root.contains?.(active) && active?.getAttribute('aria-label'));
   delete root.dataset.focusTarget;
@@ -119,10 +139,16 @@ export default function ({ parentElement, data, setStateValue = () => {} }) {
     selected = category === selected ? null : category;
     if (keyboard) root.dataset.focusTarget = selected ? 'ledger' : `查看${previous}支出明细`;
     highlight(selectedIndex());
-    renderLedger(root, { ...data, selected, detail: null }, select, element);
+    renderLedger(root, { ...data, selected, detail: null }, select, element, retry);
     setStateValue('selected', keyboard ? { category: selected,
       focus_target: selected ? 'ledger' : `查看${previous}支出明细`,
       focus_id: `${Date.now()}:${Math.random()}` } : selected);
+  };
+  const retry = (keyboard = false) => {
+    const focus = keyboard ? { focus_target: 'ledger', focus_id: `${Date.now()}:${Math.random()}` } : {};
+    if (keyboard) root.dataset.focusTarget = 'ledger';
+    renderLedger(root, { ...data, selected, detail: null }, select, element, retry);
+    setStateValue('selected', { category: selected, retry_id: `${Date.now()}:${Math.random()}`, ...focus });
   };
   rows.forEach(({ group, index }) => {
     const row = element('li');
@@ -158,7 +184,9 @@ export default function ({ parentElement, data, setStateValue = () => {} }) {
   layout.append(figure, details);
   root.append(layout);
   highlight(selectedIndex());
-  renderLedger(root, data, select, element);
+  renderLedger(root, data, select, element, retry);
+  const ledger = root.querySelector('.bank-pie-ledger-scroll');
+  if (ledger) ledger.scrollTop = scrollTop;
   const focusKey = `bank-pie-focus:${data.animation_id}`;
   let needsFocus = Boolean(data.focus_id);
   try { needsFocus &&= sessionStorage.getItem(focusKey) !== data.focus_id; } catch (_) { /* optional storage */ }

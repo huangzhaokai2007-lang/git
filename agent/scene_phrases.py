@@ -18,6 +18,8 @@ ALIASES = {
     '这笔不认识': '这笔', '这笔是什么': '这笔', '看看这笔': '这笔',
     '查一下同一家商户': '这个商户以前的记录', '同一家商户呢': '这个商户以前的记录',
     '查看操作记录': '刚才做了哪些操作',
+    '看看最大的一笔': '最大的一笔', '看最大的一笔': '最大的一笔',
+    '看这张卡详情': '这张卡的详情', '看看这张卡详情': '这张卡的详情',
 }
 
 
@@ -34,7 +36,9 @@ def extra(text: str, context: dict) -> dict | None:
         return out('card_query', read_request={'kind': 'card_bills', 'period': period, 'all_cards': True,
                                              'rank': '最多' in text}) if period else out('card_query')
     if text in ('最近有没有消费', '最近有没有交易', '最近的交易', '再看看最近的交易'):
-        return out('txn_query', read_request={'kind': 'transactions', 'period': period}) if period else out(
+        from agent.scene_context import read_scope
+        query_scope = read_scope(context)
+        return out('txn_query', read_request={'kind': 'transactions', **query_scope}) if query_scope else out(
             'txn_query', ask='请指定要查询的月份或日期范围。')
     if text in ('主要花在哪', '主要花在哪里', '主要花在哪些商户'):
         return out('txn_query', read_request={'kind': 'merchant_breakdown', 'period': period})

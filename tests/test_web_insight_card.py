@@ -87,13 +87,13 @@ def test_analysis_reply_comes_with_a_chart_and_follow_up_buttons(monkeypatch: py
 
     page = _text(at)
     assert "| 分类 | 金额（元） | 占比 |" not in page              # 分类表替换为动画饼图
-    assert insight_ui.CARD_MARK in page                              # ② 卡片真的画出来了
+    assert insight_ui.CARD_MARK not in page
+    assert at.session_state['workspace-result']['scene'] == 'bills'
     pies = [item for item in at.get('bidi_component') if item.proto.component_name.endswith('spending_pie')]
     assert len(pies) == 1                                            # ③ 分类只画一份饼图
     labels = [button.label for button in at.button]
-    assert "📄 看流水明细" in labels                                  # ④ 追问按钮在页面上
-    assert "🧾 出一份账单总结" in labels
-    assert "🔍 查异常交易" in labels
+    assert all(label in labels for label in ('最大的一笔', '查看流水'))
+    assert '关联银行卡' not in labels  # Available only after a transaction is selected.
 
 
 def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,14 +102,15 @@ def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch
     at.chat_input[0].set_value("上个月花了多少").run()
     assert not at.exception, at.exception
 
-    button = next((b for b in at.button if b.label == "📄 看流水明细"), None)
+    button = next((b for b in at.button if b.label == "查看流水"), None)
     assert button is not None, "追问按钮没画出来 —— 卡片没生效"
     button.click().run()
     assert not at.exception, at.exception
 
-    page = _text(at)
-    assert "共查到" in page and "笔交易" in page                     # 真跑了 list_txn
-    assert "| 时间 | 交易对手 | 金额（元） | 分类 |" in page
+    turn = at.session_state['messages'][-1]['turn']
+    assert turn['intent'] == 'txn_query' and turn['tool_calls']
+    assert turn['facts']['items']
+    assert at.session_state['workspace-result']['turn']['trace_id'] == turn['trace_id']
 
 
 def test_five_chat_queries_walk_all_five_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -145,7 +146,7 @@ def test_no_facts_means_no_card(monkeypatch: pytest.MonkeyPatch) -> None:
     at.chat_input[0].set_value("今天天气怎么样").run()
     assert not at.exception, at.exception
     page = _text(at)
-    assert "意图 `out_of_scope`" in page, [                  # 先确认这一问确实没接通（不是测错了对象）
+    assert at.session_state['messages'][-1]['turn']['intent'] == 'out_of_scope', [
         (m["role"], (m.get("turn") or {}).get("intent")) for m in at.session_state["messages"]]
     assert insight_ui.CARD_MARK not in page
     assert len(at.get("vega_lite_chart")) == baseline

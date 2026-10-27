@@ -42,6 +42,19 @@ def update(session: str, **values) -> dict:
         return deepcopy(state)
 
 
+def read_scope(state: dict) -> dict:
+    """Return validated time/card scope without widening an explicit date range."""
+    request, slots = state.get('read_request') or {}, state.get('slots') or {}
+    dates = request if request.get('date_from') and request.get('date_to') else slots
+    if dates.get('date_from') and dates.get('date_to'):
+        selected = {key: dates[key] for key in ('date_from', 'date_to')}
+    else:
+        selected = {'period': state.get('period')}
+    if state.get('card_id'):
+        selected['card_id'] = state['card_id']
+    return selected
+
+
 def remember_result(session: str, intent: str, slots: dict, result, request: dict | None = None) -> None:
     if not result.ok:
         return
@@ -57,8 +70,23 @@ def remember_result(session: str, intent: str, slots: dict, result, request: dic
     if request.get('date_from') and request.get('date_to'):
         period = request['date_from'][:7] if request['date_from'][:7] == request['date_to'][:7] else None
         values['period'] = period
+    elif slots.get('date_from') and slots.get('date_to'):
+        period = slots['date_from'][:7] if slots['date_from'][:7] == slots['date_to'][:7] else None
+        values['period'] = period
     if period:
         values['period'] = period
+    scope_changed = (period and period != state.get('period')) or (
+        'card_id' in request and request['card_id'] != state.get('card_id')) or request.get('all_cards')
+    before_scope, after_scope = read_scope(state), read_scope({**state, **values})
+    if any(before_scope.get(k) != after_scope.get(k) for k in ('date_from', 'date_to')):
+        scope_changed = True
+    filter_changed = any(request.get(k) is not None and request[k] != state.get(k)
+                         for k in ('category', 'direction', 'counterparty'))
+    if filter_changed or (intent == 'txn_query' and not request.get('txn_id')):
+        values['txn_id'] = None
+    if scope_changed:
+        values.update(txn_id=None, category=None, direction=None, counterparty=None)
+        values['candidates'] = {**state.get('candidates', {}), 'txn': []}
     if request.get('all_cards'):
         values['card_id'] = None
     for field in ('card_id', 'txn_id', 'sub_id', 'merchant', 'product', 'payee', 'counterparty', 'direction', 'category'):
@@ -69,9 +97,16 @@ def remember_result(session: str, intent: str, slots: dict, result, request: dic
     if kind == 'card' and data.get('cards') is not None:
         rows = data['cards']
     if kind and isinstance(rows, list) and any(k in data for k in ('items', 'cards', 'holdings', 'products')):
-        candidates = state.get('candidates', {})
+        candidates = values.get('candidates', state.get('candidates', {}))
         candidates[kind] = [{k: v for k, v in item.items() if k in _SAFE} for item in rows if isinstance(item, dict)]
         values['candidates'] = candidates
+    if request.get('kind') == 'txn_largest':
+        values['txn_id'] = rows[0]['id'] if rows else None
+    if request.get('kind') == 'txn_cards':
+        values['card_id'] = rows[0]['card_id'] if len(rows) == 1 else None
+    if intent in ('bill_report', 'bill_analysis') and 'groups' in result.facts:
+        values.update(bill_source_facts=deepcopy(result.facts), bill_source_card_id=values.get('card_id', state.get('card_id')))
+        values['bill_source_scope'] = read_scope({**state, **values})
     update(session, **values)
 
 

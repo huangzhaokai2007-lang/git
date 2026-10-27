@@ -62,6 +62,8 @@ def _ask_submit(state: Mapping[str, Any], text: str) -> None:
 def _record(state: Mapping[str, Any], turn: Any, display: str) -> None:
     """记下 agent 层返回的一次 `Turn`（回执 + 轨迹），与 `app._ask` 同口径。"""
     dump = turn.model_dump()
+    import workspace_ui
+    workspace_ui.accept(dump, display)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": dump})
 
