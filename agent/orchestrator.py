@@ -8,7 +8,8 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, session_memory, templates, write_flow, scene_runtime
+from agent import (classifier, confirm_card, payee_flow, pending_slots, read_flow, risk_flow,
+                   scheduled_runner, session_memory, templates, write_flow, scene_runtime)
 from agent.period import anchor_period, resolve_day, resolve_period
 from agent.read_routes import TOOL_ROUTES
 from data import dao
@@ -22,8 +23,7 @@ logger = logging.getLogger(__name__)
 #: 卡 20：**表单提交入口**（导出给 `interfaces/` 用 —— 界面只调 `agent/`，不直连 `tools/`）。
 #: 实现与理由见 `agent/payee_flow.py`（§5：`payee_add` → L1，不发确认卡、不要 OTP）。
 submit_payee = payee_flow.submit_payee
-#: F10：**风险测评问卷提交入口**（同上先例）。实现见 `agent/risk_flow.py`
-#: （§2 第 108 行：`assess_risk` → **L0 只读**，不计分以外的副作用为零）。
+#: F10：**风险测评问卷提交入口**（同上先例，见 `agent/risk_flow.py`；§2 第 108 行 L0 只读）。
 submit_assessment = risk_flow.submit_assessment
 
 # ---------------- 阈值与契约常量（唯一允许出现业务数字字面量的地方，逐条注明来源） ----------------
@@ -34,8 +34,7 @@ MAX_CLARIFY_ROUNDS = 2        # 来源：卡 09 第 3 条「最多 2 轮」
 #: `READ_TIER` / `RANGE_FIELDS` / `PERIOD_INTENTS` / `REQUIRED_SLOTS` 已随实现搬到
 #: `agent/read_flow.py`（F10 接通后本文件超红线），在下面再导出。
 
-#: 卡 09 第 2 条点名的 8 个只读意图 + F10 的风险测评（`assess_risk` 同属 L0，规格 §2 第 108 行）
-#: + SPEC-CHANGE 新增的 `payee_list`（T20 `list_payees`，L0 只读、无槽位）
+#: 卡 09 的 8 个 + F10 `assess_risk` + SPEC-CHANGE 的 `payee_list`（T20，L0 无槽位）
 READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
                 "subscription_list", "card_query", "wealth_recommend", "risk_assess", "payee_list",
                 "wealth_holdings", "wealth_all_products", "scheduled_list", "gift_order_list", "aa_list",
@@ -47,9 +46,7 @@ WRITE_INTENTS = write_flow.WRITE_INTENTS
 
 #: 相对时间的别名表 / 偏移 / 解析实现见 `agent/period.py`（卡 17b 拆出去：纯函数，也为守住单文件 ≤300 行）
 
-#: 只读意图 → (工具名, 调用器) 的那张表已移到 `agent/read_routes.py`（卡 23 拆出：本文件当时 293 行，
-#: 而 card-23 要把 `card_query` 接上 T18）；这里 import 即 **re-export** ——
-#: `orchestrator.TOOL_ROUTES` 仍指向**同一份表**（不是复制），历史调用点行为不变。
+#: 只读路由表在 `agent/read_routes.py`（卡 23 拆出）；这里 import 即再导出同一份表。
 
 class Turn(BaseModel):
     """一次请求的处理结果（编排层 API，非冻结工具契约）。"""
@@ -128,7 +125,7 @@ READ_TIER = read_flow.READ_TIER
 
 
 def _code(result: ToolResult) -> str | None:
-    """工具结果错误码字符串（实现唯一在 `write_flow.error_code_of`，这里只做转发）。"""
+    """工具结果错误码字符串（唯一实现见 `write_flow.error_code_of`）。"""
     return write_flow.error_code_of(result)
 
 
@@ -192,10 +189,9 @@ def _apply(ctx: _Ctx, step: write_flow.Step) -> Turn:
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
            session_id: str | None = None, card_reader: Callable[[dict], ToolResult] | None = None,
            intent_resolver: Callable[[str, list[str] | None], classifier.IntentOut] | None = None) -> Turn:
-    """**对外唯一入口**（F16）：先惰性结算到期预约 + 24h 内执行前提醒，再处理本次请求。
+    """**对外唯一入口**（F16）：先惰性结算到期预约 + 24h 提醒，再处理本次请求。
 
-    结算与提醒都拼在回执**前面**；自身出错只记日志，**绝不影响本次请求**。
-    **追问续接的上下文在这里统一给**（`agent/session_memory.py`）。
+    结算/提醒都拼在回执**前面**且出错不影响本次请求；追问续接的上下文也在这里统一给。
     """
     sid = session_id or current_session_id()
     notices = [*scheduled_runner.settle_due(), *scheduled_runner.due_soon_notices(sid)]
@@ -232,6 +228,10 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
     corrected = classifier.correct_misroute(text, verdict.intent)   # 明显误判 → 纠正
     if corrected is not None:
         verdict = corrected
+    #: 2026-10-27：追问后的这一句按分类结果合并回原意图（详见 `pending_slots.resume`）。
+    if (answered := pending_slots.resume(ctx.session_id, text, verdict,
+                                         trace_id=ctx.trace_id)) is not None:
+        return _apply(ctx, answered)
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence
     ctx.slots = dict(verdict.slots)
     if verdict.intent == "unsafe_request":

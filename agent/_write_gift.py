@@ -35,15 +35,24 @@ from tools.schemas import ToolResult
 #: 想看「不强制」的老行为：把下面这个元组清空即可（`GIFT_REQUIRED = ()`）。
 GIFT_REQUIRED = ("platform", "address", "order_no")
 #: 缺槽时各字段的说法（追问语按**实际缺的**那几项拼，不一股脑全说）
-GIFT_SLOT_LABELS = {"platform": "平台（如「京东」）",
-                    "address": "收货地址",
+#: 送礼**所有**槽位的人话（一次追问要把缺的全列出来，用户才不会来回三轮）
+GIFT_SLOT_LABELS = {"contact": "联系人", "date": "日期", "budget": "预算",
+                    "platform": "平台（如「京东」）", "address": "收货地址",
                     "order_no": "平台订单号（如 JD20261024001）"}
+#: 追问时的推荐顺序（先问人/时间/钱，再问平台/地址/单号）
+GIFT_SLOT_ORDER = ("contact", "date", "budget", "platform", "address", "order_no")
 
 
 def missing_hint(missing: list[str]) -> str:
-    """按实际缺的必填项拼追问语。"""
-    items = [GIFT_SLOT_LABELS[slot] for slot in GIFT_REQUIRED if slot in missing]
-    return ("请补充：" + "、".join(items) + "。") if items else ""
+    """把**所有**缺的槽位拼成一句追问（按推荐顺序、去重）。
+
+    2026-10-27 修（用户实测）：原来只列 `GIFT_REQUIRED` 那三项，于是回执里出现两段——
+    「请补充：平台、收货地址、平台订单号。」+ 通用追问「请补充：联系人、日期、预算。」，
+    又长又重复。现在一句话说完。
+    """
+    items = [GIFT_SLOT_LABELS[slot] for slot in GIFT_SLOT_ORDER
+             if slot in missing and slot in GIFT_SLOT_LABELS]
+    return ("请补充：" + "、".join(dict.fromkeys(items)) + "。") if items else ""
 GIFT_CN = "送礼计划"
 
 
@@ -113,8 +122,7 @@ def _shape_gift(slots: Mapping) -> ShapeResult:
         else:
             filled["amount_cents"] = cents
     _fill_required_gift_slots(filled, contact, missing)      # 平台 / 地址 / 订单号（见 GIFT_REQUIRED）
-    clarify = missing_hint(missing)
-    return ShapeResult(filled=filled, missing=missing, clarify=clarify)
+    return ShapeResult(filled=filled, missing=missing, clarify=missing_hint(missing))
 
 
 def _fill_required_gift_slots(filled: dict, contact: str, missing: list[str]) -> None:
