@@ -74,6 +74,13 @@ def test_asking_for_reminders_does_not_stack_a_second_notice(seeded: Path) -> No
     assert "【订阅提醒】" not in turn.reply
 
 
+def test_asking_for_the_list_does_not_stack_a_notice(seeded: Path) -> None:
+    """查「我有哪些订阅」同理：列表本身就把同一批订阅列出来了。"""
+    _only_one_due(seeded)
+    turn = _say("我有哪些订阅", intent="subscription_list")
+    assert "【订阅提醒】" not in turn.reply
+
+
 def test_sidebar_balance_refresh_is_not_polluted(seeded: Path) -> None:
     """侧边栏余额借用了 handle，但它不是对话 —— 提醒不能混进余额文案。"""
     _only_one_due(seeded)

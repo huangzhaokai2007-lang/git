@@ -28,6 +28,9 @@ REMIND_WITHIN_DAYS = 7
 #: 侧边栏余额刷新借用了 `handle`，但它不是用户对话 —— 提醒不能混进余额文案里。
 NON_CHAT_SUFFIX = ":sidebar-balance"
 
+#: 用户**已经在看订阅**时不再叠一句：查提醒、查列表都会把同一批数据再说一遍。
+QUIET_INTENTS = frozenset({"subscription_remind", "subscription_list"})
+
 #: session_id → 已提醒过的 `subscription_id:扣费日`
 _REMINDED: dict[str, set[str]] = {}
 
@@ -46,8 +49,8 @@ def _overdue_line(item: dict) -> str:
 
 def notices(session_id: str, intent: str | None = None) -> list[str]:
     """本会话**尚未提醒过**的到期订阅，每条一句；没有就返回空列表（不写任何表）。"""
-    if intent == "subscription_remind":
-        return []                                    # 本轮就是在查订阅，别叠一句
+    if intent in QUIET_INTENTS:
+        return []                                    # 本轮就是在看订阅，别叠一句
     if str(session_id).endswith(NON_CHAT_SUFFIX):
         return []                                    # 侧边栏余额刷新，不是对话
     try:
