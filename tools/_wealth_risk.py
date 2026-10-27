@@ -288,7 +288,11 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
              for row in products]
     #: 可用余额（整数分）：界面据此把「起购额 > 余额」的订购按钮置灰。
     #: 归属 fail-closed —— 取到的账户不是本人就当没有余额（宁可少显示，也不误判为买得起）。
-    account = dao.get_balance("savings")
+    #: **读余额失败不能让推荐整体失败**：取不到就当未知（不置灰），申购时还有一次余额校验兜底。
+    try:
+        account = dao.get_balance("savings")
+    except ValueError:
+        account = None
     available = (int(account["balance"])
                  if account is not None and account["user_id"] == current_user_id() else None)
     #: 演示区间：参考上沿 = 预期年化 + 演示波动值；下沿 = -演示波动值。

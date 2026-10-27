@@ -37,6 +37,20 @@ def test_affordable_flags_follow_the_risk_ceiling(seeded: Path) -> None:
     assert [item["affordable"] for item in facts["items"]] == [True]
 
 
+def test_balance_read_failure_does_not_break_the_recommendation(seeded: Path, monkeypatch) -> None:
+    """读余额只是"锦上添花"：失败时推荐照常给，只是不置灰（申购时还有一次余额校验）。"""
+    wealth.assess_risk(BALANCED)
+
+    def boom(*args, **kwargs):
+        raise ValueError("db busy")
+
+    monkeypatch.setattr(wealth.dao, "get_balance", boom)
+    result = wealth.recommend_wealth("R3")
+    assert result.ok and result.error_code is None
+    assert "available" not in result.facts and "available_yuan" not in result.facts
+    assert all(item["affordable"] is True for item in result.facts["items"])
+
+
 def _render(items):
     actions: list[str] = []
     turn = {"trace_id": "afford", "intent": "wealth_recommend", "error_code": None,
