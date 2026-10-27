@@ -1,16 +1,17 @@
-"""F18 订阅提醒的**惰性触达**：随用户下一次交互带出，不启后台进程。
+"""F18 订阅提醒的**常驻概览**：给界面画提醒条，回答「现在有没有要处理的」。
 
-与 `agent/scheduled_runner.due_soon_notices` 同一套口径（该模块是仓库里已有的先例）：
+**为什么不再往回执里前置提醒**：试过一版「下一次交互时把提醒拼到回执最前面」，两个问题：
 
-- **惰性**：没有 cron / MQ / 长连接，所以不叫"推送"，只在下一次 `orchestrator.handle` 时
-  把提醒拼到回执前面；
-- **去重**：每笔订阅**每个扣费日**只提醒一次（key = `subscription_id:next_charge_date`）。
-  同一期反复提会变成噪音，而下一期换了日期就应当重新提醒 —— 所以 key 必须带日期；
-- **故障隔离**：取数失败只记日志，**绝不影响本次请求**（与结算口径一致）；
-- **不抢答**：本轮用户就是在问"有什么要扣费的"，就不再叠一句提醒。
+1. **覆盖不全** —— 只有走 `orchestrator.handle()` 的路径才会带出；表单提交、卡片上的
+   直接操作（锁卡/取消订阅等）都绕过它，用户在这些场景永远看不到提醒。
+2. **污染回执** —— 每条回执开头都被塞一句提醒，既有测试里大量「回执以…开头 / 等于…」
+   的断言全部失效，等于用别人的测试稳定性换一次提示。
 
-去重状态是**进程内**的（`_REMINDED`），与测评结果、确认凭证同族：本 demo 不持久化提醒状态，
-重启后重新提醒一次是可接受的（宁可多提一次，也不要漏提）。
+改成**界面常驻提醒条**：`summary()` 只读、不去重、不写状态，页面每帧都能问；
+只要还有到期或逾期订阅就一直显示，任何操作之后都看得到。
+
+与工具层的分工：窗口口径（7 天、闭区间、只查 active、逾期单列）全在
+`tools/subscription_remind.py`，本模块只做「取一次 + 摘出概览数字」。
 """
 
 from __future__ import annotations
@@ -25,57 +26,29 @@ logger = logging.getLogger(__name__)
 #: 太早用户记不住，太晚来不及取消。
 REMIND_WITHIN_DAYS = 7
 
-#: 侧边栏余额刷新借用了 `handle`，但它不是用户对话 —— 提醒不能混进余额文案里。
+#: 侧边栏余额刷新借用了 `handle`，但它不是用户对话 —— 提醒条不该为它触发。
 NON_CHAT_SUFFIX = ":sidebar-balance"
 
-#: 用户**已经在看订阅**时不再叠一句：查提醒、查列表都会把同一批数据再说一遍。
-QUIET_INTENTS = frozenset({"subscription_remind", "subscription_list"})
 
-#: session_id → 已提醒过的 `subscription_id:扣费日`
-_REMINDED: dict[str, set[str]] = {}
+def summary(session_id: str) -> dict:
+    """本会话的订阅概览；没有要处理的就返回空字典。
 
-
-def _line(item: dict) -> str:
-    """一条提醒（数字与日期全部照抄 facts，本层不做任何换算）。"""
-    return (f"【订阅提醒】{item['merchant']} {item['days_cn']}"
-            f"（{item['next_charge_date']}）将扣费 {item['amount_yuan']} 元；")
-
-
-def _overdue_line(item: dict) -> str:
-    """一条逾期提醒：扣费日已过，说明「该扣的没扣成」，比将要扣更值得说。"""
-    return (f"【订阅提醒】{item['merchant']} 的扣费日已过（原定 {item['next_charge_date']}，"
-            f"{item['amount_yuan']} 元，{item['overdue_cn']}），可能是扣款失败或漏扣；")
-
-
-def notices(session_id: str, intent: str | None = None) -> list[str]:
-    """本会话**尚未提醒过**的到期订阅，每条一句；没有就返回空列表（不写任何表）。"""
-    if intent in QUIET_INTENTS:
-        return []                                    # 本轮就是在看订阅，别叠一句
+    返回 `{due, overdue, within_days, total_amount_yuan, overdue_total_amount_yuan}`，
+    数字全部来自工具层 facts，界面只排版。
+    """
     if str(session_id).endswith(NON_CHAT_SUFFIX):
-        return []                                    # 侧边栏余额刷新，不是对话
+        return {}
     try:
         result = subscription_remind.list_due_subscriptions(REMIND_WITHIN_DAYS)
-    except Exception:                                # noqa: BLE001 —— 提醒故障不拖垮请求
-        logger.exception("订阅提醒：取到期订阅失败，本轮跳过")
-        return []
+    except Exception:                                # noqa: BLE001 —— 提醒故障不拖垮页面
+        logger.exception("订阅提醒：取概览失败，本帧跳过")
+        return {}
     if not result.ok:
-        return []
-    seen = _REMINDED.setdefault(session_id, set())
-    lines: list[str] = []
+        return {}
     facts = result.facts or {}
-    #: 逾期项排前面：它意味着「该扣的没扣成」，比「将要扣」更需要用户马上看一眼。
-    for item in [*(facts.get("overdue_items") or []), *(facts.get("items") or [])]:
-        key = f"{item['subscription_id']}:{item['next_charge_date']}"
-        if key in seen:
-            continue
-        seen.add(key)
-        lines.append(_overdue_line(item) if "days_overdue" in item else _line(item))
-    return lines
-
-
-def reset(session_id: str | None = None) -> None:
-    """清空去重状态（测试逐用例复位；传 None 清全部）。"""
-    if session_id is None:
-        _REMINDED.clear()
-    else:
-        _REMINDED.pop(session_id, None)
+    due, overdue = int(facts.get("due_count") or 0), int(facts.get("overdue_count") or 0)
+    if not due and not overdue:
+        return {}
+    return {"due": due, "overdue": overdue, "within_days": facts.get("within_days"),
+            "total_amount_yuan": facts.get("total_amount_yuan"),
+            "overdue_total_amount_yuan": facts.get("overdue_total_amount_yuan")}

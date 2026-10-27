@@ -10,14 +10,14 @@
 申购的槽位校验、风险等级匹配、余额校验、确认卡、扣款全部在编排层与工具层完成 ——
 **界面不碰业务、不算钱、不绕过确认**。
 
-**盈亏区间图用 HTML/CSS 画**（不引图表库）：以 0 为轴，左侧红色 = 模拟下沿，
-右侧绿色 = 模拟上沿，两段宽度按比例分配。展示数字来自 `facts`。
+**盈亏区间图用 HTML/CSS 画**（不引图表库）：以 0 为轴，左侧红色 = 最大亏损，
+右侧绿色 = 最高收益，两段宽度按比例分配。数字全部来自 `facts`，界面只做排版。
 """
 
 from __future__ import annotations
 
-import html
 from typing import Any, Callable, Mapping
+import html
 
 import streamlit as st
 
@@ -101,7 +101,17 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
                 key_prefix: str = "wealth") -> None:
     """紧贴成功的推荐回执，渲染四象限入口及每款产品的订购按钮。"""
-    if turn.get('intent') != 'wealth_recommend' or turn.get('error_code'):
+    if turn.get('intent') != 'wealth_recommend':
+        return
+    if turn.get('error_code') == 'INVALID_STATE':
+        #: 未测评 → 不要只留一句报错，直接给入口（点一下就进问卷）。
+        st.markdown('#### 先做一次风险测评')
+        st.markdown('推荐要按您的风险承受能力筛选，所以得先测评（约 1 分钟）。'
+                    '结果只保存在本次会话，不会上传。')
+        if st.button('开始风险测评', key=f'{key_prefix}-assess', type='primary', width='stretch'):
+            ask('做风险测评')
+        return
+    if turn.get('error_code'):
         return
     items = (turn.get('facts') or {}).get('items') or []
     if not items:

@@ -57,6 +57,30 @@ def _row(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str
                 ask(f"取消{merchant}订阅")
 
 
+def banner(summary: Mapping[str, Any], *, ask: Callable[[str], None]) -> None:
+    """常驻提醒条：只要还有到期/逾期订阅就一直在，点「查看订阅」进列表。
+
+    与回执里的「首次提醒」互补：那个只出现一次（去重），这条每帧都在 ——
+    所以用户在任何场景下都不会"错过"。
+    """
+    if not summary:
+        return
+    parts: list[str] = []
+    if summary.get("overdue"):
+        parts.append(f"{summary['overdue']} 个订阅的扣费日已过"
+                     f"（合计 {summary.get('overdue_total_amount_yuan')} 元）")
+    if summary.get("due"):
+        parts.append(f"{summary['due']} 个订阅将在 {summary.get('within_days')} 天内扣费"
+                     f"（合计 {summary.get('total_amount_yuan')} 元）")
+    with st.container(border=True):
+        info, action = st.columns([3.8, 1.0], vertical_alignment="center")
+        with info:
+            st.markdown("**订阅提醒** · " + "；".join(parts))
+        with action:
+            if st.button("查看订阅", key="subs-banner-open", width="stretch"):
+                ask("我有哪些订阅")
+
+
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
                 key_prefix: str = "subs") -> None:
     """紧贴订阅列表 / 订阅提醒回执，逐行渲染「取消订阅」入口。"""

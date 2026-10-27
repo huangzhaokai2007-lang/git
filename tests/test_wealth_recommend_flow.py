@@ -191,3 +191,31 @@ def test_render_wealth_raises_on_missing_facts_key() -> None:
         render_lists.render_wealth({"items": [{"name": "x", "risk_level": "R1",
                                                "yield": "1.00%", "term": 0}]})
     assert render_lists.TemplateError is __import__("agent.templates", fromlist=["x"]).TemplateError
+
+
+def test_unassessed_recommendation_offers_a_questionnaire_button() -> None:
+    """未测评时不能只回一句报错 —— 要在推荐回执下面直接给「开始风险测评」。"""
+    from streamlit.testing.v1 import AppTest
+    turn = {'trace_id': 'need-assess', 'intent': 'wealth_recommend',
+            'error_code': 'INVALID_STATE', 'facts': {}, 'states': ['REPLY'], 'tier': 'L0'}
+    actions: list[str] = []
+
+    def page(turn, actions):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '尚未完成风险评估', 'turn': turn}],
+                              wealth_card=lambda shown, key: wealth_ui.render_turn(
+                                  shown, ask=actions.append, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn, actions), default_timeout=30).run()
+    assert not at.exception
+    assert any("先做一次风险测评" in m.value for m in at.markdown)
+    next(b for b in at.button if b.label == "开始风险测评").click().run()
+    assert actions == ["做风险测评"]
+
+
+def test_assess_button_phrase_routes_without_the_model() -> None:
+    """按钮文案是固定句式：模型不可用也必须能进问卷（否则按钮点了没反应）。"""
+    from agent import card_binding_flow
+
+    out = card_binding_flow._resolve_intent("做风险测评\n（当前日期：2026-09-12）", None)
+    assert out.intent == "risk_assess" and out.confidence == 1.0
