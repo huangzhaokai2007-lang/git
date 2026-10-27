@@ -144,8 +144,8 @@ def _resolve_level(risk_level: str | None) -> str:
 
     **严格与容错的分界**：
     - 没传 → 用本次会话的测评结果
-    - `R5` / `5` / `高风险` → 显式等级；已有测评时上限不超过测评结果
-    - `R9` / `R0` / `r1` / 空串 → **报 `INVALID_ARGUMENT`**（明显的输入错误）
+    - `R5` / `5` / `高风险` → 用用户指定的
+    - `R9` / `R0` / `r1` / 空串 → **报 `INVALID_ARGUMENT`**（明显的输入错误，必须让用户知道）
     - `high` / `较高` / 其他认不出的人话 → **回退测评结果**。
       LLM 抽槽位时经常给 `high` 这种英文词，为它把整个推荐打成报错不值得 ——
       用户要的是产品列表，不是一句「风险等级只能是 R1/R2/...」。
@@ -286,6 +286,11 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     items = [RecommendItem(product_id=row["id"], name=row["name"], risk_level=row["risk_level"],
                            yield_=_yield_text(row["expected_yield"]), term=row["term_days"])
              for row in products]
+    #: 可用余额（整数分）：界面据此把「起购额 > 余额」的订购按钮置灰。
+    #: 归属 fail-closed —— 取到的账户不是本人就当没有余额（宁可少显示，也不误判为买得起）。
+    account = dao.get_balance("savings")
+    available = (int(account["balance"])
+                 if account is not None and account["user_id"] == current_user_id() else None)
     #: 演示区间：参考上沿 = 预期年化 + 演示波动值；下沿 = -演示波动值。
     #: 只进 facts（不进 data —— data 字段是冻结契约），渲染层据此展示。
     swings = {row["id"]: RISK_SWING.get(row["risk_level"], 0.0) for row in products}
@@ -293,10 +298,15 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     facts = {"risk_level": level, "risk_label": risk_label(level),
              "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
+             **(_money_facts(available, "available") if available is not None else {}),
              "items": [{**item.model_dump(by_alias=True),
                         "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),
+                        #: 买得起吗 —— 由工具层判定（铁律 1：编排层与界面不做业务算术）。
+                        "affordable": (available is None or
+                                       next(row["min_amount"] for row in products
+                                            if row["id"] == item.product_id) <= available),
                         "max_gain_pct": _range_text(
                             next(row["expected_yield"] for row in products
                                  if row["id"] == item.product_id) + swings[item.product_id]),

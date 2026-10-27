@@ -80,8 +80,10 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
     with st.container(border=True):
         st.markdown(f"**{item.get('name')}**")
         #: 聊天气泡的全局样式会隐藏 st.caption；关键产品信息必须用普通 Markdown。
+        #: 起购额必须露出来 —— 否则用户点「订购」才知道买不起（演示实测）。
         st.markdown(f"{item.get('risk_label') or '风险等级待核实'} · "
-                    f"预期年化 {item.get('yield')} · 期限 {item.get('term')} 天")
+                    f"预期年化 {item.get('yield')} · 期限 {item.get('term')} 天 · "
+                    f"起购 {item.get('min_amount_yuan')} 元")
 
         #: 盈亏区间图 + 两端的图标数字（用户要求「名称底下有盈亏范围的图标」）
         st.markdown(_range_chart(gain, loss), unsafe_allow_html=True)
@@ -94,7 +96,12 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
         amount = st.number_input(
             "金额（元）", min_value=floor, value=floor, step=100,
             key=f"{key_prefix}-amt-{pid}", label_visibility="collapsed")
-        if st.button("订购", key=f"{key_prefix}-buy-{pid}", width="stretch"):
+        #: 买不起就别给可点的按钮：`affordable` 由工具层按「起购额 ≤ 储蓄余额」判定。
+        #: 老 facts 没有这个键时按"可买"处理，保持向后兼容。
+        if item.get("affordable") is False:
+            st.button("订购", key=f"{key_prefix}-buy-{pid}", width="stretch", disabled=True)
+            st.markdown("起购金额高于储蓄余额，暂时买不了。")
+        elif st.button("订购", key=f"{key_prefix}-buy-{pid}", width="stretch"):
             ask(f"买 {item.get('name')} {int(amount)} 元")
 
 
