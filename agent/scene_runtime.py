@@ -66,7 +66,8 @@ def response(ctx):
         if previous.get('intent') in ('txn_query', 'bill_report', 'bill_analysis', 'card_query', 'subscription_list', 'payee_list', 'wealth_holdings'):
             ctx.intent, ctx.slots = previous['intent'], previous.get('slots', {})
             ctx.scene_request = previous.get('read_request') or None
-            scene_context.update(ctx.session_id, **{'card_id': None, 'txn_id': None, **previous, 'views': views[:-1]})
+            scene_context.update(ctx.session_id, **{'card_id': None, 'txn_id': None, 'category': None,
+                                 'direction': None, 'counterparty': None, **previous, 'views': views[:-1]})
             return None
         return write_flow.Step(intent=ctx.intent, states=['CLARIFY'], reply='暂无可恢复的查询列表，请说明要查看的内容。')
     return None

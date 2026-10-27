@@ -64,7 +64,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "aa_collect": ("payee_ids", "amount", "amounts"),                                 # T9 create_aa_request
     "subscription_list": ("status",),                                      # T10 list_subscriptions
     "subscription_cancel": ("sub_id", "merchant"),                          # T11 cancel_subscription（card-24 扩 merchant）
-    "subscription_remind": (),                                             # §3 有此意图、§2 无对应工具 → 留空待定
+    "subscription_remind": ("within_days",),                               # F18 T53 list_due_subscriptions（可选，缺省 7 天）
     "card_query": ("status",),                                              # T18 list_cards（卡 23：status 可选，不传=全部）
     "card_apply": ("card_type",),                                          # T12 apply 的 kw
     "card_limit_adjust": ("card_id", "credit_limit", "single_limit", "daily_limit"),   # T12 kw
@@ -394,6 +394,10 @@ def classify(text: str, history: list[str] | None = None) -> IntentOut:
     本函数不判权限、不判业务、不改写 LLM 给出的 confidence；只把槽位取值归一到工具层认的枚举
     （`normalize_output`，卡 16b）。
     """
+    #: 推荐卡上的固定入口只读目录查询，不交给模型误判为推荐。
+    if re.fullmatch(r'看看全部理财产品(?:\n（当前日期：\d{4}-\d{2}-\d{2}）)?',
+                    str(text).strip()):
+        return IntentOut(intent='wealth_all_products', confidence=1.0, slots={})
     system, user = build_messages(text, history)
     for attempt in (1, 2):
         try:

@@ -1,16 +1,18 @@
 """One live result; historical messages contain no interactive business views."""
 import re
+from copy import deepcopy
 
 import streamlit as st
 
-from agent import scene_flow, bill_detail_flow
-from interfaces.web import spending_pie, insight_card_ui
+from agent import scene_flow, bill_detail_flow, subscription_notice, view_navigation
+from interfaces.web import spending_pie, insight_card_ui, txn_card_ui, wealth_ui, subscription_ui
 import card_binding_ui, card_limit_ui, card_lock_ui, card_lost_ui
 import payee_card_ui, schedule_card_ui, aa_card_ui, gift_card_ui
 import activity_ui, payee_picker_ui, card_edit_ui, scene_ui
 
 READS = {'balance_query', 'txn_query', 'bill_analysis', 'bill_report', 'anomaly_check',
-         'card_query', 'payee_list', 'subscription_list', 'wealth_holdings', 'wealth_all_products'}
+         'card_query', 'payee_list', 'subscription_list', 'subscription_remind',
+         'wealth_holdings', 'wealth_all_products', 'wealth_recommend'}
 
 
 def family(turn: dict) -> str:
@@ -46,6 +48,8 @@ def accept(turn: dict, prompt: str) -> None:
     if turn.get('ask') == 'scene_reset':
         reset()
         return
+    if turn.get('intent') in READS or turn.get('executed'):
+        st.session_state.pop('workspace-return', None)
     previous = st.session_state.get('workspace-result') or {}
     if previous and previous.get('scene') != family(turn):
         st.session_state.pop('workspace-shortcut', None)
@@ -53,8 +57,32 @@ def accept(turn: dict, prompt: str) -> None:
 
 
 def reset() -> None:
-    for key in ('workspace-result', 'workspace-error', 'workspace-shortcut', 'active-scene'):
+    for key in ('workspace-result', 'workspace-error', 'workspace-shortcut', 'active-scene',
+                'workspace-return', 'subs-banner-dismissed'):
         st.session_state.pop(key, None)
+
+
+def remember_view(executor, session: str) -> None:
+    value = st.session_state.get('workspace-result') or {}
+    if value.get('turn', {}).get('intent') not in READS:
+        return
+    token = executor.submit(view_navigation.capture, session).result()
+    if token:
+        keys = ['workspace-result', 'workspace-shortcut', 'cards-view', 'operation-records-open']
+        keys += [f'bound-{domain}-query' for domain in ('card', 'payee', 'schedule', 'aa', 'gift', 'lost')]
+        st.session_state['workspace-return'] = {'token': token, 'state': deepcopy(
+            {key: st.session_state[key] for key in keys if key in st.session_state})}
+
+
+def return_after_cancel(executor, session: str) -> None:
+    saved = st.session_state.pop('workspace-return', None)
+    restored = saved and executor.submit(view_navigation.restore, session, saved['token']).result()
+    for key in ('workspace-result', 'workspace-error', 'workspace-shortcut'):
+        st.session_state.pop(key, None)
+    st.session_state['pending_id'] = None
+    st.session_state['clarify_round'] = 0
+    if restored:
+        st.session_state.update(saved['state'])
 
 
 def current() -> str:
@@ -73,6 +101,8 @@ def error(ask) -> None:
     if not failed:
         return
     st.error(failed['turn'].get('reply') or '这次请求未能完成。')
+    if failed['turn'].get('intent') == 'wealth_recommend':
+        wealth_ui.render_turn(failed['turn'], ask=ask, key_prefix='workspace-wealth-error')
     if failed['turn'].get('intent') in READS and not failed['turn'].get('executed'):
         st.button('重试查询', key='workspace-retry', on_click=ask, args=(failed['prompt'],))
 
@@ -111,6 +141,8 @@ def transaction_result(turn: dict) -> bool:
     facts = turn.get('facts') or {}
     if turn.get('intent') != 'txn_query' or 'items' not in facts:
         return False
+    if txn_card_ui.render(facts, key='workspace-txn-' + str(turn.get('trace_id'))):
+        return True
     rows = [{'时间': str(row.get('ts') or '').replace('T', ' '),
              '交易对手': row.get('counterparty') or '—', '分类': row.get('category') or '—',
              '金额（元）': row.get('amount_yuan') or '—'} for row in facts['items']]
@@ -130,6 +162,7 @@ def result(executor, session: str, ask, detail_loader) -> None:
     if scene == 'bills':
         key = 'workspace-' + str(turn.get('trace_id'))
         facts = turn.get('facts') or {}
+        bill_navigation(executor, session, turn, ask)
         overview = [(label, facts[field]) for label, field in (
             ('支出合计（元）', 'out_sum_yuan'), ('收入合计（元）', 'in_sum_yuan'),
             ('净额（元）', 'net_yuan')) if facts.get(field) is not None]
@@ -148,18 +181,43 @@ def result(executor, session: str, ask, detail_loader) -> None:
         if not drawn and not transaction_result(turn):
             st.markdown(turn.get('reply') or '当前范围没有查询结果。')
         if facts:
-            actions = [('最大的一笔', '看看最大的一笔'), ('查看流水', '最近的交易')]
-            if executor.submit(scene_flow.context, session).result().get('txn_id'):
-                actions.insert(1, ('关联银行卡', '用的是哪张卡'))
-            if turn['intent'] == 'anomaly_check':
-                actions = [('查看流水', '最近的交易')]
-            columns = st.columns(len(actions))
-            for index, (label, prompt) in enumerate(actions):
-                columns[index].button(label, key=f'workspace-next-{index}', on_click=ask, args=(prompt,), width='stretch')
+            with st.container(key='workspace-actions', horizontal=True):
+                if turn['intent'] != 'txn_query':
+                    st.button('查看流水', key='workspace-ledger', type='primary',
+                              on_click=ask, args=('最近的交易',))
+                if turn['intent'] != 'anomaly_check':
+                    st.button('最大的一笔', key='workspace-largest', type='tertiary',
+                              on_click=ask, args=('看看最大的一笔',))
             insight_card_ui._export(turn, turn['intent'], facts, key)
+    elif scene == 'wealth_recommend':
+        if (turn.get('facts') or {}).get('items'):
+            wealth_ui.render_turn(turn, ask=ask, key_prefix='workspace-wealth-' + str(turn.get('trace_id')))
+        else:
+            st.info(turn.get('reply') or '当前没有可推荐的产品。')
+    elif (scene in ('subscription_list', 'subscription_remind')
+          and (turn.get('facts') or {}).get('status', 'active') == 'active'
+          and ((turn.get('facts') or {}).get('items') or (turn.get('facts') or {}).get('overdue_items'))):
+        subscription_ui.render_turn(turn, ask=ask, key_prefix='workspace-subs-' + str(turn.get('trace_id')))
     elif scene not in ('cards', 'payee_list') and not any(
             state in turn.get('states', []) for state in ('CONFIRM_CARD', 'OTP')):
         st.markdown(turn.get('reply') or '当前没有查询结果。')
+
+
+def notifications(executor, session: str, ask) -> None:
+    subscription_ui.banner(executor.submit(subscription_notice.summary, session).result(), ask=ask)
+
+
+def bill_navigation(executor, session: str, turn: dict, ask) -> None:
+    if turn.get('intent') != 'txn_query':
+        return
+    context = executor.submit(scene_flow.context, session).result()
+    views = context.get('views') or []
+    previous = views[-1] if views else context.get('previous', {})
+    label = {'bill_report': '返回账单', 'bill_analysis': '返回账单',
+             'txn_query': '返回流水'}.get(previous.get('intent'))
+    if label:
+        st.button(label, key='workspace-back', type='tertiary', on_click=ask,
+                  args=('返回刚才的列表',), kwargs={'display': label})
 
 
 def panels(executor, session: str, ask, pending, forms, confirmation) -> None:

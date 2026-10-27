@@ -205,10 +205,12 @@ def test_every_request_writes_exactly_one_audit_row(seeded: Path,
 
 def test_read_intents_are_exactly_the_contracted_set(seeded: Path,
                                                      monkeypatch: pytest.MonkeyPatch) -> None:
-    """只读意图清单 = 卡 09 的 8 个 + F10 的 `risk_assess` + `SPEC-CHANGE` 的 `payee_list`。
+    """只读意图清单 = 卡 09 的 8 个 + F10 的 `risk_assess` + `SPEC-CHANGE` 的 `payee_list`
+    + F18 的 `subscription_remind`。
 
-    卡 09 当时只接 8 个只读意图；F10 把 `assess_risk` 接通后扩到 9 个；本次「查看白名单」
-    （T20 `list_payees`，人类已批的 `SPEC-CHANGE`）扩到 **10** 个 —— 都是**契约扩展**，
+    卡 09 当时只接 8 个只读意图；F10 把 `assess_risk` 接通后扩到 9 个；「查看白名单」
+    （T20 `list_payees`，人类已批的 `SPEC-CHANGE`）扩到 **10** 个；此后 T26/T27/T24/T37/T42
+    陆续接通，F18 的 T53 `list_due_subscriptions` 再加一个 —— 都是**契约扩展**，
     故同步更新这条锚定断言（原断言见 git 历史），而不是绕过它。
 
     **测试名一并纠正**：原名 `..._the_eight_from_the_card` 在 F10 之后就已经名不副实
@@ -221,7 +223,7 @@ def test_read_intents_are_exactly_the_contracted_set(seeded: Path,
                                          "bill_report", "subscription_list", "card_query",
                                          "wealth_recommend", "risk_assess", "payee_list",
                                          "wealth_holdings", "wealth_all_products", "scheduled_list",
-                                         "gift_order_list", "aa_list")
+                                         "gift_order_list", "aa_list", "subscription_remind")
     assert all(intent in classifier.INTENT_LABELS for intent in orchestrator.READ_INTENTS)
     assert set(orchestrator.TOOL_ROUTES) == set(orchestrator.READ_INTENTS)   # 卡 23 起 card_query 也有路由
 

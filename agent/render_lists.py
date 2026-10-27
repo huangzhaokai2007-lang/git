@@ -111,7 +111,7 @@ CARD_TYPE_CN = {"savings": "储蓄卡", "credit": "信用卡"}
 #: F11 追加：**回执必须带产品明细**（产品名/风险等级/预期年化/期限），只报个数用户拿不到可比信息。
 #: 措辞里的「推荐」二字是**剧本契约**（`tests/cases/orchestrator.yaml` 的 wlt-001/wlt-002/sec-005
 #: 都有 `must_contain: 推荐`），不得改写成「筛选出」等同义词。
-T_WEALTH_CLEAN = "按您的风险等级 {risk_level}，为您推荐 {item_count} 个产品："
+T_WEALTH_CLEAN = "按您的风险等级「{risk_label}」，为您推荐 {item_count} 个产品："
 #: 空结果：自己的句子，不套列表头（与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径）；
 #: 措辞要**明确说清"没有放宽风险条件"**（F11 验收清单第 2 条）。同样保留「推荐」二字。
 T_WEALTH_EMPTY = "按您的风险等级没有可推荐的产品 —— 我没有放宽您的风险等级，您可以放宽期限或金额后再试。"
@@ -158,8 +158,13 @@ def wealth_line(item: Mapping) -> str:
     项目红线「金额一律整数分、禁浮点」），期限取 `term` 整数经 `term_cn` 换成文案。
     """
     level = str(item["risk_level"])
-    return (f"- {item['name']}：{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
+    line = (f"- {item['name']}：{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
             f"期限 {term_cn(item['term'])}")
+    #: 演示区间只是模型规则假设，不是实测最大亏损或历史最高收益。
+    if item.get("max_gain_pct") is not None and item.get("max_loss_pct") is not None:
+        line += (f"\n  （模拟参考区间：↑ 上沿 {item['max_gain_pct']}%"
+                 f" / ↓ 下沿 {item['max_loss_pct']}%；非历史极值或收益承诺）")
+    return line
 
 
 def render_wealth(facts: Mapping) -> str:
@@ -238,8 +243,10 @@ def subscription_line(item: Mapping) -> str:
     有一条测试钉着两层渲染同源）；周期文案直接引工具层常量，不复制副本。
     """
     cycle = CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"]))
+    #: 逾期标记（`active` 但扣费日已过）：不标出来就会出现「提醒说逾期、列表看不出」的矛盾。
+    tail = f"（{item['overdue_cn']}）" if item.get("days_overdue") else ""
     return (f"- {item['merchant']}：{item['amount_yuan']} 元／{cycle}，"
-            f"下次扣费 {item['next_charge_date']}")
+            f"下次扣费 {item['next_charge_date']}{tail}")
 
 
 def render_subscriptions(facts: Mapping) -> str:

@@ -97,7 +97,7 @@ def test_a_complete_sentence_is_scored_in_one_shot(seeded: Path, monkeypatch: py
     fake_llm(monkeypatch, [out("risk_assess", slots={"answers": one_sentence(answers)})])
     turn = orchestrator.handle("帮我做风险测评，" + one_sentence(answers))
     assert turn.tool_calls == ["assess_risk"], "5 题齐全却没直接算"
-    assert level in turn.reply and f"{score}/" in turn.reply
+    assert _wealth_risk.risk_label(level) in turn.reply and f"{score} 分" in turn.reply
 
 
 @pytest.mark.parametrize("sentence", [
@@ -163,7 +163,7 @@ def test_submit_assessment_scores_and_reports(seeded: Path, answers: dict, level
     turn = orchestrator.submit_assessment(answers, session_id=SESSION)
     assert turn.intent == "risk_assess" and turn.tool_calls == ["assess_risk"]
     assert turn.executed is True and turn.tier == "L0" and turn.error_code is None
-    assert level in turn.reply and "有效" in turn.reply
+    assert _wealth_risk.risk_label(level) in turn.reply and "有效" in turn.reply
     assert turn.states == ["IDLE", "SLOT_FILL", "PRECHECK", "EXECUTE", "VERIFY_NUMBERS", "REPLY", "AUDIT"]
 
 

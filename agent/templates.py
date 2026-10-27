@@ -85,7 +85,7 @@ T_REPORT_HEAD = "{period} 账单：支出 {out_sum_yuan} 元、收入 {in_sum_yu
 #: 风险测评结果（F10）：facts 键见 T13（risk_level / total_score / max_score / valid_until）。
 #: 回执**必须报出总分与满分**（验收清单第 1 条要求"由代码计算"，把总分亮出来才可核验），
 #: 并说清**结果只存本次会话**（验收清单第 3 条：当前仅存进程内）。
-T_RISK_RESULT = ("根据问卷计分（{total_score}/{max_score} 分），您的风险承受等级为 {risk_level}，"
+T_RISK_RESULT = ("根据问卷计分（{total_score} 分），您的风险承受能力为「{risk_label}」，"
                  "有效期至 {valid_until}。（测评结果仅保存在本次会话中）")
 #: 数字校验未通过时的降级措辞（不含任何数字；口径同 `T_DEGRADED_NOTE`）。
 T_RISK_RESULT_FALLBACK = "您的风险测评已完成，具体等级与有效期请看测评结果。（测评结果仅保存在本次会话中）"
@@ -151,6 +151,9 @@ TEMPLATES: dict[str, str] = {
 }
 
 
+from agent._render_remind import render_reminders
+
+
 def render(intent: str, facts: Mapping[str, object]) -> str:
     """按意图渲染模板：所有数字来自 `facts`（缺键直接报错，不兜底、不猜）。"""
     if intent == "anomaly_check":                            # F03：汇总 + 每条命中一行（交易 + 依据）
@@ -167,6 +170,8 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_wealth(facts)
     if intent == "payee_list":                               # SPEC-CHANGE：白名单 / 非白名单分组
         return render_payees(facts)
+    if intent == "subscription_remind":                      # F18：N 天内要扣费的订阅
+        return render_reminders(facts)
     if intent == "wealth_holdings":                          # T21：持仓明细
         return render_holdings(facts)
     if intent == "wealth_all_products":                      # T22：全部产品，按等级分组
@@ -241,7 +246,8 @@ POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重�
 #: - `bill_report`（F24 账单报告）——回执主体是工具层生成的整篇 Markdown 文档，
 #:   标题层级与表格都是结构，交给润色有可能被压平成一串文字。
 #: 列表类（刷卡/订阅/理财）口径不变，以免顺手改掉别人的回执行为。
-NO_POLISH_INTENTS = frozenset({"payee_list", "txn_query", "bill_analysis", "bill_report"})
+NO_POLISH_INTENTS = frozenset({"payee_list", "txn_query", "bill_analysis", "bill_report",
+                               "wealth_recommend", "wealth_all_products"})
 _TEMPLATE_ONLY = ContextVar('bank_template_only', default=False)
 
 

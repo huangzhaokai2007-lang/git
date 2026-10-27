@@ -58,7 +58,7 @@ CARD_FIELDS = ("type", "credit_limit", "single_limit", "daily_limit", "status")
 SUBSCRIPTION_FIELDS = ("merchant", "amount", "cycle", "next_charge_date", "source_txn_id", "status")
 _UPDATABLE = {"card": CARD_FIELDS, "subscription": SUBSCRIPTION_FIELDS}   # update_* 字段白名单
 _TXN_COLUMNS = ("id", "account_id", "ts", "amount", "direction", "counterparty", "category",
-                "channel", "memo", "balance_after", "payee_id")
+                "channel", "memo", "balance_after", "ref_no", "payee_id")
 _AUDIT_COLUMNS = ("id", "trace_id", "session_id", "ts", "actor", "intent", "tool", "params_json",
                   "risk_level", "permission_tier", "result", "error_code")
 _RISK_COLUMNS = ("id", "trace_id", "ts", "user_id", "factor", "detail", "action_taken")
@@ -181,6 +181,20 @@ def _stamp(ts: object, name: str = "ts") -> str:
     return text
 
 
+def _new_ref_no(moment: str, seed: str = "") -> str:
+    """新流水的**业务参考号**（F02 明细表要展示，纯数字）。
+
+    形状：`YYYYMMDD` + 8 位序号位。序号位取自**幂等键**（`id`）的 `uuid5` 派生值 ——
+    重放同一条流水必须拿到同一个号，否则幂等键会判"已存在且内容不同"（`id` 之外的时间戳
+    也不许进号：`ts=None` 的两次调用会差一秒）；没有幂等键时退回随机位 ——
+    那种流水本来就是新的一笔，不会被重放。
+    用户拿着这串号去对账/问客服，所以它必须**写库即定终身**，不能到展示时现编。
+    """
+    day = moment[:10].replace("-", "")
+    tail = uuid.uuid5(uuid.NAMESPACE_OID, seed).int if seed else uuid.uuid4().int
+    return f"{day}{tail % 100_000_000:08d}"
+
+
 def _period_range(period: object) -> tuple[str, str]:
     """`"2026-03"` / `"2026"` → 左闭右开的 ISO 区间（供 ts 字符串比较）。"""
     match = _PERIOD_RE.match(str(_text(period, "period")))
@@ -214,13 +228,16 @@ def _insert(table: str, columns: tuple[str, ...], values: tuple, row_id: str,
     # 按主键幂等：同 id 同内容 → 既有行；同 id 异内容 → ValueError
     # `skip_ts`：仅当 ts 是 DAO 自己生成的（调用方没给）才为 True —— 该 ts 不参与比对，
     # 否则同一业务内容的重试只要跨过一个秒边界就会被误判成"内容不同"，幂等键形同虚设。
-    # 刻意收窄成布尔、而不是接受任意列名集合：除了这个自生成的时间戳，**所有**业务字段
-    # （尤其 amount）永远参与比对，杜绝"误把金额放进豁免集 → 同 id 异金额被静默吞掉"的幂等失效。
+    # **连同 `ref_no` 一起豁免**：它是 `_new_ref_no` 由 `ts + id` 派生的，ts 自生成漂移时必然
+    # 跟着变 ——豁免 ts 却比对 ref_no，等于把同一笔业务的重试再判成冲突（`test_dao_core`
+    # 里那条"自生成 ts 仍应幂等"的用例当场抓到）。两列都不是调用方能给的输入，
+    # **所有**真正的业务字段（尤其 amount）永远参与比对。
     with _writing() as conn:
         existing = _one(f'SELECT * FROM "{table}" WHERE id = ?', (row_id,))
         if existing is not None:
+            exempt = {"ts", "ref_no"} if skip_ts else set()
             if any(existing[name] != value for name, value in zip(columns, values)
-                   if not (skip_ts and name == "ts")):
+                   if name not in exempt):
                 raise ValueError(f"{table}.id={row_id} 已存在且内容不同（幂等键冲突）")
             return existing
         holes = ", ".join("?" * len(columns))

@@ -40,6 +40,8 @@ def detail_item(row: Mapping) -> dict:
         "direction": row.get("direction") or ("in" if row["amount"] > 0 else "out"),
         "channel": row.get("channel") or "",
         "memo": row.get("memo") or "",
+        "ref_no": row.get("ref_no") or "",          # F02：流水号照抄库行（界面/回执只展示）
+        "status": row.get("status") or "done",      # 交易状态照抄库行；旧库缺列按已完成算
         **_money_facts(row["amount"], "amount"),
     }
     after = row.get("balance_after")

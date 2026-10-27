@@ -50,6 +50,11 @@ RISK_DESC = {
     "R4": "本金风险较高，可能出现 10%-20% 的波动",
     "R5": "本金风险高，可能出现 20% 以上的波动，可能损失大部分本金",
 }
+#: 【模拟参考波动】按风险等级设置的演示用区间假设（百分比，正数）。
+#: 来源：本 demo 的 RISK_DESC 文字分档（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
+#: R5「20% 以上」演示取 30%）。并非历史数据或可验证的最大收益/亏损，必须在界面显著标明。
+RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
+
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
 
@@ -119,11 +124,69 @@ class RecommendItem(BaseModel):
 
 # ---------------- 内部辅助 ----------------
 
+#: 中文等级 → 代码。**LLM 抽槽位时经常直接给中文**（"我是高风险"），
+#: 只认 R1–R5 会让整个推荐报 INVALID_ARGUMENT，用户看到的是一句错误而不是产品列表。
+_LABEL_TO_CODE = {label: code for code, label in RISK_LABELS.items()}
+
+
+def normalize_level(level: str) -> str:
+    """把「高风险」/「r5」/「R5」统一成 `R5`；认不出就原样返回（交给 `_rank` 报错）。"""
+    text = str(level).strip()
+    if text.upper() in RISK_LEVELS:
+        return text.upper()
+    if text.isdigit() and 1 <= int(text) <= 5:      # 「5」→ R5
+        return f"R{text}"
+    return _LABEL_TO_CODE.get(text, text)
+
+
+def _resolve_level(risk_level: str | None) -> str:
+    """定本次推荐的等级上限。
+
+    **严格与容错的分界**：
+    - 没传 → 用本次会话的测评结果
+    - `R5` / `5` / `高风险` → 用用户指定的
+    - `R9` / `R0` / `r1` / 空串 → **报 `INVALID_ARGUMENT`**（明显的输入错误，必须让用户知道）
+    - `high` / `较高` / 其他认不出的人话 → **回退测评结果**。
+      LLM 抽槽位时经常给 `high` 这种英文词，为它把整个推荐打成报错不值得 ——
+      用户要的是产品列表，不是一句「风险等级只能是 R1/R2/...」。
+    """
+    #: 已有测评时，分类器不能用更高等级槽位放宽推荐；显式等级但没有测评时
+    #: 保留 T14 的历史查询契约（仅用于浏览产品，买入仍强制要求真实测评）。
+    if risk_level is None:
+        return require_assessment()['risk_level']
+    record = _ASSESSMENTS.get(current_user_id())
+    assessed = require_assessment()['risk_level'] if record is not None else None
+    text = str(risk_level).strip()
+    if not text:
+        raise ToolError(ErrorCode.INVALID_ARGUMENT, "风险等级不能是空字符串")
+    if text[0].upper() == "R" or text.isdigit():          # 代码式输入：严格校验
+        level = f"R{text}" if text.isdigit() else text
+        if level not in RISK_LEVELS:
+            raise ToolError(ErrorCode.INVALID_ARGUMENT,
+                            f"风险等级只能是 {'/'.join(RISK_LEVELS)}")
+        return level if assessed is None or _rank(level) <= _rank(assessed) else assessed
+    if text in _LABEL_TO_CODE:                            # 中文等级：认
+        level = _LABEL_TO_CODE[text]
+        return level if assessed is None or _rank(level) <= _rank(assessed) else assessed
+    logger.warning("认不出的风险等级 %r，回退到测评结果", risk_level)
+    return require_assessment()['risk_level']
+
+
 def _rank(level: str) -> int:
     """风险等级 → 序数（R1=1..R5=5）；非法等级抛 `ToolError(INVALID_ARGUMENT)`。"""
+    level = normalize_level(level)
     if level not in RISK_LEVELS:
-        raise ToolError(ErrorCode.INVALID_ARGUMENT, f"风险等级只能是 {'/'.join(RISK_LEVELS)}")
+        raise ToolError(ErrorCode.INVALID_ARGUMENT,
+                        f"风险等级只能是 {'/'.join(RISK_LEVELS)} 或对应的中文名")
     return RISK_LEVELS.index(level) + 1
+
+
+def _range_text(pct: float) -> str:
+    """百分比数值 → 带符号的两位小数字符串（如 `+38.50` / `-30.00` / `0.00`）。
+
+    用于「参考区间」：正数显式带 `+`，让用户一眼分清赚和亏。
+    """
+    return f"{pct:+.2f}" if pct else "0.00"
 
 
 def _yield_text(value: float) -> str:
@@ -187,10 +250,11 @@ def assess_risk(answers: dict) -> ToolResult:
     valid_until = (AS_OF + timedelta(days=RISK_VALID_DAYS)).isoformat()
     _ASSESSMENTS[current_user_id()] = {"risk_level": level, "valid_until": valid_until}
     data = AssessRiskData(risk_level=level, valid_until=valid_until)
-    facts = {"risk_level": level, "valid_until": valid_until, "total_score": total,
-             "max_score": MAX_SCORE, "valid_days": RISK_VALID_DAYS, "answers": dict(answers)}
-    message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」"
-               f"（{level}），有效期至 {valid_until}。")
+    facts = {"risk_level": level, "risk_label": risk_label(level), "valid_until": valid_until,
+             "total_score": total, "max_score": MAX_SCORE, "valid_days": RISK_VALID_DAYS,
+             "answers": dict(answers)}
+    message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」，"
+               f"有效期至 {valid_until}。")
     return _ok(data.model_dump(), facts, message)
 
 
@@ -208,7 +272,7 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                         amount=amount)) is not None:
         return bad
     try:
-        level = risk_level if risk_level is not None else require_assessment()["risk_level"]
+        level = _resolve_level(risk_level)
         ceiling = _rank(level)
         products = [row for row in dao.list_products()
                     if _rank(row["risk_level"]) <= ceiling
@@ -222,14 +286,41 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     items = [RecommendItem(product_id=row["id"], name=row["name"], risk_level=row["risk_level"],
                            yield_=_yield_text(row["expected_yield"]), term=row["term_days"])
              for row in products]
+    #: 可用余额（整数分）：界面据此把「起购额 > 余额」的订购按钮置灰。
+    #: 归属 fail-closed —— 取到的账户不是本人就当没有余额（宁可少显示，也不误判为买得起）。
+    #: **读余额失败不能让推荐整体失败**：取不到就当未知（不置灰），申购时还有一次余额校验兜底。
+    try:
+        account = dao.get_balance("savings")
+    except ValueError:
+        account = None
+    available = (int(account["balance"])
+                 if account is not None and account["user_id"] == current_user_id() else None)
+    #: 演示区间：参考上沿 = 预期年化 + 演示波动值；下沿 = -演示波动值。
+    #: 只进 facts（不进 data —— data 字段是冻结契约），渲染层据此展示。
+    swings = {row["id"]: RISK_SWING.get(row["risk_level"], 0.0) for row in products}
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
-    facts = {"risk_level": level, "ceiling_rank": ceiling, "item_count": len(items),
+    facts = {"risk_level": level, "risk_label": risk_label(level),
+             "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
+             **(_money_facts(available, "available") if available is not None else {}),
              "items": [{**item.model_dump(by_alias=True),
+                        "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
-                                            if row["id"] == item.product_id), "min_amount")}
-                       for item in items]}
+                                            if row["id"] == item.product_id), "min_amount"),
+                        #: 买得起吗 —— 由工具层判定（铁律 1：编排层与界面不做业务算术）。
+                        "affordable": (available is None or
+                                       next(row["min_amount"] for row in products
+                                            if row["id"] == item.product_id) <= available),
+                        "max_gain_pct": _range_text(
+                            next(row["expected_yield"] for row in products
+                                 if row["id"] == item.product_id) + swings[item.product_id]),
+                        "max_loss_pct": _range_text(-swings[item.product_id])}
+                       for item in items],
+             "portfolio_max_gain_pct": _range_text(
+                 max((row["expected_yield"] + swings[row["id"]]) for row in products)
+                 if products else 0.0),
+             "portfolio_max_loss_pct": _range_text(-max(swings.values()) if swings else 0.0)}
     if not items:
         return _ok(data, facts, "按您的风险等级筛选后没有合适的产品。")
-    message = f"按风险等级 {level} 筛出 {len(items)} 个产品，按预期年化从高到低推荐。"
+    message = f"按风险等级「{risk_label(level)}」筛出 {len(items)} 个产品，按预期年化从高到低推荐。"
     return _ok(data, facts, message)

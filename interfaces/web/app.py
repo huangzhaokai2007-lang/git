@@ -79,6 +79,7 @@ def _agent_executor() -> ThreadPoolExecutor:
 def _ask(text: str, *, display: str | None = None) -> None:
     '把一句话交给编排层，记录回执与轨迹（界面不解释业务、不派生数字）。'
     state = st.session_state
+    workspace_ui.remember_view(_agent_executor(), state['session_id'])
     display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
     try:
@@ -129,17 +130,18 @@ def _ask(text: str, *, display: str | None = None) -> None:
         state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
 
 
-def _follow_up(prompt: str) -> None:
-    if (st.session_state.get('workspace-result', {}).get('prompt') == prompt
+def _follow_up(prompt: str, *, display: str | None = None) -> None:
+    if (prompt != '返回刚才的列表' and st.session_state.get('workspace-result', {}).get('prompt') == prompt
             and not st.session_state.get('workspace-error')):
         return
-    _ask(prompt)
+    _ask(prompt, display=display)
     st.rerun()
 
 
 def _cancel(confirmation) -> None:
     """取消这笔写操作：只清 agent 层的会话确认态 —— 不调工具、不执行（铁律 3）。"""
     confirm_card.clear(confirmation.session_id)
+    workspace_ui.return_after_cancel(_agent_executor(), confirmation.session_id)
     st.session_state["messages"].append(
         {"role": "assistant", "text": "已取消这笔操作：未提交执行，没有产生任何资金变动。", "turn": None})
 
@@ -227,6 +229,7 @@ def _sidebar() -> None:
         prompt = ui.scenes()
         if prompt is not None and not workspace_ui.reuse_shortcut(prompt):
             import shortcut_ui
+            workspace_ui.remember_view(_agent_executor(), st.session_state['session_id'])
             shortcut_ui.start(_agent_executor(), st.session_state['session_id'])
             if prompt != '调整额度' and st.session_state.get('limit-view'):
                 st.session_state['limit-view']['open'] = False
@@ -261,6 +264,7 @@ def _sidebar() -> None:
 
 
 def _chat_page() -> None:
+    workspace_ui.notifications(_agent_executor(), st.session_state['session_id'], _follow_up)
     messages = st.session_state['messages']
     if len(messages) > 4:
         with st.expander('较早的聊天记录', expanded=False):

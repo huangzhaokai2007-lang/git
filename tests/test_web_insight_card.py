@@ -93,7 +93,7 @@ def test_analysis_reply_comes_with_a_chart_and_follow_up_buttons(monkeypatch: py
     assert len(pies) == 1                                            # ③ 分类只画一份饼图
     labels = [button.label for button in at.button]
     assert all(label in labels for label in ('最大的一笔', '查看流水'))
-    assert '关联银行卡' not in labels  # Available only after a transaction is selected.
+    assert '关联银行卡' not in labels
 
 
 def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:

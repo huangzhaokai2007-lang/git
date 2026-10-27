@@ -60,7 +60,8 @@ def remember_result(session: str, intent: str, slots: dict, result, request: dic
         return
     request, data = request or {}, result.data or {}
     state = snapshot(session)
-    previous = {k: state[k] for k in ('intent', 'period', 'card_id', 'txn_id', 'slots', 'read_request') if k in state}
+    previous = {k: state[k] for k in ('intent', 'period', 'card_id', 'txn_id', 'slots', 'read_request',
+                                     'category', 'direction', 'counterparty') if k in state}
     values = {'intent': intent, 'slots': dict(slots), 'previous': previous, 'read_request': dict(request)}
     if previous:
         values['views'] = (state.get('views', []) + [previous])[-8:]

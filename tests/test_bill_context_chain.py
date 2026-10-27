@@ -131,10 +131,10 @@ def test_largest_is_computed_over_all_rows_before_display_limit(linked):
     account = raw(linked, 'SELECT account_id FROM txn ORDER BY ts LIMIT 1')[0]['account_id']
     for index in range(60):
         dao.connection().execute(
-            'INSERT INTO txn (id,account_id,ts,amount,direction,counterparty,category,channel,memo,balance_after) '
-            'VALUES (?,?,?,?,?,?,?,?,?,?)',
+            'INSERT INTO txn (id,account_id,ts,amount,direction,counterparty,category,channel,memo,balance_after,ref_no) '
+            'VALUES (?,?,?,?,?,?,?,?,?,?,?)',
             (f'largest-{index:03d}', account, f'2026-01-{index % 28 + 1:02d}T10:00:00',
-             -1000000 - index, 'out', 'scope merchant', '电商', '卡', '', 0))
+             -1000000 - index, 'out', 'scope merchant', '电商', '卡', '', 0, f'20260101{index:08d}'))
     dao.connection().commit()
     result = _scene_reads.read('txn_query', {'kind': 'txn_largest', 'period': '2026-01', 'category': '电商'})
     assert result.ok

@@ -108,16 +108,18 @@ def test_clear_category_preserves_cross_month_date_range(monkeypatch, seeded):
 
 
 def test_transaction_workspace_shows_readable_fields_without_internal_ids(monkeypatch, seeded):
-    from agent import card_binding_flow
+    from agent import card_binding_flow, scene_context
     turn = orchestrator.Turn(trace_id='ledger-result', intent='txn_query',
         reply='当前范围共 1 笔交易。\n流水 txn-internal-001｜合成商户｜-5.00 元',
         facts={'items': [{'id': 'txn-internal-001', 'ts': '2026-08-10T12:00:00',
                          'counterparty': '合成商户', 'category': '电商', 'amount_yuan': '-5.00'}]})
     monkeypatch.setattr(card_binding_flow, 'handle', lambda *a, **kw: turn)
     at = app(monkeypatch, seeded)
+    scene_context.update(at.session_state['session_id'], intent='txn_query', txn_id='txn-internal-001')
     at.chat_input[0].set_value('看看这笔交易').run()
     assert not at.exception
+    assert not any(button.label == '关联银行卡' for button in at.button)
     assert not any('txn-internal-001' in item.value for item in at.markdown)
-    assert len(at.dataframe) == 1
-    row = at.dataframe[0].value.iloc[0]
-    assert row['交易对手'] == '合成商户' and row['金额（元）'] == '-5.00'
+    ledger = [item.value for item in at.markdown if 'class="txn-wrap"' in item.value]
+    assert len(ledger) == 1
+    assert '合成商户' in ledger[0] and '-5.00' in ledger[0]

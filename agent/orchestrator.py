@@ -38,7 +38,8 @@ MAX_CLARIFY_ROUNDS = 2        # 来源：卡 09 第 3 条「最多 2 轮」
 #: + SPEC-CHANGE 新增的 `payee_list`（T20 `list_payees`，L0 只读、无槽位）
 READ_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report",
                 "subscription_list", "card_query", "wealth_recommend", "risk_assess", "payee_list",
-                "wealth_holdings", "wealth_all_products", "scheduled_list", "gift_order_list", "aa_list")
+                "wealth_holdings", "wealth_all_products", "scheduled_list", "gift_order_list", "aa_list",
+                "subscription_remind")
 
 #: 写意图清单的唯一来源是 `agent/write_intents.py` 的写描述符表（card-24 泛化拆出），
 #: 经 `write_flow.WRITE_INTENTS` 转发到这里 —— 全程只有一份，避免清单漂移。

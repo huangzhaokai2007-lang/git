@@ -216,6 +216,28 @@ def _window_flows(floor: date) -> list[dict]:
     return rows
 
 
+def overdue_cn(days: int) -> str:
+    """「已过 N 天」—— 逾期项的说法，不能沿用「N 天后」。
+
+    唯一实现在工具层：`tools/subscription_remind.py` 与界面层都从这里取，避免两处各写一句。
+    """
+    return "今天已过扣费日" if days == 0 else f"已过 {days} 天"
+
+
+def _overdue_facts(item: dict, status: str) -> dict:
+    """`active` 且扣费日早于 AS_OF → 补 `days_overdue` / `overdue_cn`；否则空字典。
+
+    逾期意味着「该扣的没扣成」（扣款失败 / 卡被冻结 / 漏扣）。列表页不标出来，
+    就会出现「提醒说逾期、点进列表看不出哪条逾期」的自相矛盾。
+    """
+    if status != "active":
+        return {}
+    days = (AS_OF - date.fromisoformat(item["next_charge_date"])).days
+    if days <= 0:
+        return {}
+    return {"days_overdue": days, "overdue_cn": overdue_cn(days)}
+
+
 def list_subscriptions(status: str = "active") -> ToolResult:
     """T10 订阅列表（L0）。data: `items[{id,merchant,amount,cycle,next_charge_date}]`（字段冻结）。
 
@@ -238,7 +260,9 @@ def list_subscriptions(status: str = "active") -> ToolResult:
     facts = {"status": status, "subscription_count": len(items), "zombie_count": len(zombies),
              "zombie_ids": zombies, "zombie_window_months": ZOMBIE_WINDOW_MONTHS,
              "zombie_as_of": AS_OF.isoformat(),
-             "items": [{**item, **_money_facts(item["amount"], "amount")} for item in items]}
+             "items": [{**item, "cycle_cn": CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"])),
+                        **_overdue_facts(item, status),
+                        **_money_facts(item["amount"], "amount")} for item in items]}
     if not items:
         return _ok(data.model_dump(), facts, EMPTY_MESSAGE)
     # 卡 20：面向用户不说"僵尸订阅"这种行话（与 agent/templates.py 的模板逐字一致）
@@ -258,8 +282,10 @@ def _subscription_line(item: dict) -> str:
     同一份实现刻意留在两层各一份：工具层不得依赖 agent 层，agent 层不得复制业务取数。
     """
     cycle = CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"]))
+    #: 逾期标记与 `agent/render_lists.subscription_line` 逐字一致（wording 测试钉着两层同源）。
+    tail = f"（{item['overdue_cn']}）" if item.get("days_overdue") else ""
     return (f"- {item['merchant']}：{item['amount_yuan']} 元／{cycle}，"
-            f"下次扣费 {item['next_charge_date']}")
+            f"下次扣费 {item['next_charge_date']}{tail}")
 
 
 def _subscription_message(facts: dict) -> str:
