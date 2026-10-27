@@ -5,6 +5,9 @@
 
 口径：数字全部来自 facts（铁律 2）；空结果走独立句子、不套列表头（与 `render_cards` /
 `render_subscriptions` 同口径）。
+
+**逾期项单独一段**：`status='active'` 但扣费日已过的订阅不进「将要扣费」列表（那不是"未来"），
+但也不能静默丢掉 —— 它意味着「该扣的没扣成」，值得让用户核对一次。
 """
 
 from __future__ import annotations
@@ -15,6 +18,8 @@ from agent.render_lists import TemplateError
 
 T_REMIND_EMPTY = "未来 {within_days} 天内没有要扣费的订阅。"
 T_REMIND_HEAD = "未来 {within_days} 天内有 {due_count} 个订阅要扣费，合计 {total_amount_yuan} 元："
+T_REMIND_OVERDUE_HEAD = ("另有 {overdue_count} 个订阅的扣费日已经过去（合计 "
+                         "{overdue_total_amount_yuan} 元），可能是扣款失败或漏扣，建议核对：")
 
 
 def remind_line(item: Mapping) -> str:
@@ -23,12 +28,24 @@ def remind_line(item: Mapping) -> str:
             f"{item['days_cn']}（{item['next_charge_date']}）")
 
 
+def overdue_line(item: Mapping) -> str:
+    """一行逾期：商户、金额、原定扣费日、已过几天。"""
+    return (f"- {item['merchant']}：{item['amount_yuan']} 元／{item['cycle_cn']}，"
+            f"原定 {item['next_charge_date']} 扣费（{item['overdue_cn']}）")
+
+
 def render_reminders(facts: Mapping) -> str:
-    """`subscription_remind` 回执：空结果优先，再汇总句 + 明细。"""
+    """`subscription_remind` 回执：空结果优先，再汇总句 + 明细；逾期另起一段。"""
+    overdue = facts.get("overdue_items") or []
     if not facts["items"]:
-        return T_REMIND_EMPTY.format(**facts)
-    try:
-        head = T_REMIND_HEAD.format(**facts)
-    except KeyError as exc:
-        raise TemplateError(f"'subscription_remind' 模板缺少 facts 键：{exc}") from exc
-    return "\n".join([head, *(remind_line(item) for item in facts["items"])])
+        lines = [T_REMIND_EMPTY.format(**facts)]
+    else:
+        try:
+            head = T_REMIND_HEAD.format(**facts)
+        except KeyError as exc:
+            raise TemplateError(f"'subscription_remind' 模板缺少 facts 键：{exc}") from exc
+        lines = [head, *(remind_line(item) for item in facts["items"])]
+    if overdue:
+        lines += ["", T_REMIND_OVERDUE_HEAD.format(**facts),
+                  *(overdue_line(item) for item in overdue)]
+    return "\n".join(lines)

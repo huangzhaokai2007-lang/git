@@ -77,6 +77,23 @@ def test_empty_or_failed_turn_renders_nothing() -> None:
     assert not any(b.label == "取消订阅" for b in at.button)
 
 
+def test_overdue_row_still_offers_cancel() -> None:
+    """逾期项也是 active，同样可以取消；明细要说「原定…已过 N 天」，不能说「N 天后」。"""
+    overdue = [{**SUBS[0], "subscription_id": "sub_0001", "days_overdue": 4,
+                "overdue_cn": "已过 4 天"}]
+    facts = {"status": "active", "items": [], "overdue_items": overdue,
+             "overdue_count": 1, "overdue_total_amount_yuan": "15.00"}
+    turn = {"trace_id": "subs-overdue", "intent": "subscription_remind", "error_code": None,
+            "facts": facts, "states": ["REPLY"], "tier": "L0"}
+    actions: list[str] = []
+    at = _render(turn, actions)
+    assert not at.exception
+    assert any("已过 4 天" in m.value for m in at.markdown)
+    assert not any("4 天后" in m.value for m in at.markdown)
+    next(b for b in at.button if b.label == "取消订阅").click().run()
+    assert actions == ["取消云音乐订阅"]
+
+
 def test_manage_subscriptions_scene_shows_cancel_buttons_end_to_end(monkeypatch, seeded: Path):
     """点「管订阅」→ 列表每行有取消按钮 → 点它真的进取消确认流程。"""
     from tests.test_card_binding_ui import app, click

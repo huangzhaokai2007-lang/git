@@ -26,18 +26,22 @@ def _sid(item: Mapping[str, Any]) -> str:
     return str(item.get("id") or item.get("subscription_id") or "")
 
 
-def _detail(item: Mapping[str, Any], *, reminder: bool) -> str:
+def _detail(item: Mapping[str, Any], *, reminder: bool, overdue: bool) -> str:
     """一行说明（金额 / 周期 / 扣费时间），数字全部照抄 facts，界面不做换算。"""
     amount = f"{item.get('amount_yuan')} 元"
     cycle = item.get("cycle_cn") or item.get("cycle") or ""
     head = f"{amount}／{cycle}" if cycle else amount
-    when = (f"{item.get('days_cn')}（{item.get('next_charge_date')}）" if reminder
-            else f"下次扣费 {item.get('next_charge_date')}")
+    if overdue:
+        when = f"原定 {item.get('next_charge_date')} 扣费（{item.get('overdue_cn')}）"
+    elif reminder:
+        when = f"{item.get('days_cn')}（{item.get('next_charge_date')}）"
+    else:
+        when = f"下次扣费 {item.get('next_charge_date')}"
     return f"{head} · {when}"
 
 
 def _row(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
-         reminder: bool) -> None:
+         reminder: bool, overdue: bool = False) -> None:
     """一行订阅：商户与明细在左，取消按钮在右。"""
     merchant = str(item.get("merchant") or "")
     with st.container(border=True):
@@ -45,7 +49,7 @@ def _row(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str
         with info:
             st.markdown(f"**{merchant}**")
             #: 聊天气泡的全局样式会隐藏 `st.caption`，关键信息必须用普通 Markdown。
-            st.markdown(_detail(item, reminder=reminder))
+            st.markdown(_detail(item, reminder=reminder, overdue=overdue))
         with action:
             if st.button("取消订阅", key=f"{key_prefix}-cancel-{_sid(item)}", width="stretch"):
                 ask(f"取消{merchant}订阅")
@@ -59,11 +63,15 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
         return
     facts = turn.get("facts") or {}
     items = facts.get("items") or []
-    if not items:
+    overdue = facts.get("overdue_items") or []
+    if not items and not overdue:
         return
     if intent == "subscription_list" and str(facts.get("status") or "active") != CANCELLABLE:
         return                                   # 已取消 / 已暂停：只读记录，不给按钮
     st.markdown("#### 订阅管理 · 可直接取消")
     st.markdown("点「取消订阅」会走正常流程：确认卡 → 确认后才生效。")
+    #: 逾期项排前面（扣费日已过，更需要处理）；它们同样是 active，可以取消。
+    for item in overdue:
+        _row(item, ask=ask, key_prefix=key_prefix, reminder=True, overdue=True)
     for item in items:
         _row(item, ask=ask, key_prefix=key_prefix, reminder=intent == "subscription_remind")

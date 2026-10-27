@@ -38,6 +38,12 @@ def _line(item: dict) -> str:
             f"（{item['next_charge_date']}）将扣费 {item['amount_yuan']} 元；")
 
 
+def _overdue_line(item: dict) -> str:
+    """一条逾期提醒：扣费日已过，说明「该扣的没扣成」，比将要扣更值得说。"""
+    return (f"【订阅提醒】{item['merchant']} 的扣费日已过（原定 {item['next_charge_date']}，"
+            f"{item['amount_yuan']} 元，{item['overdue_cn']}），可能是扣款失败或漏扣；")
+
+
 def notices(session_id: str, intent: str | None = None) -> list[str]:
     """本会话**尚未提醒过**的到期订阅，每条一句；没有就返回空列表（不写任何表）。"""
     if intent == "subscription_remind":
@@ -53,12 +59,14 @@ def notices(session_id: str, intent: str | None = None) -> list[str]:
         return []
     seen = _REMINDED.setdefault(session_id, set())
     lines: list[str] = []
-    for item in result.facts.get("items") or []:
+    facts = result.facts or {}
+    #: 逾期项排前面：它意味着「该扣的没扣成」，比「将要扣」更需要用户马上看一眼。
+    for item in [*(facts.get("overdue_items") or []), *(facts.get("items") or [])]:
         key = f"{item['subscription_id']}:{item['next_charge_date']}"
         if key in seen:
             continue
         seen.add(key)
-        lines.append(_line(item))
+        lines.append(_overdue_line(item) if "days_overdue" in item else _line(item))
     return lines
 
 
