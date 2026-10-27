@@ -243,8 +243,10 @@ def subscription_line(item: Mapping) -> str:
     有一条测试钉着两层渲染同源）；周期文案直接引工具层常量，不复制副本。
     """
     cycle = CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"]))
+    #: 逾期标记（`active` 但扣费日已过）：不标出来就会出现「提醒说逾期、列表看不出」的矛盾。
+    tail = f"（{item['overdue_cn']}）" if item.get("days_overdue") else ""
     return (f"- {item['merchant']}：{item['amount_yuan']} 元／{cycle}，"
-            f"下次扣费 {item['next_charge_date']}")
+            f"下次扣费 {item['next_charge_date']}{tail}")
 
 
 def render_subscriptions(facts: Mapping) -> str:
