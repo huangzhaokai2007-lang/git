@@ -238,7 +238,8 @@ def list_subscriptions(status: str = "active") -> ToolResult:
     facts = {"status": status, "subscription_count": len(items), "zombie_count": len(zombies),
              "zombie_ids": zombies, "zombie_window_months": ZOMBIE_WINDOW_MONTHS,
              "zombie_as_of": AS_OF.isoformat(),
-             "items": [{**item, **_money_facts(item["amount"], "amount")} for item in items]}
+             "items": [{**item, "cycle_cn": CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"])),
+                        **_money_facts(item["amount"], "amount")} for item in items]}
     if not items:
         return _ok(data.model_dump(), facts, EMPTY_MESSAGE)
     # 卡 20：面向用户不说"僵尸订阅"这种行话（与 agent/templates.py 的模板逐字一致）

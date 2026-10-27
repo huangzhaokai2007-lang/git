@@ -36,6 +36,7 @@ import aa_card_ui                                               # noqa: E402  �
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
 import activity_ui
 import wealth_ui                                              # noqa: E402  （main：活动流）
+import subscription_ui                                          # noqa: E402  （F18：订阅行内取消）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
 
 load_dotenv(ROOT / ".env")
@@ -259,6 +260,8 @@ def _chat_page() -> None:
                   bill_details=lambda source, category: _agent_executor().submit(
                       bill_detail_flow.load, st.session_state['session_id'], source, category).result(),
                   wealth_card=lambda turn, key: wealth_ui.render_turn(
+                      turn, ask=_follow_up, key_prefix=key),
+                  subscription_card=lambda turn, key: subscription_ui.render_turn(
                       turn, ask=_follow_up, key_prefix=key),
                   wealth_start=st.session_state.get('workspace-start', 0))
     import scene_ui

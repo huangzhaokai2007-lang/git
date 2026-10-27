@@ -28,6 +28,7 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_user_id,
 )
 from tools.schemas import ErrorCode, ToolResult
+from tools.subscription import CYCLE_LABELS
 
 TOOL = "list_due_subscriptions"
 INTENT = "subscription_remind"
@@ -85,6 +86,7 @@ def list_due_subscriptions(within_days: int = DEFAULT_WITHIN_DAYS) -> ToolResult
 
     total = sum(item["amount"] for item in items)
     facts = {"items": [{**item, "days_cn": days_cn(item["days_left"]),
+                        "cycle_cn": CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"])),
                         **_money_facts(item["amount"], "amount")} for item in items],
              "due_count": len(items), "within_days": within_days,
              **_money_facts(total, "total_amount")}
