@@ -8,7 +8,7 @@ from typing import Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, session_memory, subscription_notice, templates, write_flow, scene_runtime
+from agent import classifier, confirm_card, payee_flow, read_flow, risk_flow, scheduled_runner, session_memory, templates, write_flow, scene_runtime
 from agent.period import anchor_period, resolve_day, resolve_period
 from agent.read_routes import TOOL_ROUTES
 from data import dao
@@ -202,8 +202,7 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
     turn = _handle(text, history=session_memory.recent(sid, history), clarify_round=clarify_round,
                    session_id=sid, card_reader=card_reader, intent_resolver=intent_resolver)
     session_memory.remember(sid, text, turn.reply)     # 先记（不含结算告知），再做前缀
-    #: F18：订阅提醒同样惰性带出（每笔每期只提一次；本轮就是在查订阅时不再叠一句）
-    if notices := [*notices, *subscription_notice.notices(sid, turn.intent)]:
+    if notices:
         turn.reply = "\n".join([*notices, turn.reply])
     return turn
 

@@ -70,6 +70,34 @@ def test_reminder_rows_show_days_left_and_can_be_cancelled() -> None:
     assert actions == ["取消云音乐订阅"]
 
 
+def test_banner_shows_due_and_overdue_with_an_entry() -> None:
+    """常驻提醒条：只要还有到期/逾期就在，点「查看订阅」进列表。"""
+    actions: list[str] = []
+    summary = {"due": 1, "overdue": 2, "within_days": 7,
+               "total_amount_yuan": "25.00", "overdue_total_amount_yuan": "30.00"}
+
+    def page(summary, actions):
+        from interfaces.web import subscription_ui
+        subscription_ui.banner(summary, ask=actions.append)
+
+    at = AppTest.from_function(page, args=(summary, actions), default_timeout=30).run()
+    assert not at.exception
+    assert any("2 个订阅的扣费日已过" in m.value for m in at.markdown)
+    assert any("1 个订阅将在 7 天内扣费" in m.value for m in at.markdown)
+    next(b for b in at.button if b.label == "查看订阅").click().run()
+    assert actions == ["我有哪些订阅"]
+
+
+def test_banner_is_silent_when_nothing_is_due() -> None:
+    def page():
+        from interfaces.web import subscription_ui
+        subscription_ui.banner({}, ask=lambda _: None)
+
+    at = AppTest.from_function(page, default_timeout=30).run()
+    assert not at.exception
+    assert not any(b.label == "查看订阅" for b in at.button)
+
+
 def test_empty_or_failed_turn_renders_nothing() -> None:
     actions: list[str] = []
     at = _render(_turn([], error_code="INVALID_STATE"), actions)

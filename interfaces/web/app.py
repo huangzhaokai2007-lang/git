@@ -20,6 +20,7 @@ os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境�
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
 from agent import balance_flow, bill_detail_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
+from agent import subscription_notice                                                          # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -256,6 +257,11 @@ def _sidebar() -> None:
 
 def _chat_page() -> None:
     messages = st.session_state["messages"]
+    #: 常驻提醒条：每帧只读概览（不消耗「首次提醒」的去重集合），任何场景都能看到。
+    subscription_ui.banner(
+        _agent_executor().submit(subscription_notice.summary,
+                                 st.session_state["session_id"]).result(),
+        ask=_follow_up)
     ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card,
                   bill_details=lambda source, category: _agent_executor().submit(
                       bill_detail_flow.load, st.session_state['session_id'], source, category).result(),

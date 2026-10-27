@@ -16,6 +16,8 @@ BINDING_PROMPT = "请在绑卡表单中输入预设模拟卡号及对应的银�
 #: 「取消{商户}订阅」——订阅卡按钮的固定文案；`这个/那个` 留给场景上下文按候选解析。
 _CANCEL_SUB = re.compile(r"取消(.{1,40}?)订阅")
 _NOT_A_MERCHANT = frozenset({"这个", "那个", "该", "这", "那"})
+#: 理财卡上「开始风险测评」按钮的固定文案 —— 直接定意图，免得模型不可用时按钮点了没反应。
+_ASSESS_TEXTS = frozenset({"做风险测评", "开始风险测评", "风险测评"})
 
 
 def owner_key() -> str:
@@ -117,6 +119,9 @@ def _resolve_intent(text: str, history: list[str] | None) -> classifier.IntentOu
     if cancel and cancel[1] not in _NOT_A_MERCHANT:
         return classifier.IntentOut(intent="subscription_cancel", confidence=1.0,
                                     slots={"merchant": cancel[1]})
+    #: 理财卡的「开始风险测评」同理：固定文案直接定意图（L0 只读，界面据 intent 弹问卷）。
+    if str(text).split("\n", 1)[0].strip() in _ASSESS_TEXTS:
+        return classifier.IntentOut(intent="risk_assess", confidence=1.0, slots={})
     return classifier.classify(text, history)
 
 
