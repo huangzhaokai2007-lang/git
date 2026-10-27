@@ -163,7 +163,8 @@ def test_hallucinated_reply_is_regenerated_then_degraded_and_audited(seeded: Pat
     assert calls["classify"] == 1 and calls["polish"] == 2           # 只重生成一次
     assert turn.degraded is True and turn.error_code == facts_check.ERROR_CODE
     assert "9,999,999" not in turn.reply and "52,281.00" in turn.reply
-    assert turn.reply.startswith("您的储蓄账户余额为")                  # 模板回执（不是模型的措辞）
+    #: 回执可能被前置提醒（订阅/预约）占用开头，故判"包含"而不是"以…开头"。
+    assert "您的储蓄账户余额为" in turn.reply                  # 模板回执（不是模型的措辞）
     row = raw(seeded, "SELECT error_code, result, tool FROM audit_log ORDER BY rowid DESC LIMIT 1")[0]
     assert count(seeded, "audit_log") == before_audit + 1 and row["error_code"] == facts_check.ERROR_CODE
 
@@ -173,7 +174,7 @@ def test_honest_reply_is_kept(seeded: Path, monkeypatch: pytest.MonkeyPatch) -> 
     calls = _honest_llm(monkeypatch)
     turn = orchestrator.handle("我的储蓄卡还有多少钱", session_id="facts-13-ok")
     assert calls["polish"] == 1 and turn.degraded is False and turn.error_code is None
-    assert turn.reply.startswith("您好，您的储蓄账户余额为")
+    assert "您好，您的储蓄账户余额为" in turn.reply
 
 
 def test_write_path_uses_the_same_verifier(seeded: Path, clock, monkeypatch: pytest.MonkeyPatch) -> None:

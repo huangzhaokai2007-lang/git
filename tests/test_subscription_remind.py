@@ -85,3 +85,38 @@ def test_calling_twice_is_idempotent(seeded: Path) -> None:
     first = list_due_subscriptions()
     second = list_due_subscriptions()
     assert first.facts == second.facts
+
+
+def test_overdue_active_subscription_is_reported_separately(seeded: Path) -> None:
+    """扣费日已过的 active 订阅不能静默丢掉 —— 单独报，且**不并入**「将要扣费」列表。"""
+    _set_charge(seeded, "sub_0001", -3)
+    for sub_id in ("sub_0002", "sub_0003", "sub_0004"):
+        _set_charge(seeded, sub_id, 999)
+    result = list_due_subscriptions()
+    assert result.facts["due_count"] == 0 and result.data["items"] == []
+    assert result.facts["overdue_count"] == 1
+    item = result.facts["overdue_items"][0]
+    assert item["subscription_id"] == "sub_0001" and item["days_overdue"] == 3
+    assert item["overdue_cn"] == "已过 3 天"
+    assert "已经过去" in result.message and "扣款失败" in result.message
+
+
+def test_overdue_and_due_can_coexist(seeded: Path) -> None:
+    """同时有「将要扣」和「已逾期」时，两段都要说清，不能互相覆盖。"""
+    _set_charge(seeded, "sub_0001", -2)
+    _set_charge(seeded, "sub_0002", 3)
+    _set_charge(seeded, "sub_0003", 999)
+    _set_charge(seeded, "sub_0004", 999)
+    result = list_due_subscriptions()
+    assert {i["subscription_id"] for i in result.facts["items"]} == {"sub_0002"}
+    assert {i["subscription_id"] for i in result.facts["overdue_items"]} == {"sub_0001"}
+    assert "1 个订阅要扣费" in result.message and "另有 1 个订阅" in result.message
+
+
+def test_cancelled_overdue_is_not_reported(seeded: Path) -> None:
+    """已取消的订阅即使扣费日过了也不算逾期 —— 它本来就不该再扣。"""
+    _set_charge(seeded, "sub_0001", -5, status="cancelled")
+    for sub_id in ("sub_0002", "sub_0003", "sub_0004"):
+        _set_charge(seeded, sub_id, 999)
+    result = list_due_subscriptions()
+    assert result.facts["overdue_count"] == 0 and result.facts["overdue_items"] == []

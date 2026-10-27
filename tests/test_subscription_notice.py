@@ -109,3 +109,13 @@ def test_nothing_due_means_no_notice(seeded: Path) -> None:
     for sub_id in ("sub_0001", "sub_0002", "sub_0003", "sub_0004"):
         _set_charge(seeded, sub_id, 999)
     assert "【订阅提醒】" not in _say("查一下余额").reply
+
+
+def test_overdue_subscription_is_reminded_once(seeded: Path) -> None:
+    """扣费日已过的 active 订阅也要提醒（比「将要扣」更值得说），且同样只提一次。"""
+    _set_charge(seeded, "sub_0001", -4)
+    for sub_id in ("sub_0002", "sub_0003", "sub_0004"):
+        _set_charge(seeded, sub_id, 999)
+    first = _say("查一下余额").reply
+    assert "扣费日已过" in first and "已过 4 天" in first
+    assert "【订阅提醒】" not in _say("查一下余额").reply
