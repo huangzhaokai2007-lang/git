@@ -28,7 +28,7 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_user_id,
 )
 from tools.schemas import ErrorCode, ToolResult
-from tools.subscription import CYCLE_LABELS
+from tools.subscription import CYCLE_LABELS, overdue_cn
 
 TOOL = "list_due_subscriptions"
 INTENT = "subscription_remind"
@@ -53,11 +53,6 @@ def days_cn(days: int) -> str:
     if days == 1:
         return "明天"
     return f"{days} 天后"
-
-
-def overdue_cn(days: int) -> str:
-    """「已过 N 天」—— 与 `days_cn` 分开：过期项不能沿用「N 天后」的说法。"""
-    return "今天已过扣费日" if days == 0 else f"已过 {days} 天"
 
 
 def list_due_subscriptions(within_days: int = DEFAULT_WITHIN_DAYS) -> ToolResult:

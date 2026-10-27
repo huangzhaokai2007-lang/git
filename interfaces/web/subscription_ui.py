@@ -37,6 +37,8 @@ def _detail(item: Mapping[str, Any], *, reminder: bool, overdue: bool) -> str:
         when = f"{item.get('days_cn')}（{item.get('next_charge_date')}）"
     else:
         when = f"下次扣费 {item.get('next_charge_date')}"
+        if item.get("days_overdue"):                 # 列表页也要标出来，别只在提醒里说
+            when += f"（{item.get('overdue_cn')}）"
     return f"{head} · {when}"
 
 
