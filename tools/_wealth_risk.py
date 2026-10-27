@@ -50,10 +50,9 @@ RISK_DESC = {
     "R4": "本金风险较高，可能出现 10%-20% 的波动",
     "R5": "本金风险高，可能出现 20% 以上的波动，可能损失大部分本金",
 }
-#: 【参考波动幅度】按风险等级给「一年内可能的最大涨跌幅」（百分比，正数）。
-#: 来源：与 `RISK_DESC` 的文字口径逐条对齐（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
-#: R5「20% 以上」取 30%）。**这是历史波动区间的经验值，不是收益承诺** ——
-#: 回执里必须写「参考」，不能写成「保证」或「预期」。
+#: 【模拟参考波动】按风险等级设置的演示用区间假设（百分比，正数）。
+#: 来源：本 demo 的 RISK_DESC 文字分档（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
+#: R5「20% 以上」演示取 30%）。并非历史数据或可验证的最大收益/亏损，必须在界面显著标明。
 RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
@@ -125,10 +124,60 @@ class RecommendItem(BaseModel):
 
 # ---------------- 内部辅助 ----------------
 
+#: 中文等级 → 代码。**LLM 抽槽位时经常直接给中文**（"我是高风险"），
+#: 只认 R1–R5 会让整个推荐报 INVALID_ARGUMENT，用户看到的是一句错误而不是产品列表。
+_LABEL_TO_CODE = {label: code for code, label in RISK_LABELS.items()}
+
+
+def normalize_level(level: str) -> str:
+    """把「高风险」/「r5」/「R5」统一成 `R5`；认不出就原样返回（交给 `_rank` 报错）。"""
+    text = str(level).strip()
+    if text.upper() in RISK_LEVELS:
+        return text.upper()
+    if text.isdigit() and 1 <= int(text) <= 5:      # 「5」→ R5
+        return f"R{text}"
+    return _LABEL_TO_CODE.get(text, text)
+
+
+def _resolve_level(risk_level: str | None) -> str:
+    """定本次推荐的等级上限。
+
+    **严格与容错的分界**：
+    - 没传 → 用本次会话的测评结果
+    - `R5` / `5` / `高风险` → 显式等级；已有测评时上限不超过测评结果
+    - `R9` / `R0` / `r1` / 空串 → **报 `INVALID_ARGUMENT`**（明显的输入错误）
+    - `high` / `较高` / 其他认不出的人话 → **回退测评结果**。
+      LLM 抽槽位时经常给 `high` 这种英文词，为它把整个推荐打成报错不值得 ——
+      用户要的是产品列表，不是一句「风险等级只能是 R1/R2/...」。
+    """
+    #: 已有测评时，分类器不能用更高等级槽位放宽推荐；显式等级但没有测评时
+    #: 保留 T14 的历史查询契约（仅用于浏览产品，买入仍强制要求真实测评）。
+    if risk_level is None:
+        return require_assessment()['risk_level']
+    record = _ASSESSMENTS.get(current_user_id())
+    assessed = require_assessment()['risk_level'] if record is not None else None
+    text = str(risk_level).strip()
+    if not text:
+        raise ToolError(ErrorCode.INVALID_ARGUMENT, "风险等级不能是空字符串")
+    if text[0].upper() == "R" or text.isdigit():          # 代码式输入：严格校验
+        level = f"R{text}" if text.isdigit() else text
+        if level not in RISK_LEVELS:
+            raise ToolError(ErrorCode.INVALID_ARGUMENT,
+                            f"风险等级只能是 {'/'.join(RISK_LEVELS)}")
+        return level if assessed is None or _rank(level) <= _rank(assessed) else assessed
+    if text in _LABEL_TO_CODE:                            # 中文等级：认
+        level = _LABEL_TO_CODE[text]
+        return level if assessed is None or _rank(level) <= _rank(assessed) else assessed
+    logger.warning("认不出的风险等级 %r，回退到测评结果", risk_level)
+    return require_assessment()['risk_level']
+
+
 def _rank(level: str) -> int:
     """风险等级 → 序数（R1=1..R5=5）；非法等级抛 `ToolError(INVALID_ARGUMENT)`。"""
+    level = normalize_level(level)
     if level not in RISK_LEVELS:
-        raise ToolError(ErrorCode.INVALID_ARGUMENT, f"风险等级只能是 {'/'.join(RISK_LEVELS)}")
+        raise ToolError(ErrorCode.INVALID_ARGUMENT,
+                        f"风险等级只能是 {'/'.join(RISK_LEVELS)} 或对应的中文名")
     return RISK_LEVELS.index(level) + 1
 
 
@@ -223,7 +272,7 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                         amount=amount)) is not None:
         return bad
     try:
-        level = risk_level if risk_level is not None else require_assessment()["risk_level"]
+        level = _resolve_level(risk_level)
         ceiling = _rank(level)
         products = [row for row in dao.list_products()
                     if _rank(row["risk_level"]) <= ceiling
@@ -237,7 +286,7 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     items = [RecommendItem(product_id=row["id"], name=row["name"], risk_level=row["risk_level"],
                            yield_=_yield_text(row["expected_yield"]), term=row["term_days"])
              for row in products]
-    #: 参考区间：最高收益 = 预期年化 + 波动上限；最大亏损 = -波动上限。
+    #: 演示区间：参考上沿 = 预期年化 + 演示波动值；下沿 = -演示波动值。
     #: 只进 facts（不进 data —— data 字段是冻结契约），渲染层据此展示。
     swings = {row["id"]: RISK_SWING.get(row["risk_level"], 0.0) for row in products}
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
@@ -245,6 +294,7 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
              "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
              "items": [{**item.model_dump(by_alias=True),
+                        "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),
                         "max_gain_pct": _range_text(

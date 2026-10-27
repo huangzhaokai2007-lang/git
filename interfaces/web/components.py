@@ -69,8 +69,15 @@ def sim_banner() -> None:
 def transcript(messages: Sequence[Mapping[str, Any]],
                *, payee_card: Callable[[str], bool] | None = None,
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
-               bill_details: Callable[[dict, str], dict] | None = None) -> None:
+               bill_details: Callable[[dict, str], dict] | None = None,
+               wealth_card: Callable[[Mapping[str, Any], str], None] | None = None,
+               wealth_start: int = 0) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
+    #: 不改变账单卡片接管表格的既有行为；理财卡片仅追随当前工作区最后一条推荐。
+    recent_reply = next((i for i in range(len(messages) - 1, wealth_start - 1, -1)
+                         if messages[i].get('role') == 'assistant' and messages[i].get('turn')), -1)
+    recent_wealth = (recent_reply if recent_reply >= 0 and
+                     messages[recent_reply]['turn'].get('intent') == 'wealth_recommend' else -1)
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
         if (message["role"] == "assistant" and turn.get("intent") == "card_query"
@@ -98,6 +105,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                 with st.container(key=f"chat-audit-{index}"):
                     st.caption(f"trace_id `{turn['trace_id']}` · 意图 `{turn['intent']}` · "
                                f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
+                if wealth_card is not None and index == recent_wealth and message['role'] == 'assistant':
+                    wealth_card(turn, f"wealth-{index}")
                 if insight_card is not None and message["role"] == "assistant" and index == len(messages) - 1:
                     insight_card(turn, f"insight-{index}")
 
