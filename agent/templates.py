@@ -243,8 +243,9 @@ POLISH_ATTEMPTS = 2           # 来源：卡 09 第 5 条 + 卡 13 口径「重�
 #: - `txn_query`（F02 流水明细表）、`bill_analysis`（F14 分类占比表）——本轮刚改成表格；
 #: - `bill_report`（F24 账单报告）——回执主体是工具层生成的整篇 Markdown 文档，
 #:   标题层级与表格都是结构，交给润色有可能被压平成一串文字。
-#: 列表类（刷卡/订阅/理财）口径不变，以免顺手改掉别人的回执行为。
-NO_POLISH_INTENTS = frozenset({"payee_list", "txn_query", "bill_analysis", "bill_report"})
+#: 理财推荐及产品目录是结构化回执，保留模拟区间与风险提示，不交模型改写。
+NO_POLISH_INTENTS = frozenset({"payee_list", "txn_query", "bill_analysis", "bill_report",
+                               "wealth_recommend", "wealth_all_products"})
 def verify_numbers(text: str, facts: Mapping) -> set[str]:
     """返回回执里**未在 facts 出现**的数字集合（空集 = 通过）。
 

@@ -257,13 +257,14 @@ def _chat_page() -> None:
     messages = st.session_state["messages"]
     ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card,
                   bill_details=lambda source, category: _agent_executor().submit(
-                      bill_detail_flow.load, st.session_state['session_id'], source, category).result())
+                      bill_detail_flow.load, st.session_state['session_id'], source, category).result(),
+                  wealth_card=lambda turn, key: wealth_ui.render_turn(
+                      turn, ask=_follow_up, key_prefix=key),
+                  wealth_start=st.session_state.get('workspace-start', 0))
     import scene_ui
     scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
     _bill_charts()
     activity_ui.render(st.session_state['turns'])
-    #: F11 追加：理财推荐之后，产品旁边直接给「订购」按钮（只转成一句话交给编排层）。
-    wealth_ui.render(st.session_state['turns'], ask=_ask)
     _render_pending()
     payee_picker_ui.render(_agent_executor(), st.session_state["session_id"])  # 解析卡（同名多命中）
     card_edit_ui.render(_agent_executor(), st.session_state["session_id"])   # S5：可编辑卡片面板

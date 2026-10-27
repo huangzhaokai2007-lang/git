@@ -200,6 +200,23 @@ def test_t14_bad_arguments_are_rejected(seeded: Path, level: object, horizon: ob
     assert wealth.recommend_wealth(level, horizon, amount).error_code == ErrorCode.INVALID_ARGUMENT
 
 
+def test_t14_assessed_ceiling_cannot_be_raised_by_a_requested_level(seeded: Path) -> None:
+    """模型把用户口语误抽成高风险，也不能展示超出已完成测评的产品。"""
+    wealth.assess_risk(CONSERVATIVE)
+    for slot in ('R5', '高风险', 'high'):
+        result = wealth.recommend_wealth(slot)
+        assert result.ok and result.facts['risk_level'] == 'R1'
+        assert [item['product_id'] for item in result.facts['items']] == ['prod_r1_mmf']
+
+
+def test_t14_unrecognized_model_level_falls_back_to_assessed_level(seeded: Path) -> None:
+    wealth.assess_risk(BALANCED)
+    result = wealth.recommend_wealth('high')
+    assert result.ok and result.facts['risk_level'] == 'R3'
+    assert len(result.facts['items']) == 4
+    assert all(item['risk_label'] for item in result.facts['items'])
+
+
 def test_t14_message_numbers_come_from_facts(seeded: Path) -> None:
     result = wealth.recommend_wealth("R3")
     assert_covered(result.message, result.facts)

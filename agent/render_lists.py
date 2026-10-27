@@ -160,11 +160,10 @@ def wealth_line(item: Mapping) -> str:
     level = str(item["risk_level"])
     line = (f"- {item['name']}：{RISK_LABELS.get(level, level)}，预期年化 {item['yield']}，"
             f"期限 {term_cn(item['term'])}")
-    #: 参考区间（用户需求「给出参考的最高亏损和最高收益」）。**必须写「参考」**：
-    #: 数字来自 `RISK_SWING` 的经验波动区间，不是承诺。老 facts 没这两个键时降级为不展示。
+    #: 演示区间只是模型规则假设，不是实测最大亏损或历史最高收益。
     if item.get("max_gain_pct") is not None and item.get("max_loss_pct") is not None:
-        line += (f"\n  （参考区间：↑ 最高 {item['max_gain_pct']}%"
-                 f" / ↓ 最大亏损 {item['max_loss_pct']}%）")
+        line += (f"\n  （模拟参考区间：↑ 上沿 {item['max_gain_pct']}%"
+                 f" / ↓ 下沿 {item['max_loss_pct']}%；非历史极值或收益承诺）")
     return line
 
 

@@ -69,7 +69,8 @@ def list_all_products() -> ToolResult:
              "user_risk_level": level, "user_risk_label": RISK_LABELS.get(level, level)}
     data = {"items": items, "total_count": len(items), "fit_count": fit,
             "user_risk_level": level}
-    return _ok(data, facts, f"共 {len(items)} 只产品，其中 {fit} 只在您的风险等级（{level}）内。")
+    return _ok(data, facts, f"共 {len(items)} 只产品，其中 {fit} 只在您的风险等级"
+                            f"（{facts['user_risk_label']}）内。")
 
 
 def list_holdings() -> ToolResult:
