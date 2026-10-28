@@ -238,6 +238,11 @@ def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[
     step = span / 24 * 0.9                       # 单月最大涨跌幅（百分点）
     floor_nav = _NAV_BASE * (1 + max_loss / 100)
     ceil_nav = _NAV_BASE * (1 + max_gain / 100)
+    #: 月漂移 = 年化收益 / 12（`yield = max_gain + max_loss`）。
+    #: **必须压在区间内**：货基年化 2.1%、窗口 24 个月本可涨 4.2%，但上沿只有 +2.1%，
+    #: 不封顶就会顶在天花板上一半的月份，画出来是条直线。取区间 60% 作上限。
+    yield_pct = max_gain + max_loss
+    drift = min(yield_pct / 12, max_gain * 0.6 / CANDLE_MONTHS) / 100
     nav = float(_NAV_BASE)
     rows: list[dict] = []
     for offset in range(CANDLE_MONTHS):
@@ -246,7 +251,8 @@ def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[
         u1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
         u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
         open_nav = nav
-        close_nav = max(floor_nav, min(ceil_nav, open_nav * (1 + (u1 * 2 - 1) * step / 100)))
+        close_nav = max(floor_nav, min(ceil_nav,
+                                       open_nav * (1 + drift + (u1 * 2 - 1) * step / 100)))
         wick = abs(u2 - 0.5) * step / 100 * open_nav
         rows.append({"period": period,
                      "open": round(open_nav),

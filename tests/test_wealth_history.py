@@ -81,6 +81,22 @@ def test_monthly_candles_are_deterministic_and_well_formed(seeded: Path) -> None
     assert again == first
 
 
+def test_candles_drift_up_for_positive_yield(seeded: Path) -> None:
+    """净值要跟着预期年化往上走，不能画成"预期 9.8%、两年跌 16%"。
+
+    踩过的坑：一开始只给噪声不给漂移，14 只产品全部收在起点以下 —— 卡片写「预期年化 9.8%」，
+    图却是条下滑线，自相矛盾。漂移还必须封顶（货基年化 2.1%、窗口 24 个月本可涨 4.2%，
+    但上沿只有 +2.1%，不封顶就会一半月份顶在天花板上画直线）。
+    """
+    for item in _items():
+        candles = item["candles"]
+        assert float(item["yield"].rstrip("%")) > 0
+        assert candles[-1]["close"] > candles[0]["open"], item["name"]
+        # 没有连续三个月钉在同一个价位（那是被 clamp 卡住的征兆）
+        closes = [row["close"] for row in candles]
+        assert any(closes[i] != closes[i - 1] for i in range(1, len(closes)))
+
+
 def test_kline_spec_is_a_candlestick_with_zoom() -> None:
     """图表结构钉死：影线 rule + 实体 bar、开收盘双 y、涨跌条件着色、可交互缩放。
 
