@@ -57,6 +57,29 @@ TOOL = "assess_risk"
 #: 与 `payee_flow.PROMPT` 各写一份不同 —— 这里不再抄第二份，避免两处漂移）。
 PROMPT = templates.T_RISK_PROMPT
 
+#: 快捷按钮「风险程度」的固定文案：确定性路由到 `risk_assess` 且带 `action=query`。
+QUERY_TEXT = "我的风险等级是多少"
+#: 查询结果文案（数字全部来自 facts，`verify_numbers` 会比对）
+T_PROFILE = ("您当前的风险等级是「{risk_label}」（{risk_level}），测评有效期至 {valid_until}。"
+             "要重新测评随时说一声。")
+T_NO_PROFILE = "您还没有完成风险测评，暂时不知道您的风险承受能力。"
+
+
+def profile_reply() -> tuple[str, dict]:
+    """查询当前风险等级 → (回执, facts)。
+
+    未测评不是错误：如实说"还没有"，界面据此给「开始风险测评」按钮，而不是弹问卷打断用户。
+    """
+    record = wealth_tool.current_profile()
+    if record is None:
+        return T_NO_PROFILE, {"assessed": False}
+    level = record["risk_level"]
+    facts = {"assessed": True, "risk_level": level,
+             "risk_label": wealth_tool.risk_label(level),
+             "valid_until": record["valid_until"]}
+    return T_PROFILE.format(**facts), facts
+
+
 #: 年龄题的**锚点词**：只有段里出现它，才把段里的数字当年龄（防止「经验1-3年」的 1 被当岁数）
 _AGE_ANCHORS = ("年龄", "岁", "周岁")
 #: 从一句话里抠出「年龄 35」「35 岁」这类数字

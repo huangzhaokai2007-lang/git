@@ -399,6 +399,10 @@ def classify(text: str, history: list[str] | None = None) -> IntentOut:
     if re.fullmatch(r'看看全部理财产品(?:\n（当前日期：\d{4}-\d{2}-\d{2}）)?',
                     str(text).strip()):
         return IntentOut(intent='wealth_all_products', confidence=1.0, slots={})
+    #: 快捷按钮「风险程度」：固定文案 → risk_assess + action=query（只查不算）。
+    if re.fullmatch(r'我的风险等级是多少(?:\n（当前日期：\d{4}-\d{2}-\d{2}）)?',
+                    str(text).strip()):
+        return IntentOut(intent='risk_assess', confidence=1.0, slots={'action': 'query'})
     #: 快捷场景「推荐理财」同理：固定文案直接定意图，模型不可用时按钮也不会点了没反应。
     if re.fullmatch(r'推荐理财产品(?:\n（当前日期：\d{4}-\d{2}-\d{2}）)?',
                     str(text).strip()):

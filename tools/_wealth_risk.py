@@ -317,6 +317,18 @@ def _score(answers: dict[str, int]) -> int:
     return total
 
 
+def current_profile() -> dict | None:
+    """当前用户**有效**的测评结果；未测评或已过期 → `None`（不抛异常）。
+
+    与 `require_assessment()` 的分工：那个给"要买理财"的路径用（缺就 INVALID_STATE 拦住），
+    这个给"我只是想看看自己是什么等级"用 —— 没测评不是错误，是要如实告诉用户。
+    """
+    try:
+        return require_assessment()
+    except ToolError:
+        return None
+
+
 def require_assessment() -> dict:
     """取当前用户**有效**的测评结果（过期按未测评处理）。缺失 → `INVALID_STATE`（未测评边界）。"""
     record = _ASSESSMENTS.get(current_user_id())

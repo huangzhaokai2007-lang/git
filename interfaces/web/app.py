@@ -39,6 +39,7 @@ import activity_ui
 import wealth_ui                                              # noqa: E402  （main：活动流）
 import subscription_ui                                          # noqa: E402  （F18：订阅行内取消）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
+import risk_ui                                                  # noqa: E402  （风险程度卡）
 import slot_form_ui                                             # noqa: E402  （缺槽填表卡）
 
 load_dotenv(ROOT / ".env")
@@ -270,6 +271,8 @@ def _chat_page() -> None:
                       turn, ask=_follow_up, key_prefix=key,
                       daily_loader=lambda pid: _agent_executor().submit(
                           wealth_daily.load, st.session_state["session_id"], pid).result()),
+                  risk_card=lambda turn, key: risk_ui.render_turn(
+                      turn, ask=_follow_up, key_prefix=key),
                   subscription_card=lambda turn, key: subscription_ui.render_turn(
                       turn, ask=_follow_up, key_prefix=key),
                   wealth_start=st.session_state.get('workspace-start', 0))

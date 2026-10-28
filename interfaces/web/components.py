@@ -44,6 +44,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
                bill_details: Callable[[dict, str], dict] | None = None,
                wealth_card: Callable[[Mapping[str, Any], str], None] | None = None,
+               risk_card: Callable[[Mapping[str, Any], str], None] | None = None,
                subscription_card: Callable[[Mapping[str, Any], str], None] | None = None,
                wealth_start: int = 0) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
@@ -58,6 +59,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
     #: 推荐卡片默认同样挂最后一条；**例外**：「全部产品」是推荐卡上那个按钮点进来的下钻视图，
     #: 这时必须保留上一条推荐卡 —— 否则用户回头看，K 线和区间图例整块消失了（用户反馈的 bug）。
     recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
+    #: 风险卡（"还没测评"的入口）同样只挂最后一条：后续操作后还留着按钮会让人以为要重测。
+    recent_risk = recent_reply if recent_intent == 'risk_assess' else -1
     if recent_wealth < 0 and recent_intent == 'wealth_all_products':
         recent_wealth = next((i for i in range(recent_reply - 1, wealth_start - 1, -1)
                               if messages[i].get('role') == 'assistant'
@@ -89,6 +92,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                                f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
                 if wealth_card is not None and index == recent_wealth and message['role'] == 'assistant':
                     wealth_card(turn, f"wealth-{index}")
+                if risk_card is not None and index == recent_risk and message['role'] == 'assistant':
+                    risk_card(turn, f"risk-{index}")
                 if subscription_card is not None and index == recent_subs and message['role'] == 'assistant':
                     subscription_card(turn, f"subs-{index}")
                 if insight_card is not None and message["role"] == "assistant" and index == len(messages) - 1:

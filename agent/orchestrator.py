@@ -247,6 +247,14 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         ctx.tier = payee_flow.PAYEE_ADD_TIER
         payee_flow.capture_pending(ctx.session_id, ctx.slots)            # 表单预填：姓名/手机号已说过
         return _finish(ctx, payee_flow.PROMPT, result="pending_confirm")
+    if ctx.intent == risk_flow.INTENT and ctx.slots.get("action") == "query":
+        #: 快捷按钮「风险程度」：只查不算。未测评时回一句"还没有"，界面据此给测评入口 ——
+        #: 不像"做测评"那样直接弹问卷（用户只是想知道自己的等级，不该被打断）。
+        reply, facts = risk_flow.profile_reply()
+        ctx.enter("PRECHECK")
+        ctx.tier = risk_flow.TIER
+        ctx.facts = facts
+        return _finish(ctx, reply, result="success")
     if ctx.intent == risk_flow.INTENT and not risk_flow.answers_ready(ctx.slots.get("answers")):
         #: F10：聊天里只说"做测评"（或一个答案都没说出来）→ 回引导语、界面弹问卷（**不计分**）；
         #: 若用户已经把 5 题一并说了 → 落回下面的只读路径一次算完，不弹表单。判断用 `answers_ready`：
