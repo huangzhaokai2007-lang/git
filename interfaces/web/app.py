@@ -20,7 +20,7 @@ os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境�
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
 from agent import balance_flow, bill_detail_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
-from agent import subscription_notice                                                          # noqa: E402
+from agent import subscription_notice, wealth_daily                                            # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -267,7 +267,9 @@ def _chat_page() -> None:
                   bill_details=lambda source, category: _agent_executor().submit(
                       bill_detail_flow.load, st.session_state['session_id'], source, category).result(),
                   wealth_card=lambda turn, key: wealth_ui.render_turn(
-                      turn, ask=_follow_up, key_prefix=key),
+                      turn, ask=_follow_up, key_prefix=key,
+                      daily_loader=lambda pid: _agent_executor().submit(
+                          wealth_daily.load, st.session_state["session_id"], pid).result()),
                   subscription_card=lambda turn, key: subscription_ui.render_turn(
                       turn, ask=_follow_up, key_prefix=key),
                   wealth_start=st.session_state.get('workspace-start', 0))

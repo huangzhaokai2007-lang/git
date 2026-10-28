@@ -57,10 +57,21 @@ def _kline_spec(candles: list[Mapping[str, Any]]):
     return _kline_spec_cached(_candle_signature(candles))
 
 
-def _candle_signature(candles: list[Mapping[str, Any]]) -> tuple:
-    """把 K 线压成可哈希签名（缓存键）。K 线由工具层确定性生成，同签名必然同图。"""
-    return tuple((str(row["period"]), int(row["open"]), int(row["high"]),
-                  int(row["low"]), int(row["close"])) for row in candles)
+def _candle_signature(candles: list[Mapping[str, Any]] | list[list]) -> tuple:
+    """把 K 线压成可哈希签名（缓存键）。兼容两种形状：
+
+    - 月 K 来自推荐 facts：`{"period": ..., "open": ...}`（可读优先）
+    - 日 K 来自 `product_daily`：`[日期, 开, 高, 低, 收]`（省 45% 体积）
+    """
+    signature = []
+    for row in candles:
+        if isinstance(row, (list, tuple)):
+            period, open_, high, low, close = row
+        else:
+            period = row["period"]
+            open_, high, low, close = row["open"], row["high"], row["low"], row["close"]
+        signature.append((str(period), int(open_), int(high), int(low), int(close)))
+    return tuple(signature)
 
 
 @lru_cache(maxsize=128)
@@ -74,8 +85,11 @@ def _kline_spec_cached(signature: tuple):
 
     candles = [{"period": p, "open": o, "high": h, "low": low, "close": c}
                for p, o, h, low, c in signature]
+    #: 周期可能是 `YYYY-MM`（月 K）或 `YYYY-MM-DD`（日 K），补齐成完整日期再解析。
+    dates = [p if len(p) == 10 else f"{p}-01" for p in (row["period"] for row in candles)]
+    daily = len(signature[0][0]) == 10
     frame = pd.DataFrame({
-        "date": pd.to_datetime([f"{row['period']}-01" for row in candles]),
+        "date": pd.to_datetime(dates, format="%Y-%m-%d"),
         "o": [int(row["open"]) / 100 for row in candles],
         "h": [int(row["high"]) / 100 for row in candles],
         "l": [int(row["low"]) / 100 for row in candles],
@@ -83,13 +97,15 @@ def _kline_spec_cached(signature: tuple):
     })
     base = alt.Chart(frame).encode(
         x=alt.X("date:T", title=None,
-                axis=alt.Axis(format="%Y-%m", labelAngle=-45, tickCount=6)))
+                axis=alt.Axis(format="%m-%d" if daily else "%Y-%m",
+                              labelAngle=-45, tickCount=6)))
     wick = base.mark_rule(color="#94a3b8", strokeWidth=1).encode(
         y=alt.Y("l:Q", title="净值", scale=alt.Scale(zero=False)), y2="h:Q")
-    body = base.mark_bar(size=7).encode(
+    #: 日 K 一根只有几个像素，柱体要细；月 K 可以粗一些。
+    body = base.mark_bar(size=3 if daily else 7).encode(
         y="o:Q", y2="c:Q",
         color=alt.condition("datum.c >= datum.o", alt.value("#22c55e"), alt.value("#ef4444")),
-        tooltip=[alt.Tooltip("date:T", format="%Y-%m", title="月份"),
+        tooltip=[alt.Tooltip("date:T", format="%Y-%m-%d" if daily else "%Y-%m", title="日期"),
                  alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
                  alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
     #: `interactive()` = 滚轮缩放 + 拖拽平移；用户明确要求「可以放大」。
@@ -105,7 +121,8 @@ def _kline(candles: list[Mapping[str, Any]]) -> None:
     st.altair_chart(_kline_spec(candles), width="stretch")
 
 
-def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str) -> None:
+def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
+          daily_loader: Callable[[str], Mapping[str, Any]] | None = None) -> None:
     """一只产品一张卡：名称 → 月 K → 区间数字 → 金额 + 订购。"""
     pid = str(item.get("product_id"))
     floor = max(int(_num(item.get("min_amount_yuan"))), 1)
@@ -128,6 +145,23 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             f"<span style='color:#ef4444;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
             f"<span style='color:#22c55e;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
             "</div>", unsafe_allow_html=True)
+
+        #: 日 K **按需拉取**：日线一个产品就 120 行，14 只全塞进推荐 facts 会多出 150 KB，
+        #: 所以点开哪只才取哪只（约 5 KB，走 `agent/wealth_daily.load`）。
+        if daily_loader is not None:
+            daily_key = f"{key_prefix}-daily-{pid}"
+            loaded = st.session_state.get(daily_key)
+            if st.button("收起日 K" if loaded else "📅 日 K（近半年 · 可缩放）",
+                         key=f"{key_prefix}-dbtn-{pid}", width="stretch"):
+                if loaded:
+                    st.session_state.pop(daily_key, None)
+                else:
+                    result = daily_loader(pid)
+                    st.session_state[daily_key] = result if result.get("ok") else None
+                st.rerun()
+            if loaded:
+                _kline(loaded.get("candles") or [])
+                st.markdown("**滚轮缩放 · 拖拽平移**，可以放大看某一段的日线。")
 
         #: 点开图例看历年表现。数字全部来自 facts（工具层按产品 id 确定性生成，见 `_product_history`），
         #: 界面只排版；标题里必须写明「模拟」——数据集没有真实净值。
@@ -159,7 +193,8 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
 
 
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
-                key_prefix: str = "wealth") -> None:
+                key_prefix: str = "wealth",
+                daily_loader: Callable[[str], Mapping[str, Any]] | None = None) -> None:
     """紧贴成功的推荐回执，渲染四象限入口及每款产品的订购按钮。"""
     if turn.get('intent') != 'wealth_recommend':
         return
@@ -191,7 +226,7 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
         cols = st.columns(_COLUMNS)
         for col, item in zip(cols, shown[start:start + _COLUMNS]):
             with col:
-                _card(item, ask=ask, key_prefix=key_prefix)
+                _card(item, ask=ask, key_prefix=key_prefix, daily_loader=daily_loader)
     if len(items) > _PREVIEW_COUNT:
         label = (f'收起，只看前 {_PREVIEW_COUNT} 只' if expanded
                  else f'展开其余 {len(items) - _PREVIEW_COUNT} 只产品')
