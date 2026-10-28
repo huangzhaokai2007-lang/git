@@ -57,16 +57,6 @@ RISK_DESC = {
 RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
 #: 历年表现的口径：最近三个完整年度（演示数据锚在 2026-09，故 2023–2025）。
 HISTORY_YEARS = (2023, 2024, 2025)
-#: 各档位的年度收益区间与年内最大回撤区间（百分比，正数表示幅度）。
-#: **这是模拟口径**：演示数据集没有净值表，规格也未定义历史业绩；区间按风险档位给，
-#: 界面必须标明「模拟」。将来接真实数据只换 `_product_history()`，facts 形状不变。
-HISTORY_BANDS = {
-    "R1": ((1.6, 2.4), (0.0, 0.1)),
-    "R2": ((2.6, 3.8), (0.3, 1.2)),
-    "R3": ((-1.5, 6.5), (3.0, 9.0)),
-    "R4": ((-6.0, 11.0), (8.0, 16.0)),
-    "R5": ((-18.0, 24.0), (15.0, 32.0)),
-}
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
@@ -195,28 +185,35 @@ def _rank(level: str) -> int:
 
 
 def _pct_facts(basis_points: int, name: str) -> dict:
-    """百分比进事实包：**整数基点**本体 + 展示形态（红线 2：facts 里不许出现 float）。"""
-    return {name: basis_points, f"{name}_text": f"{basis_points / 100:+.2f}%"}
+    """百分比进事实包：**整数基点**本体 + 展示形态（红线 2：facts 里不许出现 float）。
+
+    零值不带符号（`0.00%`），否则货基「年内最大回撤」会显示成 `+0.00%`，读着像涨了。
+    """
+    text = "0.00%" if basis_points == 0 else f"{basis_points / 100:+.2f}%"
+    return {name: basis_points, f"{name}_text": text}
 
 
-def _product_history(product_id: str, level: str) -> list[dict]:
+def _product_history(product_id: str, max_gain: float, max_loss: float) -> list[dict]:
     """三年模拟表现：**同一个产品 id 永远得到同一组数字**（sha256 取种子，跨机器可复现）。
 
-    为什么是模拟：演示数据集没有净值表，规格也未定义历史业绩。数字按风险档位给区间
-    （R1 几乎不亏、R5 可以亏两三成），界面必须标明「模拟」。将来若接真实净值，
-    只换本函数实现，`facts.items[].history` 的形状不变。
+    采样区间**就是卡片上那条区间**（`[max_loss, max_gain]`）—— 否则会出现
+    「卡片写 0.00~+2.10%，展开却看到 +2.31%」这种自相矛盾（实测踩过）。
+    回撤幅度同样不超过下沿。
+
+    为什么是模拟：演示数据集没有净值表，规格也未定义历史业绩。界面必须标明「模拟」。
+    将来若接真实净值，只换本函数实现，`facts.items[].history` 的形状不变。
     """
-    ret_band, dd_band = HISTORY_BANDS.get(level, HISTORY_BANDS["R3"])
+    span = max_gain - max_loss
     rows: list[dict] = []
     for year in HISTORY_YEARS:
         digest = hashlib.sha256(f"{product_id}:{year}".encode()).digest()
         r1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
         r2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
-        ret = ret_band[0] + (ret_band[1] - ret_band[0]) * r1
-        dd = dd_band[0] + (dd_band[1] - dd_band[0]) * r2
+        ret = max_loss + span * r1
+        dd = -abs(max_loss) * (0.35 + 0.65 * r2)
         rows.append({"year": year,
                      **_pct_facts(round(ret * 100), "return"),
-                     **_pct_facts(-round(dd * 100), "drawdown")})
+                     **_pct_facts(round(dd * 100), "drawdown")})
     return rows
 
 
@@ -337,6 +334,9 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     #: 演示区间：参考上沿 = 预期年化 + 演示波动值；下沿 = -演示波动值。
     #: 只进 facts（不进 data —— data 字段是冻结契约），渲染层据此展示。
     swings = {row["id"]: RISK_SWING.get(row["risk_level"], 0.0) for row in products}
+    #: 每只产品的盈亏区间（上沿, 下沿）：卡片图例与历年表现**共用同一个区间**，保证不打架。
+    bounds = {row["id"]: (row["expected_yield"] + swings[row["id"]], -swings[row["id"]])
+              for row in products}
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
     facts = {"risk_level": level, "risk_label": risk_label(level),
              "ceiling_rank": ceiling, "item_count": len(items),
@@ -346,16 +346,14 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                         "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),
-                        #: 历年表现（模拟）：随推荐一起下发，界面点开图例时直接渲染，无需再调工具。
-                        "history": _product_history(item.product_id, item.risk_level),
+                        #: 历年表现（模拟）：区间与卡片图例**同源**，界面点开直接渲染，无需再调工具。
+                        "history": _product_history(item.product_id, *bounds[item.product_id]),
                         #: 买得起吗 —— 由工具层判定（铁律 1：编排层与界面不做业务算术）。
                         "affordable": (available is None or
                                        next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id) <= available),
-                        "max_gain_pct": _range_text(
-                            next(row["expected_yield"] for row in products
-                                 if row["id"] == item.product_id) + swings[item.product_id]),
-                        "max_loss_pct": _range_text(-swings[item.product_id])}
+                        "max_gain_pct": _range_text(bounds[item.product_id][0]),
+                        "max_loss_pct": _range_text(bounds[item.product_id][1])}
                        for item in items],
              "portfolio_max_gain_pct": _range_text(
                  max((row["expected_yield"] + swings[row["id"]]) for row in products)
