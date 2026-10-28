@@ -93,6 +93,23 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             f"<span style='color:#22c55e;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
             "</div>", unsafe_allow_html=True)
 
+        #: 点开图例看历年表现。数字全部来自 facts（工具层按产品 id 确定性生成，见 `_product_history`），
+        #: 界面只排版；标题里必须写明「模拟」——数据集没有真实净值。
+        history = item.get("history") or []
+        if history:
+            with st.expander("📈 历年收益与亏损（模拟）", expanded=False):
+                st.markdown(
+                    "| 年度 | 年度收益 | 年内最大回撤 |\n|---|---|---|\n" + "\n".join(
+                        f"| {row.get('year')} | {row.get('return_text')} | "
+                        f"{row.get('drawdown_text')} |" for row in history))
+                st.bar_chart(
+                    {"年度": [str(row.get("year")) for row in history],
+                     "年度收益(%)": [int(row.get("return") or 0) / 100 for row in history],
+                     "最大回撤(%)": [int(row.get("drawdown") or 0) / 100 for row in history]},
+                    x="年度", y=["年度收益(%)", "最大回撤(%)"])
+                st.markdown("以上为**模拟数据**，仅用于演示风险与收益的对应关系，"
+                            "不代表历史真实业绩，也不构成收益承诺。")
+
         amount = st.number_input(
             "金额（元）", min_value=floor, value=floor, step=100,
             key=f"{key_prefix}-amt-{pid}", label_visibility="collapsed")
