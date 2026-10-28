@@ -143,7 +143,27 @@ div[class*="st-key-payee-row-"]:hover { background: rgba(102,103,201,.10); borde
 .st-key-payee-detail [data-testid="stExpander"] summary p { font-size: 1.02rem; font-weight: 600; }
 """
 
-CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{PAYEE_CSS}{REDUCED_MOTION_CSS}</style>"
+
+#: 收款人「整行按钮」——把 Streamlit 的方块按钮改造成列表行（悬停才浮现提示）
+PAYEE_ROW_CSS = """
+div[class*="st-key-payee-row-"] button {
+  background: transparent !important; border: none !important; box-shadow: none !important;
+  justify-content: flex-start !important; text-align: left !important;
+  padding: .5rem .7rem !important; border-radius: 10px !important;
+  font-weight: 400 !important; color: #d1d4dc !important;
+  transition: background .12s ease, transform .12s ease;
+}
+div[class*="st-key-payee-row-"] button p { font-size: .95rem !important; line-height: 1.5; }
+div[class*="st-key-payee-row-"] button:hover {
+  background: rgba(102,103,201,.14) !important; transform: translateX(2px);
+}
+div[class*="st-key-payee-row-"] button:focus:not(:active) {
+  border: none !important; box-shadow: none !important;
+}
+div[class*="st-key-payee-row-"] { border-bottom: 1px solid rgba(44,45,51,.7); }
+"""
+
+CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{PAYEE_CSS}{PAYEE_ROW_CSS}{REDUCED_MOTION_CSS}</style>"
 
 
 def num_html(text: str, *, flash: bool = False) -> str:

@@ -178,9 +178,12 @@ def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) ->
         payee_id = str(person["payee_id"])
         kind = _kind_of(person)
         arrow = "▾" if opened == payee_id else "▸"
-        if st.button(f"{_row_label(person, kind)}　{arrow}", key=f"payee-row-{payee_id}",
-                     width="stretch", help="点这一行展开 / 收起详情"):
-            st.session_state["payee-open"] = None if opened == payee_id else payee_id
-            st.rerun()
+        #: 包一层 keyed container，CSS 才能把这一行的按钮改成「列表行」观感
+        with st.container(key=f"payee-row-{payee_id}"):
+            if st.button(f"{_row_label(person, kind)}", key=f"payee-open-{payee_id}",
+                         width="stretch", help=f"点这一行{'收起' if opened == payee_id else '展开'}详情"):
+                st.session_state["payee-open"] = None if opened == payee_id else payee_id
+                st.rerun()
+            st.caption(arrow) if False else None
         if opened == payee_id:
             _detail(executor, session_id, person)
