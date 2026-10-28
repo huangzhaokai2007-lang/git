@@ -71,6 +71,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
                bill_details: Callable[[dict, str], dict] | None = None,
                compact: bool = False,
+               legacy_bills: bool = False,
                wealth_card: Callable[[Mapping[str, Any], str], None] | None = None,
                subscription_card: Callable[[Mapping[str, Any], str], None] | None = None,
                wealth_start: int = 0) -> None:
@@ -82,9 +83,13 @@ def transcript(messages: Sequence[Mapping[str, Any]],
     recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
     recent_subs = (recent_reply if recent_intent in ('subscription_list', 'subscription_remind')
                    else -1)
+    insight_index = next((i for i in range(len(messages) - 1, -1, -1)
+        if (messages[i].get('turn') or {}).get('intent') in
+        ('txn_query', 'bill_analysis', 'bill_report', 'anomaly_check')), -1) if legacy_bills else len(messages) - 1
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
-        if compact:
+        if compact and not (legacy_bills and turn.get('intent') in
+                            ('txn_query', 'bill_analysis', 'bill_report', 'anomaly_check')):
             from interfaces.web.workspace_ui import summary
             with st.chat_message(message['role']):
                 st.markdown(message['text'] if message['role'] == 'user' else summary(message))
@@ -104,7 +109,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                     key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
                     #: 卡片会把这批数画成「走势图 + 逐笔明细表」→ 气泡里只留头句（不留重复的表格）。
                     text = (_head_only(message["text"]) if _ledger_card_follows(
-                        turn or {}, is_last=index == len(messages) - 1) else message["text"])
+                        turn or {}, is_last=index == insight_index) else message["text"])
                     if not spending_pie.render_reply(text, turn or {}, key=key,
                             animate=index == len(messages) - 1, detail_loader=bill_details):
                         reply_animation.render(text, key, animate=index == len(messages) - 1)
@@ -118,7 +123,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                     wealth_card(turn, f"wealth-{index}")
                 if subscription_card is not None and index == recent_subs and message['role'] == 'assistant':
                     subscription_card(turn, f"subs-{index}")
-                if insight_card is not None and message["role"] == "assistant" and index == len(messages) - 1:
+                if insight_card is not None and message["role"] == "assistant" and index == insight_index:
                     insight_card(turn, f"insight-{index}")
 
 

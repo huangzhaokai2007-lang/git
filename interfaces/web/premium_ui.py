@@ -145,8 +145,12 @@ EXAMPLES = ("查一下余额", "给房东转 100 元", "向王五和赵六 AA �
 
 
 def examples() -> str | None:
-    """空会话时的示例胶囊：点一下就等于说那句话（新手 3 秒上手，录屏好看）。"""
-    if st.session_state.get("messages"):
+    """**还没开始对话**时的示例胶囊：点一下就等于说那句话（新手 3 秒上手，录屏好看）。
+
+    2026-10-27 修：原来判的是 `messages` 是否为空，但首页预置了一句问候语 → 永远非空，
+    胶囊**从未出现过**（实测）。改成看 `turns`：只要还没真的问过话就展示。
+    """
+    if st.session_state.get("turns"):
         return None
     st.caption("可以这样说（点一下试试）：")
     picked = st.pills("示例指令", EXAMPLES, key="premium-examples", label_visibility="collapsed")

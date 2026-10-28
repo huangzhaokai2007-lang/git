@@ -68,7 +68,7 @@ def test_chat_query_replaces_current_business_and_retains_history(monkeypatch, s
     at.chat_input[0].set_value('出一份上个月的账单报告').run()
     assert not any(i.label == '银行卡密码' for i in at.text_input)
     assert any('2026-08 账单' in item.value for item in at.markdown)
-    assert not any(item.label == '📊 这份账单的图表' for item in at.expander)
+    assert any(item.label == '📊 这份账单的图表' for item in at.expander)
     assert at.session_state['messages'][:len(before)] == before
     assert at.session_state['workspace-result']['scene'] == 'bills'
     assert len(at.chat_input) == 1

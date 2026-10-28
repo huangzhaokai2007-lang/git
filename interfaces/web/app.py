@@ -129,14 +129,13 @@ def _ask(text: str, *, display: str | None = None) -> None:
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
 
-
-def _follow_up(prompt: str, *, display: str | None = None) -> None:
+def _follow_up(prompt: str, *, display: str | None = None, rerun: bool = True) -> None:
     if (prompt != '返回刚才的列表' and st.session_state.get('workspace-result', {}).get('prompt') == prompt
             and not st.session_state.get('workspace-error')):
         return
     _ask(prompt, display=display)
-    st.rerun()
-
+    if rerun:
+        st.rerun()
 
 def _cancel(confirmation) -> None:
     """取消这笔写操作：只清 agent 层的会话确认态 —— 不调工具、不执行（铁律 3）。"""
@@ -144,7 +143,6 @@ def _cancel(confirmation) -> None:
     workspace_ui.return_after_cancel(_agent_executor(), confirmation.session_id)
     st.session_state["messages"].append(
         {"role": "assistant", "text": "已取消这笔操作：未提交执行，没有产生任何资金变动。", "turn": None})
-
 
 def _render_pending() -> None:
     """L3 待复核：登记仍在 agent 层，撤销也走 agent 层（界面只显示与转发）。"""
@@ -159,9 +157,10 @@ def _render_pending() -> None:
                 {"role": "assistant", "text": confirm_card.undone_text(pending_id), "turn": None})
         st.rerun()
 
-
 def _render_confirm() -> None:
     """确认卡 / OTP 卡：状态取自 agent 层，动作回灌编排层。"""
+    from agent import web_features
+    _agent_executor().submit(web_features.clear_removed_drafts, st.session_state['session_id']).result()
     confirmation = confirm_card.current(st.session_state["session_id"])
     if confirmation is None:
         return
@@ -182,7 +181,6 @@ def _render_confirm() -> None:
         _cancel(confirmation)
         st.rerun()
 
-
 # ---------------- 表单桥（卡 20 收款人 / F10 风险测评） ----------------
 # 两个表单的渲染与提交都拆到 `interfaces/web/forms.py`（F10 接通后本文件超红线 300）；
 # 这里只负责"交给它、按结果 rerun"，会话状态仍由本模块唯一持有。
@@ -194,7 +192,6 @@ def _render_forms() -> None:
     if forms.render_all(st.session_state, _agent_executor()):
         st.rerun()
 
-
 # ---------------- 侧边栏 ----------------
 
 def _refresh_sidebar_balance():
@@ -202,7 +199,6 @@ def _refresh_sidebar_balance():
     if not turn.error_code:
         st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
     return turn
-
 
 def _sidebar() -> None:
     """侧边栏：账户余额、快捷场景与重置会话。"""
@@ -262,23 +258,22 @@ def _sidebar() -> None:
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
             st.rerun()
 
-
 def _chat_page() -> None:
     workspace_ui.notifications(_agent_executor(), st.session_state['session_id'], _follow_up)
-    messages = st.session_state['messages']
-    if len(messages) > 4:
-        with st.expander('较早的聊天记录', expanded=False):
-            ui.transcript(messages[:-4], compact=True)
-    ui.transcript(messages[-4:], compact=True)
-    if workspace_ui.current() or st.session_state.get('workspace-error'):
+    workspace_ui.transcript(st.session_state['messages'], _agent_executor(),
+                            st.session_state['session_id'], _follow_up)
+    if (workspace_ui.current() not in ('', 'bills') or
+            (not workspace_ui.current() and st.session_state.get('workspace-error'))):
         with st.container(key='current-business'):
             st.markdown('### 当前业务')
             workspace_ui.panels(_agent_executor(), st.session_state['session_id'], _follow_up,
                                 _render_pending, _render_forms, _render_confirm)
+    if (picked := premium_ui.examples()) is not None:
+        _ask(picked)
+        st.rerun()
     if (text := st.chat_input("")) and text.strip():
         _ask(text)
         st.rerun()
-
 
 def main() -> None:
     st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
@@ -293,6 +288,5 @@ def main() -> None:
     cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
     _sidebar()
     _chat_page()
-
 
 main()

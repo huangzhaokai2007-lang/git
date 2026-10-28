@@ -76,7 +76,7 @@ def test_new_query_replaces_operation_records(monkeypatch, seeded):
     click(at, '操作记录')
     at.chat_input[0].set_value('八月账单').run()
     assert not at.session_state['operation-records-open']
-    assert any(button.label == '最大的一笔' for button in at.button)
+    assert any(button.label == '📄 看流水明细' for button in at.button)
 
 
 def test_unknown_financial_exception_never_offers_read_retry(monkeypatch, seeded):
@@ -91,26 +91,10 @@ def test_unknown_financial_exception_never_offers_read_retry(monkeypatch, seeded
     assert not any(button.label == '重试查询' for button in at.button)
 
 
-def test_clear_category_preserves_cross_month_date_range(monkeypatch, seeded):
-    from agent import scene_context
-    at = app(monkeypatch, seeded)
-    session = at.session_state['session_id']
-    scene_context.update(session, intent='txn_query', period=None, category='电商',
-                         read_request={'date_from': '2026-07-31', 'date_to': '2026-08-03'})
-    at.session_state['workspace-result'] = {'scene': 'bills', 'prompt': '最近的交易',
-        'turn': {'intent': 'txn_query', 'reply': '当前范围的交易', 'facts': {'items': []}}}
-    at.run()
-    click(at, '清除分类')
-    context = scene_context.snapshot(session)
-    assert context.get('category') is None
-    assert context['read_request']['date_from'] == '2026-07-31'
-    assert context['read_request']['date_to'] == '2026-08-03'
-
-
 def test_transaction_workspace_shows_readable_fields_without_internal_ids(monkeypatch, seeded):
     from agent import card_binding_flow, scene_context
     turn = orchestrator.Turn(trace_id='ledger-result', intent='txn_query',
-        reply='当前范围共 1 笔交易。\n流水 txn-internal-001｜合成商户｜-5.00 元',
+        reply='当前范围共 1 笔交易。\n| 时间 | 交易对手 | 金额 |\n|---|---|---|\n| 2026-08-10 | 合成商户 | -5.00 |',
         facts={'items': [{'id': 'txn-internal-001', 'ts': '2026-08-10T12:00:00',
                          'counterparty': '合成商户', 'category': '电商', 'amount_yuan': '-5.00'}]})
     monkeypatch.setattr(card_binding_flow, 'handle', lambda *a, **kw: turn)

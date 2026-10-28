@@ -54,7 +54,8 @@ def _selection(context: dict, ask) -> None:
                         key='scene-candidate-' + domain)
     st.button('查看所选详情', key='scene-select-' + domain,
               on_click=ask, args=(f'第{index + 1}个',),
-              kwargs={'display': _selection_description(domain, rows[index], labels[index])})
+              kwargs={} if domain == 'txn' else
+              {'display': _selection_description(domain, rows[index], labels[index])})
 
 
 def _selection_description(domain: str, row: dict, label: str) -> str:

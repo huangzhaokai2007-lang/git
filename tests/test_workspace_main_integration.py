@@ -1,6 +1,21 @@
 """Keep newly merged subscription and wealth controls in the current workspace."""
+import pytest
 from agent import card_binding_flow, orchestrator
 from tests.test_card_binding_ui import app, click
+
+
+@pytest.mark.parametrize('destination', ['管卡', '操作记录', '重置会话'])
+def test_switching_away_from_missing_slots_closes_the_form(monkeypatch, seeded, destination):
+    from agent import classifier, llm, pending_slots
+    monkeypatch.setattr(llm, 'chat_json', lambda *a, **kw: (_ for _ in ()).throw(llm.LLMUnavailable('offline')))
+    monkeypatch.setattr(classifier, 'classify', lambda text, *a, **kw: classifier.IntentOut(
+        intent='card_query' if '卡片查询' in text else 'transfer_scheduled', confidence=1, slots={}))
+    at = app(monkeypatch, seeded)
+    at.chat_input[0].set_value('预约转账').run()
+    assert any(button.label == '继续' for button in at.button)
+    click(at, destination)
+    assert not any(button.label == '继续' for button in at.button)
+    assert pending_slots.peek(at.session_state['session_id']) is None
 
 
 def test_overdue_only_subscription_keeps_cancel_and_disappears_after_switch(monkeypatch, seeded):

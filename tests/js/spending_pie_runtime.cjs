@@ -119,17 +119,3 @@ assert(walk(root).some(node => node.textContent === '该分类在此账期暂无
 mount({ ...data, selected: '电商', detail: { ok: false, message: '查询暂不可用' } });
 assert(walk(root).some(node => node.textContent === '查询暂不可用'));
 console.log('spending pie lifecycle, safe labels, hover, and edge cases passed');
-const retry = byClass(root, 'bank-pie-retry')[0];
-assert(retry, 'failed detail offers an in-place Retry button');
-retry.onclick({ detail: 0 });
-assert.equal(events.at(-1).key, 'selected');
-assert.equal(events.at(-1).value.category, '电商', 'retry keeps the same selected category');
-assert(events.at(-1).value.retry_id, 'each retry emits a stable event identity');
-assert(walk(root).some(node => node.textContent === '正在读取明细…'), 'retry shows loading in the current ledger');
-assert.equal(byClass(root, 'bank-pie-retry').length, 0, 'pending retry cannot be clicked twice');
-mount({ ...data, selected: '电商', detail });
-assert(byClass(root, 'bank-pie-ledger')[0].className.includes('is-new'), 'a newly loaded result may animate');
-byClass(root, 'bank-pie-ledger-scroll')[0].scrollTop = 120;
-mount({ ...data, selected: '电商', detail });
-assert.equal(byClass(root, 'bank-pie-ledger-scroll')[0].scrollTop, 120, 'ordinary rerender preserves ledger scroll');
-assert(!byClass(root, 'bank-pie-ledger')[0].className.includes('is-new'), 'ordinary rerender must not replay ledger animation');

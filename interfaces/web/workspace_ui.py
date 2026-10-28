@@ -5,10 +5,10 @@ from copy import deepcopy
 import streamlit as st
 
 from agent import scene_flow, bill_detail_flow, subscription_notice, view_navigation
-from interfaces.web import spending_pie, insight_card_ui, txn_card_ui, wealth_ui, subscription_ui
+from interfaces.web import wealth_ui, subscription_ui
 import card_binding_ui, card_limit_ui, card_lock_ui, card_lost_ui
 import payee_card_ui, schedule_card_ui, aa_card_ui, gift_card_ui
-import activity_ui, payee_picker_ui, card_edit_ui, scene_ui
+import activity_ui, payee_picker_ui, card_edit_ui, scene_ui, slot_form_ui, legacy_bill_ui
 
 READS = {'balance_query', 'txn_query', 'bill_analysis', 'bill_report', 'anomaly_check',
          'card_query', 'payee_list', 'subscription_list', 'subscription_remind',
@@ -137,22 +137,6 @@ def scope(executor, session: str, ask) -> None:
             st.button('切换银行卡', key='scope-change-card', on_click=ask, args=('看看卡片信息',))
 
 
-def transaction_result(turn: dict) -> bool:
-    facts = turn.get('facts') or {}
-    if turn.get('intent') != 'txn_query' or 'items' not in facts:
-        return False
-    if txn_card_ui.render(facts, key='workspace-txn-' + str(turn.get('trace_id'))):
-        return True
-    rows = [{'时间': str(row.get('ts') or '').replace('T', ' '),
-             '交易对手': row.get('counterparty') or '—', '分类': row.get('category') or '—',
-             '金额（元）': row.get('amount_yuan') or '—'} for row in facts['items']]
-    if rows:
-        st.dataframe(rows, hide_index=True, width='stretch')
-    else:
-        st.info('当前范围没有符合条件的交易。')
-    return True
-
-
 def result(executor, session: str, ask, detail_loader) -> None:
     value = st.session_state.get('workspace-result')
     if not value or current() == 'records':
@@ -160,35 +144,7 @@ def result(executor, session: str, ask, detail_loader) -> None:
     turn = value['turn']
     scene = value['scene']
     if scene == 'bills':
-        key = 'workspace-' + str(turn.get('trace_id'))
-        facts = turn.get('facts') or {}
-        bill_navigation(executor, session, turn, ask)
-        overview = [(label, facts[field]) for label, field in (
-            ('支出合计（元）', 'out_sum_yuan'), ('收入合计（元）', 'in_sum_yuan'),
-            ('净额（元）', 'net_yuan')) if facts.get(field) is not None]
-        if not overview and facts.get('total_yuan') is not None:
-            overview = [('支出合计（元）', facts['total_yuan'])]
-        if overview:
-            for column, (label, amount) in zip(st.columns(len(overview)), overview):
-                column.metric(label, str(amount))
-        def category(source, selected):
-            selected_result = executor.submit(scene_flow.select_bill_category, session, source, selected).result()
-            if selected_result['ok']:
-                st.session_state['workspace-scope-updated'] = True
-            return selected_result
-        drawn = spending_pie.render_reply(turn.get('reply', ''), turn, key=key,
-                    animate=False, detail_loader=detail_loader, on_category=category, compact=True)
-        if not drawn and not transaction_result(turn):
-            st.markdown(turn.get('reply') or '当前范围没有查询结果。')
-        if facts:
-            with st.container(key='workspace-actions', horizontal=True):
-                if turn['intent'] != 'txn_query':
-                    st.button('查看流水', key='workspace-ledger', type='primary',
-                              on_click=ask, args=('最近的交易',))
-                if turn['intent'] != 'anomaly_check':
-                    st.button('最大的一笔', key='workspace-largest', type='tertiary',
-                              on_click=ask, args=('看看最大的一笔',))
-            insight_card_ui._export(turn, turn['intent'], facts, key)
+        return
     elif scene == 'wealth_recommend':
         if (turn.get('facts') or {}).get('items'):
             wealth_ui.render_turn(turn, ask=ask, key_prefix='workspace-wealth-' + str(turn.get('trace_id')))
@@ -207,22 +163,23 @@ def notifications(executor, session: str, ask) -> None:
     subscription_ui.banner(executor.submit(subscription_notice.summary, session).result(), ask=ask)
 
 
-def bill_navigation(executor, session: str, turn: dict, ask) -> None:
-    if turn.get('intent') != 'txn_query':
+def transcript(messages, executor, session: str, ask) -> None:
+    if current() == 'bills':
+        legacy_bill_ui.render(messages, executor, session, ask)
+        error(ask)
+        scene_ui.render(executor, session, ask)
         return
-    context = executor.submit(scene_flow.context, session).result()
-    views = context.get('views') or []
-    previous = views[-1] if views else context.get('previous', {})
-    label = {'bill_report': '返回账单', 'bill_analysis': '返回账单',
-             'txn_query': '返回流水'}.get(previous.get('intent'))
-    if label:
-        st.button(label, key='workspace-back', type='tertiary', on_click=ask,
-                  args=('返回刚才的列表',), kwargs={'display': label})
+    from interfaces.web import components
+    if len(messages) > 4:
+        with st.expander('较早的聊天记录', expanded=False):
+            components.transcript(messages[:-4], compact=True)
+    components.transcript(messages[-4:], compact=True)
 
 
 def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
     scene = current()
-    scope(executor, session, ask)
+    if scene != 'bills':
+        scope(executor, session, ask)
     error(ask)
     result(executor, session, ask,
            lambda source, category: executor.submit(bill_detail_flow.load, session, source, category).result())
@@ -248,4 +205,5 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
             renderer(executor, session)
     if scene not in ('cards', 'records'):
         scene_ui.render(executor, session, ask, show_scope=False)
+    slot_form_ui.render(executor, session)
     confirmation()

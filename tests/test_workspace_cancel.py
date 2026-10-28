@@ -31,9 +31,9 @@ def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp, short
     assert at.session_state['workspace-result']['turn']['trace_id'] == original
     assert scene_context.snapshot(session)['period'] == '2026-08'
     assert scene_context.snapshot(session)['intent'] == 'bill_report'
-    assert any(b.label == '查看流水' for b in at.button)
+    assert any(b.label == '📊 按分类分析支出' for b in at.button)
     assert raw(seeded, 'SELECT id,balance FROM account ORDER BY id') == balances
-    click(at, '查看流水')
+    at.chat_input[0].set_value('最近的交易').run()
     assert scene_context.snapshot(session)['period'] == '2026-08'
 
 

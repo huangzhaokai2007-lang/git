@@ -25,7 +25,7 @@ def test_active_panel_is_the_only_query_panel_and_precedes_confirmation(monkeypa
     modules = (('activity_ui', 'activity'), ('payee_picker_ui', 'picker'), ('card_edit_ui', 'edit'),
                ('card_binding_ui', 'cards'), ('payee_card_ui', 'payee'),
                ('schedule_card_ui', 'schedule'), ('aa_card_ui', 'aa'), ('gift_card_ui', 'gift'),
-               ('scene_ui', 'selection'))
+               ('scene_ui', 'selection'), ('slot_form_ui', 'slot-form'))
     for name, label in modules:
         monkeypatch.setattr(getattr(workspace_ui, name), 'render',
                             lambda *a, _label=label, **kw: calls.append(_label))

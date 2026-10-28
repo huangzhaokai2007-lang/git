@@ -87,13 +87,13 @@ def test_analysis_reply_comes_with_a_chart_and_follow_up_buttons(monkeypatch: py
 
     page = _text(at)
     assert "| 分类 | 金额（元） | 占比 |" not in page              # 分类表替换为动画饼图
-    assert insight_ui.CARD_MARK not in page
-    assert at.session_state['workspace-result']['scene'] == 'bills'
+    assert insight_ui.CARD_MARK in page                              # ② 卡片真的画出来了
     pies = [item for item in at.get('bidi_component') if item.proto.component_name.endswith('spending_pie')]
     assert len(pies) == 1                                            # ③ 分类只画一份饼图
     labels = [button.label for button in at.button]
-    assert all(label in labels for label in ('最大的一笔', '查看流水'))
-    assert '关联银行卡' not in labels
+    assert "📄 看流水明细" in labels                                  # ④ 追问按钮在页面上
+    assert "🧾 出一份账单总结" in labels
+    assert "🔍 查异常交易" in labels
 
 
 def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,15 +102,17 @@ def test_follow_up_button_runs_the_same_pipeline(monkeypatch: pytest.MonkeyPatch
     at.chat_input[0].set_value("上个月花了多少").run()
     assert not at.exception, at.exception
 
-    button = next((b for b in at.button if b.label == "查看流水"), None)
+    button = next((b for b in at.button if b.label == "📄 看流水明细"), None)
     assert button is not None, "追问按钮没画出来 —— 卡片没生效"
     button.click().run()
     assert not at.exception, at.exception
 
-    turn = at.session_state['messages'][-1]['turn']
-    assert turn['intent'] == 'txn_query' and turn['tool_calls']
-    assert turn['facts']['items']
-    assert at.session_state['workspace-result']['turn']['trace_id'] == turn['trace_id']
+    page = _text(at)
+    assert "共查到" in page and "笔交易" in page                     # 真跑了 list_txn
+    #: 2026-10-26 二次验收：气泡只留头句，走势图与逐笔明细交给卡片（同一批数不印两遍）
+    assert insight_ui.CARD_MARK in page
+    assert "按日支出走势" in page and "逐笔明细" in page
+    assert "| 时间 | 交易对手 |" not in page
 
 
 def test_five_chat_queries_walk_all_five_tasks(monkeypatch: pytest.MonkeyPatch) -> None:
