@@ -47,6 +47,24 @@ def _current_limits() -> dict:
         return {}
 
 
+def split_with_self(total_cents: int, others: int) -> dict:
+    """「含我自己」的均摊：`others` = 除我以外的参与人数。
+
+    用户 2026-10-28：「我和王五群收款 300，那么王五就要给我 150，我自己也有 150」
+    → 分摊份数 = others + 1（我占一份），我那份不需要"付给自己"，
+    所以**待收 = total − 我那份**（余数按既有口径给发起人，也就是我）。
+
+    返回金额全为**整数分**，界面只负责格式化，不自己算（铁律 2）。
+    """
+    if others < 1 or total_cents <= 0:
+        return {"per_cents": 0, "mine_cents": 0, "collect_cents": 0, "people": 0}
+    per, _remainder = split_amount(total_cents, others + 1)
+    #: 我占一份（per），余数按既有口径也归我 → 我承担 = 总额 − 其他人应缴
+    mine = total_cents - per * others
+    return {"per_cents": per, "mine_cents": mine,
+            "collect_cents": per * others, "people": others + 1}
+
+
 def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = None,
              per_person: Sequence[int] | None = None) -> dict:
     """AA 的事实包：人数 / 总额 / 每人金额 / 余数 / 档位 / 收款人名单。

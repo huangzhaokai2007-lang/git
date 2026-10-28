@@ -161,22 +161,26 @@ def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict) -> None
         _actions(executor, session_id, person, who)
 
 
+def _row_label(person: dict, kind: str) -> str:
+    """整行按钮的文案：头像字 + 姓名 + 脱敏号 + 银行 + 类型（一行内对齐）。"""
+    initial = str(person["name"])[:1] or "?"
+    text, _color, _bg = BADGE[kind]
+    return (f"**{initial}**　**{person['name']}**　　{person['masked_phone']}"
+            f"　　{person.get('bank') or '—'}　　{text}")
+
+
 def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) -> None:
-    """一长条列表；点行尾 ▸ 在该行下方展开详情（带拉开动画）。"""
+    """一列「整行按钮」；点谁就在谁下面拉开详情（再点收起）。"""
     opened = st.session_state.get("payee-open")
     premium_ui.card_head(f"👥 收款人管理（{len(people)} 位）",
-                         "点每行右侧 ▸ 展开这位收款人的详情与操作", tone="")
+                         "点某一行展开这位收款人的详情与操作，再点一次收起", tone="")
     for person in people:
         payee_id = str(person["payee_id"])
         kind = _kind_of(person)
-        with st.container(key=f"payee-row-{payee_id}"):
-            left, right, toggle = st.columns([7.2, 2.2, 0.6], vertical_alignment="center")
-            left.markdown(_row_html(person), unsafe_allow_html=True)
-            right.markdown(_badge_html(kind), unsafe_allow_html=True)
-            arrow = "▾" if opened == payee_id else "▸"
-            if toggle.button(arrow, key=f"payee-toggle-{payee_id}",
-                             help="展开 / 收起这位收款人的详情"):
-                st.session_state["payee-open"] = None if opened == payee_id else payee_id
-                st.rerun()
+        arrow = "▾" if opened == payee_id else "▸"
+        if st.button(f"{_row_label(person, kind)}　{arrow}", key=f"payee-row-{payee_id}",
+                     width="stretch", help="点这一行展开 / 收起详情"):
+            st.session_state["payee-open"] = None if opened == payee_id else payee_id
+            st.rerun()
         if opened == payee_id:
             _detail(executor, session_id, person)

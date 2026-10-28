@@ -53,18 +53,19 @@ def test_list_renders_one_row_per_person(monkeypatch: pytest.MonkeyPatch) -> Non
     app = _app(monkeypatch)
     app.chat_input[0].set_value("我的收款人有哪些").run()
     assert not app.exception, app.exception
-    rows = [str(element.value) for element in app.markdown
-            if '<div class="dsh-payee-row"' in str(element.value)]
-    assert len(rows) == 5, f"应有 5 行，实际 {len(rows)}"
-    assert "139****1001" in "\n".join(rows) and "招商银行" in "\n".join(rows)
-    assert len([button for button in app.button if button.label == "▸"]) == 5
+    rows = [button.label for button in app.button if button.label.startswith("**李**")
+            or "**" in button.label]
+    row_buttons = [button for button in app.button if "****" in button.label]   # 每行一个按钮
+    assert len(row_buttons) == 5, f"应有 5 个整行按钮，实际 {len(row_buttons)}"
+    labels = "\n".join(button.label for button in row_buttons)
+    assert "139****1001" in labels and "招商银行" in labels and "李四" in labels
 
 
 def test_clicking_the_row_expands_the_detail_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
     """点 ▸ → 展开详情（名字色条 + 编辑资料 + 操作按钮）；再点 ▾ → 收起。"""
     app = _app(monkeypatch)
     app.chat_input[0].set_value("我的收款人有哪些").run()
-    next(button for button in app.button if button.label == "▸").click().run()
+    next(button for button in app.button if "****" in button.label).click().run()
     assert not app.exception, app.exception
     marks = "\n".join(str(element.value)
                       for element in app.markdown if "<style>" not in str(element.value))
@@ -75,10 +76,10 @@ def test_clicking_the_row_expands_the_detail_in_place(monkeypatch: pytest.Monkey
     for expect in ("转账", "拉黑", "删除"):
         assert expect in action_labels
 
-    next(button for button in app.button if button.label == "▾").click().run()
+    next(button for button in app.button if "****" in button.label).click().run()
     labels = [box.label for box in app.text_input]
     assert not any("备注" in label for label in labels), "收起后编辑资料应消失"
-    assert len([button for button in app.button if button.label == "▸"]) == 5
+    assert len([button for button in app.button if "****" in button.label]) == 5
 
 
 def test_list_styles_and_expand_animation_exist() -> None:

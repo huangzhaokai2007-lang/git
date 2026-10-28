@@ -115,9 +115,7 @@ def test_whitelist_reply_is_drawn_as_an_interactive_list(monkeypatch: pytest.Mon
     assert 'class="payee-card"' not in page                    # 静态卡不再上屏
     assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page    # 裸 Markdown 表格也没有
     # 可交互列表：每人一行 + 行尾 ▸
-    rows = [str(element.value) for element in at.markdown
-            if '<div class="dsh-payee-row"' in str(element.value)]
-    assert len(rows) == 5, f"应有 5 行可交互列表，实际 {len(rows)}"
-    assert "139****1001" in "\n".join(rows)
-    assert len([button for button in at.button if button.label == "▸"]) == 5
+    row_buttons = [button for button in at.button if "****" in button.label]
+    assert len(row_buttons) == 5, f"应有 5 个整行按钮，实际 {len(row_buttons)}"
+    assert "139****1001" in "\n".join(button.label for button in row_buttons)
     assert "trace_id" in "\n".join(str(e.value) for e in at.caption)   # 回执元信息照旧

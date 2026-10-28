@@ -127,7 +127,10 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["pending_id"] = turn.pending_id
     state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
-    state["bound-aa-query"] = turn.intent == "aa_list" and turn.error_code is None
+    #: 2026-10-28：发起群收款（含缺槽追问）时也画卡面 —— 总额/选人/按人金额都在卡上填，
+    #: 比让用户一句句打字快（用户要求）。
+    state["bound-aa-query"] = (turn.intent in ("aa_list", "aa_collect")
+                                and turn.error_code is None)
     state["bound-gift-query"] = turn.intent == "gift_order_list" and turn.error_code is None
     state['bound-card-query'] = state.get('bound-card-query', False) or (
         (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
