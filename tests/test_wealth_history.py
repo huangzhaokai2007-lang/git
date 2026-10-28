@@ -25,10 +25,10 @@ def _items(level: str = "R5") -> list[dict]:
     return result.facts["items"]
 
 
-def test_history_covers_three_years_with_int_basis_points(seeded: Path) -> None:
+def test_history_covers_five_years_with_int_basis_points(seeded: Path) -> None:
     for item in _items():
         history = item["history"]
-        assert [row["year"] for row in history] == [2023, 2024, 2025]
+        assert [row["year"] for row in history] == [2021, 2022, 2023, 2024, 2025]
         for row in history:
             assert isinstance(row["return"], int) and isinstance(row["drawdown"], int)
             assert row["return_text"].endswith("%") and row["drawdown"] <= 0
@@ -68,7 +68,7 @@ def test_monthly_candles_are_deterministic_and_well_formed(seeded: Path) -> None
     """月 K：24 根、末月 = 数据锚点所在月、OHLC 关系成立、净值落在卡片区间内。"""
     for item in _items():
         candles = item["candles"]
-        assert len(candles) == 24
+        assert len(candles) == 60
         assert candles[-1]["period"] == "2026-09"           # 与 data.seed.AS_OF 同月
         lo = float(item["max_loss_pct"].rstrip("%").lstrip("+")) / 100
         hi = float(item["max_gain_pct"].rstrip("%").lstrip("+")) / 100

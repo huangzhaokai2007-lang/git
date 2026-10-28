@@ -55,11 +55,13 @@ RISK_DESC = {
 #: 来源：本 demo 的 RISK_DESC 文字分档（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
 #: R5「20% 以上」演示取 30%）。并非历史数据或可验证的最大收益/亏损，必须在界面显著标明。
 RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
-#: 历年表现的口径：最近三个完整年度（演示数据锚在 2026-09，故 2023–2025）。
-HISTORY_YEARS = (2023, 2024, 2025)
-#: 月 K 的口径：最近 24 个月（末月 = `AS_OF` 所在月），净值基点 10000 = 1.0000。
-CANDLE_MONTHS = 24
+#: 历年表现的口径：最近五个完整年度（演示数据锚在 2026-09，故 2021–2025）。
+HISTORY_YEARS = (2021, 2022, 2023, 2024, 2025)
+#: 月 K 的口径：最近 60 个月（5 年，末月 = `AS_OF` 所在月），净值基点 10000 = 1.0000。
+CANDLE_MONTHS = 60
 _NAV_BASE = 10_000
+#: 单月波动的分母：见 `_product_candles()` 里的注释（不随窗口长度变）。
+_STEP_DIVISOR = 24
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
@@ -235,7 +237,9 @@ def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[
     单月波动按档位放大（R5 抖得比 R1 厉害），看起来才像真的净值曲线。
     """
     span = max(max_gain - max_loss, 1.0)
-    step = span / 24 * 0.9                       # 单月最大涨跌幅（百分点）
+    #: 单月波动按**年化区间**定，不随窗口长度稀释：`span/24` 是「两年摊平」的直觉刻度。
+    #: 若按 `span/CANDLE_MONTHS` 摊到 60 个月，实体只有 1.8px，图上几乎看不见。
+    step = span / _STEP_DIVISOR * 0.9
     floor_nav = _NAV_BASE * (1 + max_loss / 100)
     ceil_nav = _NAV_BASE * (1 + max_gain / 100)
     #: 月漂移 = 年化收益 / 12（`yield = max_gain + max_loss`）。
@@ -244,15 +248,24 @@ def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[
     yield_pct = max_gain + max_loss
     drift = min(yield_pct / 12, max_gain * 0.6 / CANDLE_MONTHS) / 100
     nav = float(_NAV_BASE)
+    dev = 0.0                                    # 上个月的「偏离趋势」部分，给动量用
     rows: list[dict] = []
     for offset in range(CANDLE_MONTHS):
         period = _candle_period(offset)
         digest = hashlib.sha256(f"{product_id}:k:{period}".encode()).digest()
         u1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
         u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
+        #: **动量**：`dev = 0.4 * 上月偏离 + 0.8 * 本月冲击`。
+        #: 纯独立随机会画成锯齿（相邻 K 线一半时间反向），看着不像行情；带自相关后
+        #: 连续几个月朝一个方向走，才像一段趋势。实测转向率从 50% 降到 ~35%。
+        #: 系数 0.55 会更顺，但净值更容易撞到区间边界贴着走，0.4 是折中。
+        dev = 0.4 * dev + 0.8 * (u1 * 2 - 1) * step / 100
         open_nav = nav
-        close_nav = max(floor_nav, min(ceil_nav,
-                                       open_nav * (1 + drift + (u1 * 2 - 1) * step / 100)))
+        raw_nav = open_nav * (1 + drift + dev)
+        close_nav = max(floor_nav, min(ceil_nav, raw_nav))
+        if close_nav != raw_nav:
+            #: 撞到区间边界就**反弹**：不处理的话，动量会让净值贴着上沿走十几个月的直线。
+            dev = -0.6 * dev
         wick = abs(u2 - 0.5) * step / 100 * open_nav
         rows.append({"period": period,
                      "open": round(open_nav),
