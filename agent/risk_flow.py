@@ -63,20 +63,22 @@ QUERY_TEXT = "我的风险等级是多少"
 T_PROFILE = ("您当前的风险等级是「{risk_label}」（{risk_level}），测评有效期至 {valid_until}。"
              "要重新测评随时说一声。")
 T_NO_PROFILE = "您还没有完成风险测评，暂时不知道您的风险承受能力。"
+#: 过期 ≠ 没做过：用户明明做过，说"还没做"会让他以为白做了。
+T_EXPIRED = "您的风险测评已于 {valid_until} 过期（原等级「{risk_label}」），需要重新做一次才能继续买理财。"
 
 
 def profile_reply() -> tuple[str, dict]:
-    """查询当前风险等级 → (回执, facts)。
-
-    未测评不是错误：如实说"还没有"，界面据此给「开始风险测评」按钮，而不是弹问卷打断用户。
-    """
+    """查询当前风险等级 → (回执, facts)。三种状态分开说，别把"过期"说成"没做过"。"""
     record = wealth_tool.current_profile()
-    if record is None:
+    status = record.get("status")
+    if status == "missing":
         return T_NO_PROFILE, {"assessed": False}
     level = record["risk_level"]
-    facts = {"assessed": True, "risk_level": level,
+    facts = {"assessed": status == "ok", "risk_level": level,
              "risk_label": wealth_tool.risk_label(level),
-             "valid_until": record["valid_until"]}
+             "valid_until": record["valid_until"], "expired": status == "expired"}
+    if status == "expired":
+        return T_EXPIRED.format(**facts), facts
     return T_PROFILE.format(**facts), facts
 
 

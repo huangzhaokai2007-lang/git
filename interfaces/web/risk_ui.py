@@ -19,7 +19,10 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     facts = turn.get('facts') or {}
     if facts.get('assessed') is not False:
         return
-    st.markdown('#### 先做一次风险测评')
+    #: 过期和没做过是两件事：过期的用户已经花过 1 分钟，别让他以为按钮是"从头再来"。
+    expired = facts.get('expired') is True
+    st.markdown('#### 测评已过期，重新做一次' if expired else '#### 先做一次风险测评')
     st.markdown('一共 9 道题、大约 1 分钟，做完我就能按您的承受能力推荐产品。')
-    if st.button('开始风险测评', key=f'{key_prefix}-assess', type='primary', width='stretch'):
+    label = '重新测评' if expired else '开始风险测评'
+    if st.button(label, key=f'{key_prefix}-assess', type='primary', width='stretch'):
         ask('做风险测评')
