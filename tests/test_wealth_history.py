@@ -81,6 +81,28 @@ def test_monthly_candles_are_deterministic_and_well_formed(seeded: Path) -> None
     assert again == first
 
 
+def test_kline_spec_is_a_candlestick_with_zoom() -> None:
+    """图表结构钉死：影线 rule + 实体 bar、开收盘双 y、涨跌条件着色、可交互缩放。
+
+    界面测试只能断言「元素存在」，看不到图长什么样；这条补上**规格层面**的保证 ——
+    以后谁把 y2 去掉、把 condition 写错，这里会直接红。
+    """
+    import json
+
+    from interfaces.web import wealth_ui
+
+    candles = [{"period": "2026-08", "open": 10000, "high": 10200, "low": 9800, "close": 10150},
+               {"period": "2026-09", "open": 10150, "high": 10300, "low": 10050, "close": 10100}]
+    spec = wealth_ui._kline_spec(candles).to_dict()
+    layer = spec["layer"]
+    assert layer[0]["mark"]["type"] == "rule"       # 影线
+    assert layer[1]["mark"]["type"] == "bar"        # 实体
+    assert layer[0]["encoding"]["y2"]["field"] == "h"
+    assert layer[1]["encoding"]["y2"]["field"] == "c"
+    assert "condition" in json.dumps(spec)          # 阳绿阴红
+    assert spec["params"] or "interactive" in json.dumps(spec)   # 可缩放
+
+
 def test_card_expander_renders_the_history_rows() -> None:
     item = {"product_id": "p1", "name": "成长精选三年期", "risk_label": "高风险",
             "yield": "8.50%", "term": 1095, "min_amount": 10_000_000,

@@ -49,12 +49,8 @@ def _num(text: object) -> float:
         return 0.0
 
 
-def _kline(candles: list[Mapping[str, Any]]) -> None:
-    """月 K 图：阳线绿、阴线红，滚轮缩放 + 拖拽平移。
-
-    `candles` 来自 facts（整数基点，10000 = 净值 1.0000），这里只除以 100 变成「元」。
-    用 Altair 而不是 plotly：altair 是 Streamlit 自带依赖，不新增第三方库。
-    """
+def _kline_spec(candles: list[Mapping[str, Any]]):
+    """构建月 K 的 Altair 图表对象（不渲染）—— 拆出来是为了能单测它的结构。"""
     import altair as alt
     import pandas as pd
 
@@ -77,7 +73,16 @@ def _kline(candles: list[Mapping[str, Any]]) -> None:
                  alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
                  alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
     #: `interactive()` = 滚轮缩放 + 拖拽平移；用户明确要求「可以放大」。
-    st.altair_chart((wick + body).properties(height=200).interactive(), width="stretch")
+    return (wick + body).properties(height=200).interactive()
+
+
+def _kline(candles: list[Mapping[str, Any]]) -> None:
+    """月 K 图：阳线绿、阴线红，滚轮缩放 + 拖拽平移。
+
+    `candles` 来自 facts（整数基点，10000 = 净值 1.0000），这里只除以 100 变成「元」。
+    用 Altair 而不是 plotly：altair 是 Streamlit 自带依赖，不新增第三方库。
+    """
+    st.altair_chart(_kline_spec(candles), width="stretch")
 
 
 def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str) -> None:
