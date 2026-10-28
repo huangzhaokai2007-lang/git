@@ -69,9 +69,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         return
     #: 2026-10-28（用户要求）：这张「每人收款金额」卡**不再出现** ——
     #: 群收款已由卡面的「按人设置金额」负责，页面上不要出现两块同样的表单。
-    if draft.kind == "aa_collect":
-        return
-    if draft.kind == "aa_collect":                      # （保留分支以便回退）
+    if draft.kind == "aa_collect":                      # 群收款由卡面的「按人设置金额」负责
         _aa_amounts(executor, session_id)
         return
     if not draft.fields:

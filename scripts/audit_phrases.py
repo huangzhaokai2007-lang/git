@@ -41,6 +41,20 @@ READ, WRITE = "read", "write"
 #: 排雷用例：`text` 是用户会说的原话；`intent`/`slots` 是离线模式的既定解析结果。
 #: `expect` 该意图集合（live 模式用来判断有没有被判错）。
 CASES: list[dict] = [
+    #: 2026-10-28：群收款（含我）+ 收款人列表 —— 改名与新卡面之后的说法都要能跑通
+    {"text": "我的群收款有哪些", "intent": "aa_list", "slots": {}, "kind": READ},
+    {"text": "发起群收款", "intent": "aa_collect",
+     "slots": {"payee_ids": ["王五"], "amount": "300"}, "kind": WRITE},
+    {"text": "我和王五群收款 300 元", "intent": "aa_collect",
+     "slots": {"payee_ids": ["王五"], "amount": "300"}, "kind": WRITE},
+    {"text": "向王五和赵六群收款 300 元", "intent": "aa_collect",
+     "slots": {"payee_ids": ["王五", "赵六"], "amount": "300"}, "kind": WRITE},
+    {"text": "把张小美加入白名单，额度 500 元，有效期到 2026-12-31",
+     "intent": "payee_whitelist",
+     "slots": {"payee": "张小美", "quota": "500", "expire": "2026-12-31"}, "kind": WRITE},
+    {"text": "把王五拉黑", "intent": "payee_blacklist",
+     "slots": {"payee": "王五"}, "kind": WRITE},
+
     # ---- 只读：看模板渲染与「不误执行」 ----
     {"text": "我的收款人有哪些", "intent": "payee_list", "slots": {}, "kind": READ},
     {"text": "查一下我的收款人", "intent": "payee_list", "slots": {}, "kind": READ},

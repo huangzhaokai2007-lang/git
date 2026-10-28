@@ -78,7 +78,8 @@ def _create_card(executor: ThreadPoolExecutor, session_id: str) -> None:
                 amounts[name] = st.text_input(f"{name} 应收（元）", key=f"aa-amt-{index}",
                                               value=plan["per_yuan"])
 
-        if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch"):
+        if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
+                     disabled=float(total or 0) <= 0):     # 总额为 0 时不可按
             slots = {"payee_ids": people, "amount": plan["collect_yuan"]}
             filled = {name: value.strip() for name, value in amounts.items() if value.strip()}
             if filled:

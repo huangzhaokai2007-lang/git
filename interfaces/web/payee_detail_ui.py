@@ -45,24 +45,6 @@ def _dispatch(executor: ThreadPoolExecutor, session_id: str, intent: str,
     st.rerun()
 
 
-def _row_html(person: dict) -> str:
-    """一行列表：圆形头像（姓首字）+ 姓名 + 脱敏手机 + 银行（观感对齐图一）。"""
-    initial = str(person["name"])[:1] or "?"
-    return (f'<div class="dsh-payee-row">'
-            f'<span class="dsh-payee-avatar">{initial}</span>'
-            f'<span class="dsh-payee-name">{person["name"]}</span>'
-            f'<span class="dsh-payee-phone">{person["masked_phone"]}</span>'
-            f'<span class="dsh-payee-bank">{person.get("bank") or "—"}</span>'
-            f'</div>')
-
-
-def _badge_html(kind: str) -> str:
-    text, color, background = BADGE[kind]
-    return (f'<div style="text-align:right"><span style="font-size:12px;padding:2px 10px;'
-            f'border-radius:999px;color:{color};background:{background};'
-            f'white-space:nowrap">{text}</span></div>')
-
-
 def _quota_block(executor: ThreadPoolExecutor, person: dict) -> None:
     """白名单额度：进度条 + 已用/剩余（数字由 `payee_risk` 算，界面不自己算）。"""
     if not person["is_whitelist"] or person.get("whitelist_quota") is None:
