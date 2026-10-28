@@ -24,8 +24,13 @@ BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_r
 AGGRESSIVE = {"age": 50, "experience": 4, "income": 4, "income_level": 4, "asset_ratio": 4,
               "drawdown": 4, "horizon": 4, "goal": 4, "reaction": 4}
 #: seed 的 6 个理财产品（id, 等级, 预期年化）
-PRODUCTS = (("prod_r1_mmf", "R1", 2.10), ("prod_r2_bond90", "R2", 3.20), ("prod_r2_bond180", "R2", 3.60),
-            ("prod_r3_mixed365", "R3", 4.50), ("prod_r4_quant720", "R4", 6.20), ("prod_r5_growth", "R5", 8.50))
+PRODUCTS = (("prod_r1_mmf", "R1", 2.10), ("prod_r1_cash", "R1", 2.30),
+            ("prod_r2_bond30", "R2", 2.80), ("prod_r2_bond90", "R2", 3.20),
+            ("prod_r2_bond180", "R2", 3.60), ("prod_r3_balance", "R3", 3.90),
+            ("prod_r3_mixed365", "R3", 4.50), ("prod_r3_div", "R3", 4.80),
+            ("prod_r4_asia", "R4", 5.60), ("prod_r4_quant720", "R4", 6.20),
+            ("prod_r4_growth540", "R4", 7.10), ("prod_r5_theme", "R5", 7.90),
+            ("prod_r5_growth", "R5", 8.50), ("prod_r5_pe", "R5", 9.80))
 
 
 # ---------------- T13 assess_risk ----------------
@@ -144,11 +149,15 @@ def test_t14_data_fields_are_frozen_to_the_spec(seeded: Path) -> None:
 
 
 @pytest.mark.parametrize(("level", "expected_ids"), [
-    ("R1", ["prod_r1_mmf"]),
-    ("R2", ["prod_r2_bond180", "prod_r2_bond90", "prod_r1_mmf"]),
-    ("R3", ["prod_r3_mixed365", "prod_r2_bond180", "prod_r2_bond90", "prod_r1_mmf"]),
-    ("R5", ["prod_r5_growth", "prod_r4_quant720", "prod_r3_mixed365", "prod_r2_bond180",
-            "prod_r2_bond90", "prod_r1_mmf"]),
+    ("R1", ["prod_r1_cash", "prod_r1_mmf"]),
+    ("R2", ["prod_r2_bond180", "prod_r2_bond90", "prod_r2_bond30",
+            "prod_r1_cash", "prod_r1_mmf"]),
+    ("R3", ["prod_r3_div", "prod_r3_mixed365", "prod_r3_balance", "prod_r2_bond180",
+            "prod_r2_bond90", "prod_r2_bond30", "prod_r1_cash", "prod_r1_mmf"]),
+    ("R5", ["prod_r5_pe", "prod_r5_growth", "prod_r5_theme", "prod_r4_growth540",
+            "prod_r4_quant720", "prod_r4_asia", "prod_r3_div", "prod_r3_mixed365",
+            "prod_r3_balance", "prod_r2_bond180", "prod_r2_bond90", "prod_r2_bond30",
+            "prod_r1_cash", "prod_r1_mmf"]),
 ])
 def test_t14_never_recommends_above_the_user_level(seeded: Path, level: str,
                                                    expected_ids: list[str]) -> None:
@@ -162,21 +171,24 @@ def test_t14_never_recommends_above_the_user_level(seeded: Path, level: str,
 def test_t14_sorted_by_yield_descending(seeded: Path) -> None:
     """按预期年化降序；`yield` 是百分数字符串（不引入浮点，见模型 docstring）。"""
     yields = [item["yield"] for item in wealth.recommend_wealth("R5").data["items"]]
-    assert yields == ["8.50%", "6.20%", "4.50%", "3.60%", "3.20%", "2.10%"]
+    assert yields == ["9.80%", "8.50%", "7.90%", "7.10%", "6.20%", "5.60%", "4.80%",
+                      "4.50%", "3.90%", "3.60%", "3.20%", "2.80%", "2.30%", "2.10%"]
 
 
 def test_t14_horizon_and_amount_filters(seeded: Path) -> None:
     ids = [item["product_id"] for item in wealth.recommend_wealth("R3", 200, 1_200_000).data["items"]]
-    assert ids == ["prod_r2_bond180", "prod_r2_bond90", "prod_r1_mmf"]      # 365 天与 R3 被过滤
+    assert ids == ["prod_r3_balance", "prod_r2_bond180", "prod_r2_bond90",  # 365 天的被过滤
+                   "prod_r2_bond30", "prod_r1_cash", "prod_r1_mmf"]
     only_short = wealth.recommend_wealth("R5", 0).data["items"]
-    assert [item["product_id"] for item in only_short] == ["prod_r1_mmf"]   # term=0 只有货币基金
+    assert [item["product_id"] for item in only_short] == ["prod_r1_cash",
+                                                          "prod_r1_mmf"]   # term=0 只有活期类
 
 
 def test_t14_uses_the_stored_assessment_when_level_is_omitted(seeded: Path) -> None:
     assert wealth.recommend_wealth().error_code == ErrorCode.INVALID_STATE   # 未测评
     wealth.assess_risk(BALANCED)
     assert [item["risk_level"] for item in wealth.recommend_wealth().data["items"]] == (
-        ["R3", "R2", "R2", "R1"])
+        ["R3", "R3", "R3", "R2", "R2", "R2", "R1", "R1"])
 
 
 def test_t14_expired_assessment_is_treated_as_unassessed(seeded: Path) -> None:
@@ -206,14 +218,15 @@ def test_t14_assessed_ceiling_cannot_be_raised_by_a_requested_level(seeded: Path
     for slot in ('R5', '高风险', 'high'):
         result = wealth.recommend_wealth(slot)
         assert result.ok and result.facts['risk_level'] == 'R1'
-        assert [item['product_id'] for item in result.facts['items']] == ['prod_r1_mmf']
+        assert [item['product_id'] for item in result.facts['items']] == ['prod_r1_cash',
+                                                                         'prod_r1_mmf']
 
 
 def test_t14_unrecognized_model_level_falls_back_to_assessed_level(seeded: Path) -> None:
     wealth.assess_risk(BALANCED)
     result = wealth.recommend_wealth('high')
     assert result.ok and result.facts['risk_level'] == 'R3'
-    assert len(result.facts['items']) == 4
+    assert len(result.facts['items']) == 8
     assert all(item['risk_label'] for item in result.facts['items'])
 
 

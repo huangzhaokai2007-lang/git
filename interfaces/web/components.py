@@ -22,33 +22,6 @@ SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银�
 #: 编排层没有这层归一化 → 工具直接 INVALID_ARGUMENT。这是 agent/ 层缺口，见交付说明「待拍板」。
 BALANCE_PROMPT = "查一下余额"
 
-#: 回执里的表格**由卡片接管**的意图（2026-10-26 验收口径：曲线图放最前面、表格要有高级感）。
-#: 这些意图的回执在气泡里只留**头句**（区间 / 笔数 / 合计），走势图与逐笔明细交给紧跟其后的
-#: 洞察卡 —— 同一批数在气泡里印一遍、卡片里再画一遍，用户看到的不是"全"，是冗长。
-LEDGER_CARD_INTENTS = ("txn_query",)
-
-
-def _head_only(text: str) -> str:
-    """回执的**头句**（第一段）：遇到表格行就停 —— 表格由卡片呈现，气泡里不再铺一遍。"""
-    kept: list[str] = []
-    for line in str(text).splitlines():
-        if line.startswith("|"):
-            break
-        kept.append(line)
-    return "\n".join(kept).strip()
-
-
-def _ledger_card_follows(turn: Mapping[str, Any], *, is_last: bool) -> bool:
-    """这条回执后面**紧接着**会画一张带图表的卡片吗？
-
-    卡片只在**最后一条**助手消息里画（见 `transcript` 里 `insight_card` 的调用条件）→
-    历史消息照旧印全量回执，翻上去还能对账；`ask`（追问）/ `error_code`（报错）/ 空结果
-    都没有表格可接管，一律不砍。
-    """
-    return (is_last and str((turn or {}).get("intent") or "") in LEDGER_CARD_INTENTS
-            and not turn.get("ask") and not turn.get("error_code")
-            and bool((turn.get("facts") or {}).get("items")))
-
 def _esc(value: object) -> str:
     """HTML 转义（用户输入与回执都可能带尖括号）。"""
     return html.escape("" if value is None else str(value))
@@ -74,13 +47,22 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                subscription_card: Callable[[Mapping[str, Any], str], None] | None = None,
                wealth_start: int = 0) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
-    #: 不改变账单卡片接管表格的既有行为；理财 / 订阅卡片仅追随当前工作区最后一条回执。
+    #: 卡片挂在「哪一条回执」上，两类不同（见下）：推荐挂最近一次，订阅挂最后一条。
     recent_reply = next((i for i in range(len(messages) - 1, wealth_start - 1, -1)
                          if messages[i].get('role') == 'assistant' and messages[i].get('turn')), -1)
     recent_intent = (messages[recent_reply]['turn'].get('intent') if recent_reply >= 0 else None)
-    recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
+    #: 订阅卡片仍只在「最后一条业务回执确为订阅列表」时画：卡上的按钮是**取消**，
+    #: 后续操作后还留着，用户可能误以为它作用于当前结果。
     recent_subs = (recent_reply if recent_intent in ('subscription_list', 'subscription_remind')
                    else -1)
+    #: 推荐卡片默认同样挂最后一条；**例外**：「全部产品」是推荐卡上那个按钮点进来的下钻视图，
+    #: 这时必须保留上一条推荐卡 —— 否则用户回头看，K 线和区间图例整块消失了（用户反馈的 bug）。
+    recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
+    if recent_wealth < 0 and recent_intent == 'wealth_all_products':
+        recent_wealth = next((i for i in range(recent_reply - 1, wealth_start - 1, -1)
+                              if messages[i].get('role') == 'assistant'
+                              and (messages[i].get('turn') or {}).get('intent') == 'wealth_recommend'),
+                             -1)
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
         if (message["role"] == "assistant" and turn.get("intent") == "card_query"
@@ -96,12 +78,9 @@ def transcript(messages: Sequence[Mapping[str, Any]],
             if not drawn:
                 if message["role"] == "assistant":
                     key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
-                    #: 卡片会把这批数画成「走势图 + 逐笔明细表」→ 气泡里只留头句（不留重复的表格）。
-                    text = (_head_only(message["text"]) if _ledger_card_follows(
-                        turn or {}, is_last=index == len(messages) - 1) else message["text"])
-                    if not spending_pie.render_reply(text, turn or {}, key=key,
+                    if not spending_pie.render_reply(message["text"], turn or {}, key=key,
                             animate=index == len(messages) - 1, detail_loader=bill_details):
-                        reply_animation.render(text, key, animate=index == len(messages) - 1)
+                        reply_animation.render(message["text"], key, animate=index == len(messages) - 1)
                 else:
                     st.markdown(message["text"])
             if turn is not None:

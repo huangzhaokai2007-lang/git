@@ -394,10 +394,15 @@ def classify(text: str, history: list[str] | None = None) -> IntentOut:
     本函数不判权限、不判业务、不改写 LLM 给出的 confidence；只把槽位取值归一到工具层认的枚举
     （`normalize_output`，卡 16b）。
     """
-    #: 推荐卡上的固定入口只读目录查询，不交给模型误判为推荐。
+    #: 推荐卡上的「查看全部产品」是固定文案：确定性映射到只读目录意图。
+    #: 不让模型把它误判成 wealth_recommend；实际查询仍经编排层及工具层。
     if re.fullmatch(r'看看全部理财产品(?:\n（当前日期：\d{4}-\d{2}-\d{2}）)?',
                     str(text).strip()):
         return IntentOut(intent='wealth_all_products', confidence=1.0, slots={})
+    #: 快捷场景「推荐理财」同理：固定文案直接定意图，模型不可用时按钮也不会点了没反应。
+    if re.fullmatch(r'推荐理财产品(?:\n（当前日期：\d{4}-\d{2}-\d{2}）)?',
+                    str(text).strip()):
+        return IntentOut(intent='wealth_recommend', confidence=1.0, slots={})
     system, user = build_messages(text, history)
     for attempt in (1, 2):
         try:
