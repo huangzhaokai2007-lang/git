@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Callable, Mapping
 import html
 
@@ -24,6 +25,8 @@ import streamlit as st
 
 #: 网格列数：2 列 → 4 只产品正好排成四象限；超过 4 只继续往下排。
 _COLUMNS = 2
+#: 默认展示的产品数：14 只全铺开会刷满好几屏，先给 4 张（正好两行），其余折叠。
+_PREVIEW_COUNT = 4
 
 
 def latest_recommendation(turns: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
@@ -51,11 +54,42 @@ def _num(text: object) -> float:
 
 def _kline_spec(candles: list[Mapping[str, Any]]):
     """构建月 K 的 Altair 图表对象（不渲染）—— 拆出来是为了能单测它的结构。"""
+    return _kline_spec_cached(_candle_signature(candles))
+
+
+def _candle_signature(candles: list[Mapping[str, Any]] | list[list]) -> tuple:
+    """把 K 线压成可哈希签名（缓存键）。兼容两种形状：
+
+    - 月 K 来自推荐 facts：`{"period": ..., "open": ...}`（可读优先）
+    - 日 K 来自 `product_daily`：`[日期, 开, 高, 低, 收]`（省 45% 体积）
+    """
+    signature = []
+    for row in candles:
+        if isinstance(row, (list, tuple)):
+            period, open_, high, low, close = row
+        else:
+            period = row["period"]
+            open_, high, low, close = row["open"], row["high"], row["low"], row["close"]
+        signature.append((str(period), int(open_), int(high), int(low), int(close)))
+    return tuple(signature)
+
+
+@lru_cache(maxsize=128)
+def _kline_spec_cached(signature: tuple):
+    """Altair 建图每张约 100ms；14 张展开后每次 rerun 都要重算，所以按签名缓存。
+
+    缓存键是**数据本身**，不是产品 id —— 换产品/换参数自然失效，不会拿到旧图。
+    """
     import altair as alt
     import pandas as pd
 
+    candles = [{"period": p, "open": o, "high": h, "low": low, "close": c}
+               for p, o, h, low, c in signature]
+    #: 周期可能是 `YYYY-MM`（月 K）或 `YYYY-MM-DD`（日 K），补齐成完整日期再解析。
+    dates = [p if len(p) == 10 else f"{p}-01" for p in (row["period"] for row in candles)]
+    daily = len(signature[0][0]) == 10
     frame = pd.DataFrame({
-        "date": pd.to_datetime([f"{row['period']}-01" for row in candles]),
+        "date": pd.to_datetime(dates, format="%Y-%m-%d"),
         "o": [int(row["open"]) / 100 for row in candles],
         "h": [int(row["high"]) / 100 for row in candles],
         "l": [int(row["low"]) / 100 for row in candles],
@@ -63,13 +97,15 @@ def _kline_spec(candles: list[Mapping[str, Any]]):
     })
     base = alt.Chart(frame).encode(
         x=alt.X("date:T", title=None,
-                axis=alt.Axis(format="%Y-%m", labelAngle=-45, tickCount=6)))
+                axis=alt.Axis(format="%m-%d" if daily else "%Y-%m",
+                              labelAngle=-45, tickCount=6)))
     wick = base.mark_rule(color="#94a3b8", strokeWidth=1).encode(
         y=alt.Y("l:Q", title="净值", scale=alt.Scale(zero=False)), y2="h:Q")
-    body = base.mark_bar(size=7).encode(
+    #: 日 K 一根只有几个像素，柱体要细；月 K 可以粗一些。
+    body = base.mark_bar(size=3 if daily else 7).encode(
         y="o:Q", y2="c:Q",
         color=alt.condition("datum.c >= datum.o", alt.value("#22c55e"), alt.value("#ef4444")),
-        tooltip=[alt.Tooltip("date:T", format="%Y-%m", title="月份"),
+        tooltip=[alt.Tooltip("date:T", format="%Y-%m-%d" if daily else "%Y-%m", title="日期"),
                  alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
                  alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
     #: `interactive()` = 滚轮缩放 + 拖拽平移；用户明确要求「可以放大」。
@@ -85,7 +121,8 @@ def _kline(candles: list[Mapping[str, Any]]) -> None:
     st.altair_chart(_kline_spec(candles), width="stretch")
 
 
-def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str, readonly: bool = False) -> None:
+def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
+          daily_loader: Callable[[str], Mapping[str, Any]] | None = None, readonly: bool = False) -> None:
     """一只产品一张卡：名称 → 月 K → 区间数字 → 金额 + 订购。"""
     pid = str(item.get("product_id"))
     floor = max(int(_num(item.get("min_amount_yuan"))), 1)
@@ -108,6 +145,23 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             f"<span style='color:#ef4444;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
             f"<span style='color:#22c55e;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
             "</div>", unsafe_allow_html=True)
+
+        #: 日 K **按需拉取**：日线一个产品就 120 行，14 只全塞进推荐 facts 会多出 150 KB，
+        #: 所以点开哪只才取哪只（约 5 KB，走 `agent/wealth_daily.load`）。
+        if daily_loader is not None:
+            daily_key = f"{key_prefix}-daily-{pid}"
+            loaded = st.session_state.get(daily_key)
+            if st.button("收起日 K" if loaded else "📅 日 K（近半年 · 可缩放）",
+                         key=f"{key_prefix}-dbtn-{pid}", width="stretch"):
+                if loaded:
+                    st.session_state.pop(daily_key, None)
+                else:
+                    result = daily_loader(pid)
+                    st.session_state[daily_key] = result if result.get("ok") else None
+                st.rerun()
+            if loaded:
+                _kline(loaded.get("candles") or [])
+                st.markdown("**滚轮缩放 · 拖拽平移**，可以放大看某一段的日线。")
 
         #: 点开图例看历年表现。数字全部来自 facts（工具层按产品 id 确定性生成，见 `_product_history`），
         #: 界面只排版；标题里必须写明「模拟」——数据集没有真实净值。
@@ -139,7 +193,8 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
 
 
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
-                key_prefix: str = "wealth", readonly: bool = False) -> None:
+                key_prefix: str = "wealth",
+                daily_loader: Callable[[str], Mapping[str, Any]] | None = None, readonly: bool = False) -> None:
     """紧贴成功的推荐回执，渲染四象限入口及每款产品的订购按钮。"""
     if turn.get('intent') != 'wealth_recommend':
         return
@@ -162,11 +217,22 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     #: 查看全部产品必须走编排层的公开目录查询，不把超风险等级的产品伪装成推荐。
     if st.button('查看全部产品 →', key=f'{key_prefix}-all', width='stretch', type='primary', disabled=readonly):
         ask('看看全部理财产品')
-    for start in range(0, len(items), _COLUMNS):
+
+    #: 默认只铺前 `PREVIEW_COUNT` 张卡（14 张会刷满好几屏），其余折叠在按钮后面。
+    expanded_key = f'{key_prefix}-expanded'
+    expanded = bool(st.session_state.get(expanded_key))
+    shown = items if expanded else items[:_PREVIEW_COUNT]
+    for start in range(0, len(shown), _COLUMNS):
         cols = st.columns(_COLUMNS)
-        for col, item in zip(cols, items[start:start + _COLUMNS]):
+        for col, item in zip(cols, shown[start:start + _COLUMNS]):
             with col:
-                _card(item, ask=ask, key_prefix=key_prefix, readonly=readonly)
+                _card(item, ask=ask, key_prefix=key_prefix, daily_loader=daily_loader, readonly=readonly)
+    if len(items) > _PREVIEW_COUNT:
+        label = (f'收起，只看前 {_PREVIEW_COUNT} 只' if expanded
+                 else f'展开其余 {len(items) - _PREVIEW_COUNT} 只产品')
+        if st.button(label, key=f'{key_prefix}-toggle', width='stretch'):
+            st.session_state[expanded_key] = not expanded
+            st.rerun()
 
 
 def render(turns: list[Mapping[str, Any]], *, ask: Callable[[str], None],

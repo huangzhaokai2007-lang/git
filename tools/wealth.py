@@ -40,6 +40,7 @@ from tools._query_common import (
 )
 from tools._wealth_risk import (             # noqa: F401 —— assess_risk/recommend_wealth/_ASSESSMENTS 为 re-export
     _ASSESSMENTS, _rank, _yield_text, RISK_DESC, RISK_LABELS, assess_risk, recommend_wealth,
+    product_daily,
     require_assessment,
 )
 from tools.wealth_holdings import list_all_products, list_holdings   # noqa: F401 —— T26/T27 re-export

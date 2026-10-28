@@ -4,7 +4,7 @@ from copy import deepcopy
 
 import streamlit as st
 
-from agent import scene_flow, bill_detail_flow, subscription_notice
+from agent import scene_flow, bill_detail_flow, subscription_notice, wealth_daily
 import agent.view_navigation as view_navigation
 from interfaces.web import wealth_ui
 import interfaces.web.subscription_ui as subscription_ui
@@ -160,13 +160,15 @@ def result(executor, session: str, ask, detail_loader) -> None:
         return
     elif scene == 'wealth_recommend':
         if (turn.get('facts') or {}).get('items'):
-            wealth_ui.render_turn(turn, ask=ask, key_prefix='workspace-wealth-' + str(turn.get('trace_id')))
+            wealth_ui.render_turn(turn, ask=ask, key_prefix='workspace-wealth-' + str(turn.get('trace_id')),
+                daily_loader=lambda pid: executor.submit(wealth_daily.load, session, pid).result())
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
     elif scene == 'wealth_all_products':
         st.markdown(turn.get('reply') or '当前没有查询结果。')
         if source := st.session_state.get('workspace-wealth-source'):
-            wealth_ui.render_turn(source, ask=ask, key_prefix='workspace-wealth-' + str(source.get('trace_id')))
+            wealth_ui.render_turn(source, ask=ask, key_prefix='workspace-wealth-' + str(source.get('trace_id')),
+                daily_loader=lambda pid: executor.submit(wealth_daily.load, session, pid).result())
     elif (scene in ('subscription_list', 'subscription_remind')
           and (turn.get('facts') or {}).get('status', 'active') == 'active'
           and ((turn.get('facts') or {}).get('items') or (turn.get('facts') or {}).get('overdue_items'))):
