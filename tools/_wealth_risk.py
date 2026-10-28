@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from datetime import timedelta
 
@@ -54,6 +55,11 @@ RISK_DESC = {
 #: 来源：本 demo 的 RISK_DESC 文字分档（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
 #: R5「20% 以上」演示取 30%）。并非历史数据或可验证的最大收益/亏损，必须在界面显著标明。
 RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
+#: 历年表现的口径：最近三个完整年度（演示数据锚在 2026-09，故 2023–2025）。
+HISTORY_YEARS = (2023, 2024, 2025)
+#: 月 K 的口径：最近 24 个月（末月 = `AS_OF` 所在月），净值基点 10000 = 1.0000。
+CANDLE_MONTHS = 24
+_NAV_BASE = 10_000
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
@@ -181,6 +187,82 @@ def _rank(level: str) -> int:
     return RISK_LEVELS.index(level) + 1
 
 
+def _pct_facts(basis_points: int, name: str) -> dict:
+    """百分比进事实包：**整数基点**本体 + 展示形态（红线 2：facts 里不许出现 float）。
+
+    零值不带符号（`0.00%`），否则货基「年内最大回撤」会显示成 `+0.00%`，读着像涨了。
+    """
+    text = "0.00%" if basis_points == 0 else f"{basis_points / 100:+.2f}%"
+    return {name: basis_points, f"{name}_text": text}
+
+
+def _product_history(product_id: str, max_gain: float, max_loss: float) -> list[dict]:
+    """三年模拟表现：**同一个产品 id 永远得到同一组数字**（sha256 取种子，跨机器可复现）。
+
+    采样区间**就是卡片上那条区间**（`[max_loss, max_gain]`）—— 否则会出现
+    「卡片写 0.00~+2.10%，展开却看到 +2.31%」这种自相矛盾（实测踩过）。
+    回撤幅度同样不超过下沿。
+
+    为什么是模拟：演示数据集没有净值表，规格也未定义历史业绩。界面必须标明「模拟」。
+    将来若接真实净值，只换本函数实现，`facts.items[].history` 的形状不变。
+    """
+    span = max_gain - max_loss
+    rows: list[dict] = []
+    for year in HISTORY_YEARS:
+        digest = hashlib.sha256(f"{product_id}:{year}".encode()).digest()
+        r1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
+        r2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
+        ret = max_loss + span * r1
+        dd = -abs(max_loss) * (0.35 + 0.65 * r2)
+        rows.append({"year": year,
+                     **_pct_facts(round(ret * 100), "return"),
+                     **_pct_facts(round(dd * 100), "drawdown")})
+    return rows
+
+
+def _candle_period(offset: int) -> str:
+    """第 `offset` 个月（0 = 最早）的 `YYYY-MM`；末月 = `AS_OF` 所在月。"""
+    end = AS_OF.year * 12 + (AS_OF.month - 1)
+    total = end - (CANDLE_MONTHS - 1) + offset
+    return f"{total // 12:04d}-{total % 12 + 1:02d}"
+
+
+def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[dict]:
+    """最近 `CANDLE_MONTHS` 个月的模拟月 K（净值，整数基点；`10000` = 1.0000）。
+
+    同样按 `product_id + 月份` 取 sha256 种子 → 同一产品永远同一根 K 线。
+    净值被夹在 `[1+max_loss%, 1+max_gain%]` 之间，和卡片上那条区间保持一致；
+    单月波动按档位放大（R5 抖得比 R1 厉害），看起来才像真的净值曲线。
+    """
+    span = max(max_gain - max_loss, 1.0)
+    step = span / 24 * 0.9                       # 单月最大涨跌幅（百分点）
+    floor_nav = _NAV_BASE * (1 + max_loss / 100)
+    ceil_nav = _NAV_BASE * (1 + max_gain / 100)
+    #: 月漂移 = 年化收益 / 12（`yield = max_gain + max_loss`）。
+    #: **必须压在区间内**：货基年化 2.1%、窗口 24 个月本可涨 4.2%，但上沿只有 +2.1%，
+    #: 不封顶就会顶在天花板上一半的月份，画出来是条直线。取区间 60% 作上限。
+    yield_pct = max_gain + max_loss
+    drift = min(yield_pct / 12, max_gain * 0.6 / CANDLE_MONTHS) / 100
+    nav = float(_NAV_BASE)
+    rows: list[dict] = []
+    for offset in range(CANDLE_MONTHS):
+        period = _candle_period(offset)
+        digest = hashlib.sha256(f"{product_id}:k:{period}".encode()).digest()
+        u1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
+        u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
+        open_nav = nav
+        close_nav = max(floor_nav, min(ceil_nav,
+                                       open_nav * (1 + drift + (u1 * 2 - 1) * step / 100)))
+        wick = abs(u2 - 0.5) * step / 100 * open_nav
+        rows.append({"period": period,
+                     "open": round(open_nav),
+                     "high": round(max(open_nav, close_nav) + wick),
+                     "low": round(min(open_nav, close_nav) - wick),
+                     "close": round(close_nav)})
+        nav = close_nav
+    return rows
+
+
 def _range_text(pct: float) -> str:
     """百分比数值 → 带符号的两位小数字符串（如 `+38.50` / `-30.00` / `0.00`）。
 
@@ -298,6 +380,9 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     #: 演示区间：参考上沿 = 预期年化 + 演示波动值；下沿 = -演示波动值。
     #: 只进 facts（不进 data —— data 字段是冻结契约），渲染层据此展示。
     swings = {row["id"]: RISK_SWING.get(row["risk_level"], 0.0) for row in products}
+    #: 每只产品的盈亏区间（上沿, 下沿）：卡片图例与历年表现**共用同一个区间**，保证不打架。
+    bounds = {row["id"]: (row["expected_yield"] + swings[row["id"]], -swings[row["id"]])
+              for row in products}
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
     facts = {"risk_level": level, "risk_label": risk_label(level),
              "ceiling_rank": ceiling, "item_count": len(items),
@@ -307,14 +392,20 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                         "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),
+                        #: 历年表现（模拟）：区间与卡片图例**同源**，界面点开直接渲染，无需再调工具。
+                        "history": _product_history(item.product_id, *bounds[item.product_id]),
+                        #: 月 K（模拟）：只随推荐下发 —— 全部产品目录（T22）不带，避免 payload 翻几倍。
+                        "candles": _product_candles(item.product_id, *bounds[item.product_id]),
                         #: 买得起吗 —— 由工具层判定（铁律 1：编排层与界面不做业务算术）。
                         "affordable": (available is None or
                                        next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id) <= available),
-                        "max_gain_pct": _range_text(
-                            next(row["expected_yield"] for row in products
-                                 if row["id"] == item.product_id) + swings[item.product_id]),
-                        "max_loss_pct": _range_text(-swings[item.product_id])}
+                        "max_gain_pct": _range_text(bounds[item.product_id][0]),
+                        "max_loss_pct": _range_text(bounds[item.product_id][1]),
+                        #: 期限的月/年整数形态：渲染层会把 180 天说成「6 个月」、730 天说成「2 年」，
+                        #: 那两个数字必须能在 facts 里找到，否则数字校验器判成幻觉。
+                        "term_months": int(item.term) // 30,
+                        "term_years": int(item.term) // 365}
                        for item in items],
              "portfolio_max_gain_pct": _range_text(
                  max((row["expected_yield"] + swings[row["id"]]) for row in products)

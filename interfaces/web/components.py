@@ -81,6 +81,9 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                          if messages[i].get('role') == 'assistant' and messages[i].get('turn')), -1)
     recent_intent = (messages[recent_reply]['turn'].get('intent') if recent_reply >= 0 else None)
     recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
+    if recent_wealth < 0 and recent_intent == 'wealth_all_products':
+        recent_wealth = next((i for i in range(recent_reply - 1, wealth_start - 1, -1)
+            if (messages[i].get('turn') or {}).get('intent') == 'wealth_recommend'), -1)
     recent_subs = (recent_reply if recent_intent in ('subscription_list', 'subscription_remind')
                    else -1)
     insight_index = next((i for i in range(len(messages) - 1, -1, -1)

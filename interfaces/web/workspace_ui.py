@@ -50,6 +50,10 @@ def accept(turn: dict, prompt: str) -> None:
         return
     if turn.get('intent') in READS or turn.get('executed'):
         st.session_state.pop('workspace-return', None)
+    if turn.get('intent') == 'wealth_recommend' and (turn.get('facts') or {}).get('items'):
+        st.session_state['workspace-wealth-source'] = turn
+    elif turn.get('intent') not in ('wealth_all_products', 'wealth_recommend'):
+        st.session_state.pop('workspace-wealth-source', None)
     previous = st.session_state.get('workspace-result') or {}
     if previous and previous.get('scene') != family(turn):
         st.session_state.pop('workspace-shortcut', None)
@@ -58,7 +62,7 @@ def accept(turn: dict, prompt: str) -> None:
 
 def reset() -> None:
     for key in ('workspace-result', 'workspace-error', 'workspace-shortcut', 'active-scene',
-                'workspace-return', 'subs-banner-dismissed'):
+                'workspace-return', 'subs-banner-dismissed', 'workspace-wealth-source'):
         st.session_state.pop(key, None)
 
 
@@ -68,7 +72,8 @@ def remember_view(executor, session: str) -> None:
         return
     token = executor.submit(view_navigation.capture, session).result()
     if token:
-        keys = ['workspace-result', 'workspace-shortcut', 'cards-view', 'operation-records-open']
+        keys = ['workspace-result', 'workspace-shortcut', 'cards-view', 'operation-records-open',
+                'workspace-wealth-source']
         keys += [f'bound-{domain}-query' for domain in ('card', 'payee', 'schedule', 'aa', 'gift', 'lost')]
         st.session_state['workspace-return'] = {'token': token, 'state': deepcopy(
             {key: st.session_state[key] for key in keys if key in st.session_state})}
@@ -150,6 +155,10 @@ def result(executor, session: str, ask, detail_loader) -> None:
             wealth_ui.render_turn(turn, ask=ask, key_prefix='workspace-wealth-' + str(turn.get('trace_id')))
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
+    elif scene == 'wealth_all_products':
+        st.markdown(turn.get('reply') or '当前没有查询结果。')
+        if source := st.session_state.get('workspace-wealth-source'):
+            wealth_ui.render_turn(source, ask=ask, key_prefix='workspace-wealth-' + str(source.get('trace_id')))
     elif (scene in ('subscription_list', 'subscription_remind')
           and (turn.get('facts') or {}).get('status', 'active') == 'active'
           and ((turn.get('facts') or {}).get('items') or (turn.get('facts') or {}).get('overdue_items'))):

@@ -9,7 +9,7 @@ from tests.test_card_binding_ui import CARD, app, bind, click
 def offline(monkeypatch):
     routes = {'我买了哪些理财': ('wealth_holdings', {}),
               '我有哪些订阅': ('subscription_list', {}),
-              '看看还有哪些理财产品': ('wealth_all_products', {}),
+              '推荐理财产品': ('wealth_recommend', {}),
               '我的收款人有哪些': ('payee_list', {}),
               '给王五转 100 元': ('transfer_single', {'payee': '王五', 'amount': '100'}),
               '出一份上个月的账单报告': ('bill_report', {'period': '2026-08', 'kind': 'monthly'})}
@@ -27,7 +27,7 @@ def pies(at):
 
 @pytest.mark.parametrize(('label', 'intent'), [
     ('我的理财', 'wealth_holdings'), ('管订阅', 'subscription_list'),
-    ('全部产品', 'wealth_all_products'), ('收款人', 'payee_list'),
+    ('推荐理财', 'wealth_recommend'), ('收款人', 'payee_list'),
     ('转账', 'transfer_single'), ('看账单', 'bill_report'),
     ('调整额度', 'card_limit_adjust'), ('挂失补卡', 'card_report_lost')])
 def test_shortcut_closes_card_workspace_and_opens_selected_scene(monkeypatch, seeded, label, intent):
@@ -45,7 +45,7 @@ def test_shortcut_closes_card_workspace_and_opens_selected_scene(monkeypatch, se
     assert not any(button.label in ('绑定银行卡', '关闭详情') for button in at.button)
     assert at.session_state['messages'][:len(messages)] == messages
     assert at.session_state['messages'][-1]['turn']['intent'] == intent
-    if label == '全部产品':
+    if label == '推荐理财':
         assert at.session_state['messages'][-1]['turn']['error_code'] == 'INVALID_STATE'
         assert '风险测评' in at.session_state['messages'][-1]['text']
     else:
