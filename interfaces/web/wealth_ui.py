@@ -1,17 +1,18 @@
-"""理财推荐卡片（F11）：2×2 网格 + 盈亏区间图 + 订购按钮。
+"""理财推荐卡片（F11）：2×2 网格 + 月 K 图 + 订购按钮。
 
 用户需求：
 - 「每个理财产品下方可以有一个图表来展示盈亏范围」
 - 「四个理财产品的位置就像四象限」
 - 「产品名称底下有盈亏范围的图标」
 - 「加上一个按钮，按了之后可以直接展示出所有产品」
+- 「改成股票那种 K 线的感觉，而且可以放大」（2026-10-28）
 
 **按钮只做一件事**：把「买 X 元 Y」交给编排层（`ask`）。
 申购的槽位校验、风险等级匹配、余额校验、确认卡、扣款全部在编排层与工具层完成 ——
 **界面不碰业务、不算钱、不绕过确认**。
 
-**盈亏区间图用 HTML/CSS 画**（不引图表库）：以 0 为轴，左侧红色 = 最大亏损，
-右侧绿色 = 最高收益，两段宽度按比例分配。数字全部来自 `facts`，界面只做排版。
+**月 K 用 Altair 画**（Streamlit 自带依赖，不新增库）：`mark_rule` 画影线、`mark_bar` 画实体，
+`interactive()` 给滚轮缩放与拖拽平移。OHLC 全部来自 `facts`（整数基点，界面只除以 100 展示）。
 """
 
 from __future__ import annotations
@@ -48,33 +49,40 @@ def _num(text: object) -> float:
         return 0.0
 
 
-def _range_chart(gain: float, loss: float) -> str:
-    """盈亏区间条：0 为轴，左红（亏）右绿（赚），宽度按比例。
+def _kline(candles: list[Mapping[str, Any]]) -> None:
+    """月 K 图：阳线绿、阴线红，滚轮缩放 + 拖拽平移。
 
-    两端都为 0（R1 货基）时画一条中性灰线，避免除零。
+    `candles` 来自 facts（整数基点，10000 = 净值 1.0000），这里只除以 100 变成「元」。
+    用 Altair 而不是 plotly：altair 是 Streamlit 自带依赖，不新增第三方库。
     """
-    total = abs(gain) + abs(loss)
-    if total <= 0:
-        return ('<div style="height:10px;border-radius:5px;background:#cbd5e1;'
-                'margin:6px 0 2px;"></div>')
-    left = abs(loss) / total * 100
-    right = abs(gain) / total * 100
-    return (
-        '<div style="display:flex;align-items:center;height:12px;margin:6px 0 2px;">'
-        f'<div style="width:{left:.1f}%;height:10px;background:#ef4444;'
-        'border-radius:5px 0 0 5px;"></div>'
-        '<div style="width:2px;height:16px;background:#64748b;flex:none;"></div>'
-        f'<div style="width:{right:.1f}%;height:10px;background:#22c55e;'
-        'border-radius:0 5px 5px 0;"></div>'
-        '</div>'
-    )
+    import altair as alt
+    import pandas as pd
+
+    frame = pd.DataFrame({
+        "date": pd.to_datetime([f"{row['period']}-01" for row in candles]),
+        "o": [int(row["open"]) / 100 for row in candles],
+        "h": [int(row["high"]) / 100 for row in candles],
+        "l": [int(row["low"]) / 100 for row in candles],
+        "c": [int(row["close"]) / 100 for row in candles],
+    })
+    base = alt.Chart(frame).encode(
+        x=alt.X("date:T", title=None,
+                axis=alt.Axis(format="%Y-%m", labelAngle=-45, tickCount=6)))
+    wick = base.mark_rule(color="#94a3b8", strokeWidth=1).encode(
+        y=alt.Y("l:Q", title="净值", scale=alt.Scale(zero=False)), y2="h:Q")
+    body = base.mark_bar(size=7).encode(
+        y="o:Q", y2="c:Q",
+        color=alt.condition("datum.c >= datum.o", alt.value("#22c55e"), alt.value("#ef4444")),
+        tooltip=[alt.Tooltip("date:T", format="%Y-%m", title="月份"),
+                 alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
+                 alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
+    #: `interactive()` = 滚轮缩放 + 拖拽平移；用户明确要求「可以放大」。
+    st.altair_chart((wick + body).properties(height=200).interactive(), width="stretch")
 
 
 def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str) -> None:
-    """一只产品一张卡：名称 → 盈亏区间图 → 图标数字 → 金额 + 订购。"""
+    """一只产品一张卡：名称 → 月 K → 区间数字 → 金额 + 订购。"""
     pid = str(item.get("product_id"))
-    gain = _num(item.get("max_gain_pct"))
-    loss = _num(item.get("max_loss_pct"))
     floor = max(int(_num(item.get("min_amount_yuan"))), 1)
 
     with st.container(border=True):
@@ -85,10 +93,13 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
                     f"预期年化 {item.get('yield')} · 期限 {item.get('term')} 天 · "
                     f"起购 {item.get('min_amount_yuan')} 元")
 
-        #: 盈亏区间图 + 两端的图标数字（用户要求「名称底下有盈亏范围的图标」）
-        st.markdown(_range_chart(gain, loss), unsafe_allow_html=True)
+        #: 月 K 图（替代原来的红绿区间条）：可缩放、可拖拽。
+        candles = item.get("candles") or []
+        if candles:
+            _kline(candles)
+        #: 区间文字保留：K 线看的是走势，这两个数字说清「最坏 / 最好能到什么程度」。
         st.markdown(
-            "<div style='display:flex;justify-content:space-between;font-size:.82rem;'>"
+            "<div style='display:flex;justify-content:space-between;font-size:.8rem;'>"
             f"<span style='color:#ef4444;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
             f"<span style='color:#22c55e;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
             "</div>", unsafe_allow_html=True)

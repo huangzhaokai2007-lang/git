@@ -18,7 +18,7 @@ def _reply(facts, *, error_code=None, intent='wealth_recommend'):
 def test_four_cards_below_recommendation_and_buttons_work(seeded: Path):
     wealth.assess_risk(BALANCED)
     result = wealth.recommend_wealth('R3')
-    assert result.ok and len(result.facts['items']) == 4
+    assert result.ok and len(result.facts['items']) == 8
     actions = []
 
     def page(turn, actions):
@@ -29,7 +29,7 @@ def test_four_cards_below_recommendation_and_buttons_work(seeded: Path):
 
     at = AppTest.from_function(page, args=(_reply(result.facts), actions), default_timeout=30).run()
     assert not at.exception
-    assert [b.label for b in at.button].count('订购') == 4
+    assert [b.label for b in at.button].count('订购') == 8
     assert [b.label for b in at.button].count('查看全部产品 →') == 1
     assert len(at.columns) >= 2
     next(b for b in at.button if b.label == '查看全部产品 →').click().run()
@@ -52,8 +52,8 @@ def test_app_renders_buy_buttons_after_recommendation(monkeypatch, seeded: Path)
     assert not at.exception
     turn = at.session_state['turns'][-1]['turn']
     assert turn['intent'] == 'wealth_recommend' and not turn['error_code']
-    assert len(turn['facts']['items']) == 6
-    assert sum(button.label == '订购' for button in at.button) == 6
+    assert len(turn['facts']['items']) == 14
+    assert sum(button.label == '订购' for button in at.button) == 14
     assert any(button.label == '查看全部产品 →' for button in at.button)
     assert any('模拟参考区间' in message['text'] for message in at.session_state['messages'])
 
@@ -76,7 +76,7 @@ def test_view_all_routes_to_catalog_when_llm_offline(monkeypatch, seeded: Path):
     assert first.intent == 'wealth_recommend' and not first.error_code
     turn = orchestrator.handle('看看全部理财产品', session_id='wealth-catalog-ui')
     assert turn.intent == 'wealth_all_products' and not turn.error_code
-    assert turn.facts['total_count'] == 6
+    assert turn.facts['total_count'] == 14
 
 
 def test_buttons_absent_for_failed_or_stale_recommendation(seeded: Path):
@@ -96,7 +96,7 @@ def test_buttons_absent_for_failed_or_stale_recommendation(seeded: Path):
     at = AppTest.from_function(page, args=(failed, None), default_timeout=30).run()
     assert not at.exception
     assert not any(button.label == '订购' for button in at.button)
-    later = _reply({}, intent='wealth_all_products')
+    later = _reply({}, intent='balance_query')
     at = AppTest.from_function(page, args=(_reply(facts), later), default_timeout=30).run()
     assert not at.exception
     assert not any(button.label in ('订购', '查看全部产品 →') for button in at.button)

@@ -64,6 +64,23 @@ def test_history_stays_within_the_range_shown_on_the_card(seeded: Path) -> None:
             assert row["drawdown"] / 100 >= lo, (item["name"], row)
 
 
+def test_monthly_candles_are_deterministic_and_well_formed(seeded: Path) -> None:
+    """月 K：24 根、末月 = 数据锚点所在月、OHLC 关系成立、净值落在卡片区间内。"""
+    for item in _items():
+        candles = item["candles"]
+        assert len(candles) == 24
+        assert candles[-1]["period"] == "2026-09"           # 与 data.seed.AS_OF 同月
+        lo = float(item["max_loss_pct"].rstrip("%").lstrip("+")) / 100
+        hi = float(item["max_gain_pct"].rstrip("%").lstrip("+")) / 100
+        for row in candles:
+            assert row["low"] <= min(row["open"], row["close"])
+            assert row["high"] >= max(row["open"], row["close"])
+            assert 10000 * (1 + lo) - 1 <= row["close"] <= 10000 * (1 + hi) + 1
+    again = {item["product_id"]: item["candles"] for item in _items()}
+    first = {item["product_id"]: item["candles"] for item in _items()}
+    assert again == first
+
+
 def test_card_expander_renders_the_history_rows() -> None:
     item = {"product_id": "p1", "name": "成长精选三年期", "risk_label": "高风险",
             "yield": "8.50%", "term": 1095, "min_amount": 10_000_000,
