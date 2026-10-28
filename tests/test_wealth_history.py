@@ -31,7 +31,10 @@ def test_history_covers_three_years_with_int_basis_points(seeded: Path) -> None:
         assert [row["year"] for row in history] == [2023, 2024, 2025]
         for row in history:
             assert isinstance(row["return"], int) and isinstance(row["drawdown"], int)
-            assert row["return_text"].endswith("%") and row["drawdown_text"].startswith("-")
+            assert row["return_text"].endswith("%") and row["drawdown"] <= 0
+            assert row["drawdown_text"].endswith("%")
+            if row["drawdown"] == 0:
+                assert row["drawdown_text"] == "0.00%"     # 零回撤不许显示成 +0.00%
 
 
 def test_history_is_deterministic_across_calls(seeded: Path) -> None:
@@ -45,6 +48,20 @@ def test_higher_risk_means_deeper_drawdown(seeded: Path) -> None:
         return min(row["drawdown"] for item in _items(level) for row in item["history"])
 
     assert worst("R1") > worst("R3") > worst("R5")
+
+
+def test_history_stays_within_the_range_shown_on_the_card(seeded: Path) -> None:
+    """历年数字必须落在卡片图例那条区间里。
+
+    踩过的坑：历史区间按档位硬编码、卡片区间用 `expected_yield ± RISK_SWING`，两边各算各的，
+    结果货基卡片写 `0.00 ~ +2.10%`、展开却看到 `+2.31%` —— 自己打自己脸。
+    """
+    for item in _items():
+        lo = float(item["max_loss_pct"].rstrip("%").lstrip("+"))
+        hi = float(item["max_gain_pct"].rstrip("%").lstrip("+"))
+        for row in item["history"]:
+            assert lo <= row["return"] / 100 <= hi, (item["name"], row)
+            assert row["drawdown"] / 100 >= lo, (item["name"], row)
 
 
 def test_card_expander_renders_the_history_rows() -> None:
