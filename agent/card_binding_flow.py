@@ -1,6 +1,7 @@
 """界面专用的模拟卡片入口；凭证直接交给工具，不经过分类器。"""
 from __future__ import annotations
 
+import re
 import uuid
 
 from agent import card_request_language, classifier
@@ -12,6 +13,11 @@ from tools.schemas import ToolResult
 STATUS_LABELS = {"normal": "正常", "locked": "已锁定", "lost": "已挂失", "frozen": "已冻结"}
 TYPE_LABELS = {"savings": "储蓄卡", "credit": "信用卡"}
 BINDING_PROMPT = "请在绑卡表单中输入预设模拟卡号及对应的银行卡密码，验证后确认绑定。"
+#: 「取消{商户}订阅」——订阅卡按钮的固定文案；`这个/那个` 留给场景上下文按候选解析。
+_CANCEL_SUB = re.compile(r"取消(.{1,40}?)订阅")
+_NOT_A_MERCHANT = frozenset({"这个", "那个", "该", "这", "那"})
+#: 理财卡上「开始风险测评」按钮的固定文案 —— 直接定意图，免得模型不可用时按钮点了没反应。
+_ASSESS_TEXTS = frozenset({"做风险测评", "开始风险测评", "风险测评"})
 
 
 def owner_key() -> str:
@@ -106,6 +112,16 @@ def _resolve_intent(text: str, history: list[str] | None) -> classifier.IntentOu
     """仅完整匹配明确查询指令；含写操作或其它条件的表达仍交由原分类器。"""
     if card_request_language.recognize(text):
         return classifier.IntentOut(intent="card_query", confidence=1.0, slots={})
+    #: 订阅卡上的「取消订阅」按钮是**界面固定句式**（`interfaces/web/subscription_ui.py`）：
+    #: 这里直接定意图，避免模型把商户名吞掉；商户名仍由写流程按真实订阅名匹配，认不出就追问。
+    #: 放在界面入口而不是通用分类器 —— 用户自己说「取消云音乐订阅」时，仍应走模型的语义判断。
+    cancel = _CANCEL_SUB.fullmatch(str(text).split("\n", 1)[0].strip())
+    if cancel and cancel[1] not in _NOT_A_MERCHANT:
+        return classifier.IntentOut(intent="subscription_cancel", confidence=1.0,
+                                    slots={"merchant": cancel[1]})
+    #: 理财卡的「开始风险测评」同理：固定文案直接定意图（L0 只读，界面据 intent 弹问卷）。
+    if str(text).split("\n", 1)[0].strip() in _ASSESS_TEXTS:
+        return classifier.IntentOut(intent="risk_assess", confidence=1.0, slots={})
     return classifier.classify(text, history)
 
 

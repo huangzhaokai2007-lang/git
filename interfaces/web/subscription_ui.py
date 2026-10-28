@@ -1,0 +1,103 @@
+"""订阅卡（F18 补全）：列表与提醒的每一行都直接给「取消订阅」按钮。
+
+**按钮只做一件事**：把「取消 X 订阅」交给编排层（`ask`）。
+商户名 → 订阅 id 的解析、风险提示、L2 确认卡、审计全部在 `agent/` 与 `tools/` 完成 ——
+界面不查库、不判断能不能取消、不绕过确认。
+
+只对 `active` 的订阅给按钮：查已取消 / 已暂停的列表是**只读记录**，再给一个「取消」按钮
+只会让人以为还能取消第二次。
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Mapping
+
+import streamlit as st
+
+#: 能取消的状态。其余状态只展示、不给按钮。
+CANCELLABLE = "active"
+
+#: 两行布局的列宽：信息左、按钮右（用户要求「产品的旁边加上取消订阅的按钮」）。
+_INFO, _ACTION = (3.6, 1.1)
+
+
+def _sid(item: Mapping[str, Any]) -> str:
+    """订阅 id：列表用 `id`，提醒用 `subscription_id`（两套 facts 的键名不同）。"""
+    return str(item.get("id") or item.get("subscription_id") or "")
+
+
+def _detail(item: Mapping[str, Any], *, reminder: bool, overdue: bool) -> str:
+    """一行说明（金额 / 周期 / 扣费时间），数字全部照抄 facts，界面不做换算。"""
+    amount = f"{item.get('amount_yuan')} 元"
+    cycle = item.get("cycle_cn") or item.get("cycle") or ""
+    head = f"{amount}／{cycle}" if cycle else amount
+    if overdue:
+        when = f"原定 {item.get('next_charge_date')} 扣费（{item.get('overdue_cn')}）"
+    elif reminder:
+        when = f"{item.get('days_cn')}（{item.get('next_charge_date')}）"
+    else:
+        when = f"下次扣费 {item.get('next_charge_date')}"
+        if item.get("days_overdue"):                 # 列表页也要标出来，别只在提醒里说
+            when += f"（{item.get('overdue_cn')}）"
+    return f"{head} · {when}"
+
+
+def _row(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
+         reminder: bool, overdue: bool = False) -> None:
+    """一行订阅：商户与明细在左，取消按钮在右。"""
+    merchant = str(item.get("merchant") or "")
+    with st.container(border=True):
+        info, action = st.columns([_INFO, _ACTION], vertical_alignment="center")
+        with info:
+            st.markdown(f"**{merchant}**")
+            #: 聊天气泡的全局样式会隐藏 `st.caption`，关键信息必须用普通 Markdown。
+            st.markdown(_detail(item, reminder=reminder, overdue=overdue))
+        with action:
+            if st.button("取消订阅", key=f"{key_prefix}-cancel-{_sid(item)}", width="stretch"):
+                ask(f"取消{merchant}订阅")
+
+
+def banner(summary: Mapping[str, Any], *, ask: Callable[[str], None]) -> None:
+    """常驻提醒条：只要还有到期/逾期订阅就一直在，点「查看订阅」进列表。
+
+    与回执里的「首次提醒」互补：那个只出现一次（去重），这条每帧都在 ——
+    所以用户在任何场景下都不会"错过"。
+    """
+    if not summary:
+        return
+    parts: list[str] = []
+    if summary.get("overdue"):
+        parts.append(f"{summary['overdue']} 个订阅的扣费日已过"
+                     f"（合计 {summary.get('overdue_total_amount_yuan')} 元）")
+    if summary.get("due"):
+        parts.append(f"{summary['due']} 个订阅将在 {summary.get('within_days')} 天内扣费"
+                     f"（合计 {summary.get('total_amount_yuan')} 元）")
+    with st.container(border=True):
+        info, action = st.columns([3.8, 1.0], vertical_alignment="center")
+        with info:
+            st.markdown("**订阅提醒** · " + "；".join(parts))
+        with action:
+            if st.button("查看订阅", key="subs-banner-open", width="stretch"):
+                ask("我有哪些订阅")
+
+
+def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
+                key_prefix: str = "subs") -> None:
+    """紧贴订阅列表 / 订阅提醒回执，逐行渲染「取消订阅」入口。"""
+    intent = turn.get("intent")
+    if intent not in ("subscription_list", "subscription_remind") or turn.get("error_code"):
+        return
+    facts = turn.get("facts") or {}
+    items = facts.get("items") or []
+    overdue = facts.get("overdue_items") or []
+    if not items and not overdue:
+        return
+    if intent == "subscription_list" and str(facts.get("status") or "active") != CANCELLABLE:
+        return                                   # 已取消 / 已暂停：只读记录，不给按钮
+    st.markdown("#### 订阅管理 · 可直接取消")
+    st.markdown("点「取消订阅」会走正常流程：确认卡 → 确认后才生效。")
+    #: 逾期项排前面（扣费日已过，更需要处理）；它们同样是 active，可以取消。
+    for item in overdue:
+        _row(item, ask=ask, key_prefix=key_prefix, reminder=True, overdue=True)
+    for item in items:
+        _row(item, ask=ask, key_prefix=key_prefix, reminder=intent == "subscription_remind")

@@ -62,6 +62,7 @@ def _ledger_card_follows(turn: Mapping[str, Any], *, is_last: bool) -> bool:
             and not turn.get("ask") and not turn.get("error_code")
             and bool((turn.get("facts") or {}).get("items")))
 
+
 def _esc(value: object) -> str:
     """HTML 转义（用户输入与回执都可能带尖括号）。"""
     return html.escape("" if value is None else str(value))
@@ -82,8 +83,27 @@ def sim_banner() -> None:
 def transcript(messages: Sequence[Mapping[str, Any]],
                *, payee_card: Callable[[str], bool] | None = None,
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
-               bill_details: Callable[[dict, str], dict] | None = None) -> None:
+               bill_details: Callable[[dict, str], dict] | None = None,
+               wealth_card: Callable[[Mapping[str, Any], str], None] | None = None,
+               subscription_card: Callable[[Mapping[str, Any], str], None] | None = None,
+               wealth_start: int = 0) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
+    #: 卡片挂在「哪一条回执」上，两类不同（见下）：推荐挂最近一次，订阅挂最后一条。
+    recent_reply = next((i for i in range(len(messages) - 1, wealth_start - 1, -1)
+                         if messages[i].get('role') == 'assistant' and messages[i].get('turn')), -1)
+    recent_intent = (messages[recent_reply]['turn'].get('intent') if recent_reply >= 0 else None)
+    #: 订阅卡片仍只在「最后一条业务回执确为订阅列表」时画：卡上的按钮是**取消**，
+    #: 后续操作后还留着，用户可能误以为它作用于当前结果。
+    recent_subs = (recent_reply if recent_intent in ('subscription_list', 'subscription_remind')
+                   else -1)
+    #: 推荐卡片默认同样挂最后一条；**例外**：「全部产品」是推荐卡上那个按钮点进来的下钻视图，
+    #: 这时必须保留上一条推荐卡 —— 否则用户回头看，K 线和区间图例整块消失了（用户反馈的 bug）。
+    recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
+    if recent_wealth < 0 and recent_intent == 'wealth_all_products':
+        recent_wealth = next((i for i in range(recent_reply - 1, wealth_start - 1, -1)
+                              if messages[i].get('role') == 'assistant'
+                              and (messages[i].get('turn') or {}).get('intent') == 'wealth_recommend'),
+                             -1)
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
         if (message["role"] == "assistant" and turn.get("intent") == "card_query"
@@ -100,6 +120,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                 if message["role"] == "assistant":
                     key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
                     #: 卡片会把这批数画成「走势图 + 逐笔明细表」→ 气泡里只留头句（不留重复的表格）。
+                    #: 2026-10-28 合入 main 时这里被改成印全量回执（main 侧删掉了 `_head_only`），
+                    #: 本分支的验收口径是「卡片接管表格，气泡不再铺一遍」，故恢复裁剪。
                     text = (_head_only(message["text"]) if _ledger_card_follows(
                         turn or {}, is_last=index == len(messages) - 1) else message["text"])
                     if not spending_pie.render_reply(text, turn or {}, key=key,
@@ -111,6 +133,10 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                 with st.container(key=f"chat-audit-{index}"):
                     st.caption(f"trace_id `{turn['trace_id']}` · 意图 `{turn['intent']}` · "
                                f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
+                if wealth_card is not None and index == recent_wealth and message['role'] == 'assistant':
+                    wealth_card(turn, f"wealth-{index}")
+                if subscription_card is not None and index == recent_subs and message['role'] == 'assistant':
+                    subscription_card(turn, f"subs-{index}")
                 if insight_card is not None and message["role"] == "assistant" and index == len(messages) - 1:
                     insight_card(turn, f"insight-{index}")
 

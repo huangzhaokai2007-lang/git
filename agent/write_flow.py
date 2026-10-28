@@ -8,7 +8,7 @@ from typing import Any, Callable, Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-from agent import card_draft, confirm_card, payee_picker, templates, write_intents
+from agent import card_draft, confirm_card, payee_picker, pending_slots, templates, write_intents
 from guard import permission
 
 logger = logging.getLogger(__name__)
@@ -310,6 +310,8 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
         absent = [label for label in dict.fromkeys(labels) if label not in shaped.clarify]
         if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
             ask = f"{shaped.clarify}\n请补充：{'、'.join(absent)}。"
+        #: 2026-10-27：登记「还差什么」，让用户下一句短答能**续接补槽**（不再被当新意图）。
+        pending_slots.remember(session_id, intent, dict(slots), list(shaped.missing))
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
     filled = shaped.filled

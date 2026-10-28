@@ -20,6 +20,7 @@ os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境�
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
 from agent import balance_flow, bill_detail_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
+from agent import subscription_notice, wealth_daily                                            # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -34,8 +35,11 @@ import payee_picker_ui                                          # noqa: E402  �
 import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
 import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
-import activity_ui                                              # noqa: E402  （main：活动流）
+import activity_ui
+import wealth_ui                                              # noqa: E402  （main：活动流）
+import subscription_ui                                          # noqa: E402  （F18：订阅行内取消）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
+import slot_form_ui                                             # noqa: E402  （缺槽填表卡）
 
 load_dotenv(ROOT / ".env")
 
@@ -254,9 +258,21 @@ def _sidebar() -> None:
 
 def _chat_page() -> None:
     messages = st.session_state["messages"]
+    #: 常驻提醒条：每帧只读概览（不消耗「首次提醒」的去重集合），任何场景都能看到。
+    subscription_ui.banner(
+        _agent_executor().submit(subscription_notice.summary,
+                                 st.session_state["session_id"]).result(),
+        ask=_follow_up)
     ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card,
                   bill_details=lambda source, category: _agent_executor().submit(
-                      bill_detail_flow.load, st.session_state['session_id'], source, category).result())
+                      bill_detail_flow.load, st.session_state['session_id'], source, category).result(),
+                  wealth_card=lambda turn, key: wealth_ui.render_turn(
+                      turn, ask=_follow_up, key_prefix=key,
+                      daily_loader=lambda pid: _agent_executor().submit(
+                          wealth_daily.load, st.session_state["session_id"], pid).result()),
+                  subscription_card=lambda turn, key: subscription_ui.render_turn(
+                      turn, ask=_follow_up, key_prefix=key),
+                  wealth_start=st.session_state.get('workspace-start', 0))
     import scene_ui
     scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
     _bill_charts()
@@ -282,6 +298,8 @@ def _chat_page() -> None:
         aa_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-gift-query"):                  # F20：送礼查询卡 + 支付/取消
         gift_card_ui.render(_agent_executor(), st.session_state["session_id"])
+    #: 缺槽 → 直接弹「填表卡」（比打字快；文字补槽仍然可用）。
+    slot_form_ui.render(_agent_executor(), st.session_state["session_id"])
     #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
     #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
     _render_confirm()

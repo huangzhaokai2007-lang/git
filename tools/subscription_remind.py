@@ -28,6 +28,7 @@ from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_user_id,
 )
 from tools.schemas import ErrorCode, ToolResult
+from tools.subscription import CYCLE_LABELS, overdue_cn
 
 TOOL = "list_due_subscriptions"
 INTENT = "subscription_remind"
@@ -59,6 +60,11 @@ def list_due_subscriptions(within_days: int = DEFAULT_WITHIN_DAYS) -> ToolResult
 
     `data` = `items[{subscription_id,merchant,cycle,next_charge_date,days_left,amount}]`
     + `due_count` / `within_days` / `total_amount`（金额单位为分，与 T10 一致）。
+
+    **过期项单独放 facts**（`overdue_items` / `overdue_count`）：`status='active'` 但扣费日
+    早于 AS_OF 的订阅，说明「该扣的没扣成」—— 可能是扣款失败或漏扣。它**不进 `items`**
+    （那不是"将要扣费"，天天算进去就是噪音），但也不能像以前那样静默丢掉：用户永远
+    不知道有一条 active 订阅已经逾期。
     """
     if (bad := _invalid(ListDueSubscriptionsReq, within_days=within_days)) is not None:
         return bad
@@ -73,24 +79,42 @@ def list_due_subscriptions(within_days: int = DEFAULT_WITHIN_DAYS) -> ToolResult
         return _dao_reject(exc)
 
     end = AS_OF + timedelta(days=within_days)
-    items = []
+    items, overdue = [], []
     for sub in subs:
         day = date.fromisoformat(sub["next_charge_date"])
-        if not (AS_OF <= day <= end):                 # 闭区间；早于 AS_OF 的过期项不算
+        if day < AS_OF:                               # 扣费日已过：单独归到「逾期」
+            overdue.append({"subscription_id": sub["id"], "merchant": sub["merchant"],
+                            "cycle": sub["cycle"], "next_charge_date": sub["next_charge_date"],
+                            "days_overdue": (AS_OF - day).days, "amount": sub["amount"]})
+            continue
+        if day > end:                                 # 窗外：既不是待扣，也不是逾期
             continue
         items.append({"subscription_id": sub["id"], "merchant": sub["merchant"],
                       "cycle": sub["cycle"], "next_charge_date": sub["next_charge_date"],
                       "days_left": (day - AS_OF).days, "amount": sub["amount"]})
     items.sort(key=lambda item: (item["days_left"], item["merchant"]))
+    overdue.sort(key=lambda item: (-item["days_overdue"], item["merchant"]))
 
     total = sum(item["amount"] for item in items)
+    overdue_total = sum(item["amount"] for item in overdue)
     facts = {"items": [{**item, "days_cn": days_cn(item["days_left"]),
+                        "cycle_cn": CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"])),
                         **_money_facts(item["amount"], "amount")} for item in items],
              "due_count": len(items), "within_days": within_days,
-             **_money_facts(total, "total_amount")}
+             **_money_facts(total, "total_amount"),
+             "overdue_items": [{**item, "overdue_cn": overdue_cn(item["days_overdue"]),
+                                "cycle_cn": CYCLE_LABELS.get(str(item["cycle"]), str(item["cycle"])),
+                                **_money_facts(item["amount"], "amount")} for item in overdue],
+             "overdue_count": len(overdue),
+             **_money_facts(overdue_total, "overdue_total_amount")}
     data = {"items": items, "due_count": len(items), "within_days": within_days,
             "total_amount": total}
     if not items:
-        return _ok(data, facts, f"未来 {within_days} 天内没有要扣费的订阅。")
-    return _ok(data, facts, f"未来 {within_days} 天内有 {len(items)} 个订阅要扣费，"
-                            f"合计 {facts['total_amount_yuan']} 元。")
+        message = f"未来 {within_days} 天内没有要扣费的订阅。"
+    else:
+        message = (f"未来 {within_days} 天内有 {len(items)} 个订阅要扣费，"
+                   f"合计 {facts['total_amount_yuan']} 元。")
+    if overdue:
+        message += (f"另有 {len(overdue)} 个订阅的扣费日已经过去（合计 "
+                    f"{facts['overdue_total_amount_yuan']} 元），可能是扣款失败或漏扣，建议核对。")
+    return _ok(data, facts, message)

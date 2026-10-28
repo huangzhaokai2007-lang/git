@@ -28,6 +28,7 @@ from tools import wealth
 from tools.schemas import ErrorCode
 
 from tests.conftest import assert_covered
+from tests.test_tools_wealth_risk import AGGRESSIVE
 
 SESSION = "sess-f11"
 BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
@@ -114,7 +115,12 @@ def test_receipt_lists_every_product_with_all_four_fields(
 def test_receipt_says_recommend_because_the_script_pins_the_word(
         seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """**回归**：回执必须含「推荐」二字 —— `tests/cases/orchestrator.yaml` 的 wlt-001/wlt-002/
-    sec-005 都有 `must_contain: 推荐`，改成「筛选出」等同义词会让剧本验收失败。"""
+    sec-005 都有 `must_contain: 推荐`，改成「筛选出」等同义词会让剧本验收失败。
+
+    2026-10-28：快捷按钮「推荐理财」的文案 `推荐理财产品` 改走**确定性路由**（模型不可用时
+    按钮也要有反应），不再经过 LLM 抽槽，所以这里先做测评、由测评结果决定推荐范围。
+    """
+    wealth.assess_risk(BALANCED)
     fake_llm(monkeypatch, [out("wealth_recommend", slots={"risk_level": "R1"})])
     turn = orchestrator.handle("推荐理财产品")
     assert "推荐" in turn.reply
@@ -123,6 +129,8 @@ def test_receipt_says_recommend_because_the_script_pins_the_word(
 def test_receipt_reports_the_correct_product_count(
         seeded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """汇总句里的个数 == 明细行数（不许只报个数不报明细，反之亦然）。"""
+    orchestrator.submit_assessment({"age": 50, **{key: 4 for key in BALANCED if key != "age"}},
+                                   session_id=SESSION)
     fake_llm(monkeypatch, [out("wealth_recommend", slots={"risk_level": "R5"})])
     turn = orchestrator.handle("推荐 R5 理财")
     head = turn.reply.splitlines()[0]
@@ -191,3 +199,205 @@ def test_render_wealth_raises_on_missing_facts_key() -> None:
         render_lists.render_wealth({"items": [{"name": "x", "risk_level": "R1",
                                                "yield": "1.00%", "term": 0}]})
     assert render_lists.TemplateError is __import__("agent.templates", fromlist=["x"]).TemplateError
+
+
+def test_recommendation_cards_appear_below_reply_with_buy_and_all_buttons(seeded: Path) -> None:
+    """回归真实问题：卡片要在推荐回执下面，而不是聊天末尾的独立区块。"""
+    from streamlit.testing.v1 import AppTest
+    from interfaces.web import components, wealth_ui
+
+    wealth.assess_risk(BALANCED)
+    recommendation = wealth.recommend_wealth('R3')
+    assert recommendation.ok and len(recommendation.facts['items']) == 8
+    received = []
+    turn = {'trace_id': 'wealth-test', 'intent': 'wealth_recommend', 'error_code': None,
+            'reply': recommendation.message, 'facts': recommendation.facts,
+            'states': ['REPLY'], 'tier': 'L0'}
+
+    def page(turn, received):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': turn['reply'], 'turn': turn}],
+                              wealth_card=lambda result, key: wealth_ui.render_turn(
+                                  result, ask=received.append, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn, received), default_timeout=30).run()
+    assert not at.exception
+    assert [b.label for b in at.button].count('订购') == 4
+    assert [b.label for b in at.button].count('查看全部产品 →') == 1
+    assert len(at.columns) >= 2
+    next(b for b in at.button if b.label == '查看全部产品 →').click().run()
+    assert received == ['看看全部理财产品']
+    next(b for b in at.button if b.label == '订购').click().run()
+    assert received[-1].startswith('买 ')
+
+
+def test_web_app_recommendation_renders_buttons_in_real_chat(monkeypatch, seeded: Path) -> None:
+    """真正运行 app.py，用户发送推荐请求后，每只产品下方都有订购入口。"""
+    from streamlit.testing.v1 import AppTest
+    from agent import classifier, llm
+
+    monkeypatch.setenv('DB_PATH', str(seeded))
+    monkeypatch.setattr(classifier, 'classify', lambda text, history=None:
+                        classifier.IntentOut(intent='wealth_recommend', confidence=1,
+                                             slots={'risk_level': '高风险'}))
+    monkeypatch.setattr(llm, 'chat_json', lambda *args, **kwargs:
+                        (_ for _ in ()).throw(llm.LLMUnavailable('offline')))
+    path = Path(__file__).resolve().parents[1] / 'interfaces/web/app.py'
+    at = AppTest.from_file(str(path), default_timeout=60).run()
+    assert not at.exception
+    at.chat_input[0].set_value('推荐高风险理财').run()
+    assert not at.exception
+    turn = at.session_state['turns'][-1]['turn']
+    assert turn['intent'] == 'wealth_recommend' and not turn['error_code']
+    assert len(turn['facts']['items']) == 14
+    assert sum(b.label == '订购' for b in at.button) == 4
+    assert any(b.label == '查看全部产品 →' for b in at.button)
+    assert any('模拟参考区间' in m['text'] for m in at.session_state['messages'])
+
+
+def test_recommendation_disclaimer_survives_polishing(seeded: Path, monkeypatch) -> None:
+    """结构化推荐禁止被 LLM 润色成「保证最高收益」等误导性文字。"""
+    from agent import templates
+    monkeypatch.setattr(templates, 'polish', lambda *_: '保证最高收益')
+    result = wealth.recommend_wealth('R3')
+    reply, degraded, calls = templates.compose_reply('wealth_recommend', {}, result)
+    assert '模拟参考区间' in reply and '非历史极值或收益承诺' in reply
+    assert not degraded and calls == 0
+
+
+def test_all_products_button_prompt_uses_catalog_even_if_llm_is_offline(monkeypatch, seeded: Path) -> None:
+    from agent import classifier, llm
+
+    monkeypatch.setattr(llm, 'chat_json', lambda *args, **kwargs:
+                        (_ for _ in ()).throw(llm.LLMUnavailable('offline')))
+    classified = classifier.classify('看看全部理财产品')
+    assert classified.intent == 'wealth_all_products'
+    wealth.assess_risk(BALANCED)
+    previous = orchestrator.handle('推荐理财', session_id='f11-all-products-button',
+                                   intent_resolver=lambda *_: classifier.IntentOut(
+                                       intent='wealth_recommend', confidence=1.0, slots={}))
+    assert previous.intent == 'wealth_recommend' and not previous.error_code
+    result = orchestrator.handle('看看全部理财产品', session_id='f11-all-products-button')
+    assert result.intent == 'wealth_all_products' and not result.error_code
+    assert result.facts['total_count'] == 14
+
+
+def test_recommendation_shows_four_cards_and_can_expand_the_rest(seeded: Path) -> None:
+    """默认只铺 4 张卡（14 张会刷满好几屏），其余折叠在「展开其余 N 只」后面。"""
+    from streamlit.testing.v1 import AppTest
+    from interfaces.web import components, wealth_ui
+
+    wealth.assess_risk(AGGRESSIVE)
+    recommendation = wealth.recommend_wealth('R5')
+    assert len(recommendation.facts['items']) == 14
+    turn = {'trace_id': 'expand', 'intent': 'wealth_recommend', 'error_code': None,
+            'facts': recommendation.facts, 'states': ['REPLY'], 'tier': 'L0'}
+
+    def page(turn):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '推荐', 'turn': turn}],
+                              wealth_card=lambda shown, key: wealth_ui.render_turn(
+                                  shown, ask=lambda _: None, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn,), default_timeout=60).run()
+    assert not at.exception
+    assert sum(b.label == '订购' for b in at.button) == 4
+    toggle = next(b for b in at.button if b.label.startswith('展开其余'))
+    assert '10' in toggle.label                      # 14 - 4
+    toggle.click().run()
+    assert sum(b.label == '订购' for b in at.button) == 14
+    assert any(b.label.startswith('收起') for b in at.button)
+
+
+def test_recommendation_cards_survive_the_all_products_drilldown(seeded: Path) -> None:
+    """点「查看全部产品」之后，上一条推荐卡（K 线 + 区间图例 + 订购）必须还在。
+
+    用户反馈的原话：「在全部理财产品的页面，推荐的那几个产品的图例会消失」。
+    根因是卡片只挂「最后一条回执」，而全部产品页的最后一条是 `wealth_all_products`。
+    """
+    from streamlit.testing.v1 import AppTest
+    wealth.assess_risk(BALANCED)
+    result = wealth.recommend_wealth('R1')
+    turn = {'trace_id': 'old', 'intent': 'wealth_recommend', 'error_code': None,
+            'facts': result.facts, 'states': ['REPLY'], 'tier': 'L0'}
+    later = {'trace_id': 'new', 'intent': 'wealth_all_products', 'error_code': None,
+             'facts': {}, 'states': ['REPLY'], 'tier': 'L0'}
+
+    def page(old, new):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '推荐', 'turn': old},
+                               {'role': 'assistant', 'text': '全部产品', 'turn': new}],
+                              wealth_card=lambda shown, key: wealth_ui.render_turn(
+                                  shown, ask=lambda _: None, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn, later), default_timeout=30).run()
+    assert not at.exception
+    assert any(b.label == '订购' for b in at.button)          # 卡片还在
+    assert any('参考下沿' in m.value for m in at.markdown)     # 区间图例还在
+
+
+def test_old_recommendation_buttons_disappear_after_other_replies(seeded: Path) -> None:
+    """除「全部产品」外的后续回执，仍不能让旧推荐留着可点击的订购按钮。"""
+    from streamlit.testing.v1 import AppTest
+    wealth.assess_risk(BALANCED)
+    result = wealth.recommend_wealth('R1')
+    turn = {'trace_id': 'old', 'intent': 'wealth_recommend', 'error_code': None,
+            'facts': result.facts, 'states': ['REPLY'], 'tier': 'L0'}
+    later = {'trace_id': 'new', 'intent': 'balance_query', 'error_code': None,
+             'facts': {}, 'states': ['REPLY'], 'tier': 'L0'}
+
+    def page(old, new):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '推荐', 'turn': old},
+                               {'role': 'assistant', 'text': '查余额', 'turn': new}],
+                              wealth_card=lambda shown, key: wealth_ui.render_turn(
+                                  shown, ask=lambda _: None, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn, later), default_timeout=30).run()
+    assert not at.exception
+    assert not any(b.label in ('订购', '查看全部产品 →') for b in at.button)
+
+
+def test_unassessed_recommendation_offers_a_questionnaire_button() -> None:
+    """未测评时不能只回一句报错 —— 要在推荐回执下面直接给「开始风险测评」。"""
+    from streamlit.testing.v1 import AppTest
+    turn = {'trace_id': 'need-assess', 'intent': 'wealth_recommend',
+            'error_code': 'INVALID_STATE', 'facts': {}, 'states': ['REPLY'], 'tier': 'L0'}
+    actions: list[str] = []
+
+    def page(turn, actions):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '尚未完成风险评估', 'turn': turn}],
+                              wealth_card=lambda shown, key: wealth_ui.render_turn(
+                                  shown, ask=actions.append, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn, actions), default_timeout=30).run()
+    assert not at.exception
+    assert any("先做一次风险测评" in m.value for m in at.markdown)
+    next(b for b in at.button if b.label == "开始风险测评").click().run()
+    assert actions == ["做风险测评"]
+
+
+def test_assess_button_phrase_routes_without_the_model() -> None:
+    """按钮文案是固定句式：模型不可用也必须能进问卷（否则按钮点了没反应）。"""
+    from agent import card_binding_flow
+
+    out = card_binding_flow._resolve_intent("做风险测评\n（当前日期：2026-09-12）", None)
+    assert out.intent == "risk_assess" and out.confidence == 1.0
+
+
+def test_recommendation_cards_do_not_render_for_failed_or_empty_turns() -> None:
+    from streamlit.testing.v1 import AppTest
+    from interfaces.web import components, wealth_ui
+
+    def page():
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '未查到', 'turn': {
+            'trace_id': 'failed', 'intent': 'wealth_recommend', 'error_code': 'INVALID_STATE',
+            'facts': {}, 'states': ['REPLY'], 'tier': 'L0'}}],
+            wealth_card=lambda result, key: wealth_ui.render_turn(result, ask=lambda _: None,
+                                                                     key_prefix=key))
+
+    at = AppTest.from_function(page, default_timeout=30).run()
+    assert not at.exception
+    assert not any(b.label in ('订购', '查看全部产品 →') for b in at.button)

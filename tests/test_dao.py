@@ -124,9 +124,9 @@ def test_get_subscription_and_update_subscription_cancel(seeded: Path) -> None:
 
 def test_list_and_get_products(seeded: Path) -> None:
     every = dao.list_products()
-    assert every == raw(seeded, "SELECT * FROM wealth_product ORDER BY min_amount, id") and len(every) == 6
+    assert every == raw(seeded, "SELECT * FROM wealth_product ORDER BY min_amount, id") and len(every) == 14
     assert [p["min_amount"] for p in every] == sorted(p["min_amount"] for p in every)
-    assert {p["risk_level"] for p in dao.list_products("R2")} == {"R2"} and len(dao.list_products("R2")) == 2
+    assert {p["risk_level"] for p in dao.list_products("R2")} == {"R2"} and len(dao.list_products("R2")) == 3
     assert dao.get_product("prod_r3_mixed365")["risk_level"] == "R3"
 
 
