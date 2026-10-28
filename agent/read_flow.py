@@ -27,9 +27,23 @@ REQUIRED_SLOTS: dict[str, tuple[str, ...]] = {"txn_query": RANGE_FIELDS,
                                              "risk_assess": ("answers",)}
 
 
-def fill_period_slot(filled: dict) -> None:
-    """period 槽位：**没给** → 锚点当月（卡 09 口径，未变）；**给了但认不出** → 清掉（→ CLARIFY）。"""
+#: 没给时间就**必须追问**的分析意图（2026-10-27 验收口径）。
+#: 异常分析是"这段时间账目有没有问题"，**范围本身就是结论的一部分** —— 悄悄按锚点当月算，
+#: 用户会以为查的是全部历史，而报告里只有本月几笔（实机就是这样被误解的）。
+#: 账单分析/账单总结不在其中：说「花了多少」时默认本月是用户能接受的惯例。
+PERIOD_MUST_BE_STATED = ("anomaly_check",)
+
+
+def fill_period_slot(filled: dict, intent: str = "") -> None:
+    """period 槽位：**没给** → 锚点当月（卡 09 口径，未变）；**给了但认不出** → 清掉（→ CLARIFY）。
+
+    `PERIOD_MUST_BE_STATED` 里的意图例外：没给时**不默认**，留空 → 被 `REQUIRED_SLOTS`
+    判成缺失 → 编排层追问时间段。
+    """
     raw = filled.get("period")
+    if raw in (None, "") and intent in PERIOD_MUST_BE_STATED:
+        filled.pop("period", None)
+        return
     resolved = anchor_period() if raw in (None, "") else resolve_period(raw)
     if resolved is None:
         filled.pop("period", None)
@@ -60,7 +74,7 @@ def fill_slots(intent: str, slots: Mapping) -> tuple[dict, list[str]]:
     """代码补齐时间槽位（+ F10 的问卷答案），然后算缺失项（缺 → CLARIFY）。"""
     filled = {key: value for key, value in slots.items() if value not in (None, "")}
     if intent in PERIOD_INTENTS:
-        fill_period_slot(filled)
+        fill_period_slot(filled, intent)
     if intent == "txn_query":
         for field, edge in (("date_from", "start"), ("date_to", "end")):
             resolved = resolve_day(filled.get(field), edge=edge)

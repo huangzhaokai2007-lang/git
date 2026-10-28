@@ -30,7 +30,7 @@ from typing import Any, Callable, Mapping, Sequence
 
 import streamlit as st
 from agent.render_query import TXN_STATUS_LABELS      # 交易状态改名表（agent 层单一出处，界面不另抄一份）
-from interfaces.web import chart_ui, txn_card_ui
+from interfaces.web import anomaly_card_ui, chart_ui, txn_card_ui
 
 #: 有富卡片的意图（其余意图一律不画 —— 宁可朴素，也不许拿半截数据凑图）。
 INSIGHT_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report")
@@ -110,20 +110,12 @@ def _draw_spending(facts: Mapping[str, Any]) -> None:
 
 
 def _draw_anomalies(facts: Mapping[str, Any]) -> None:
-    """F03：异常检测 —— 扫描/命中两个指标 + 命中清单（笔数取自 facts，界面不数）。"""
-    left, right = st.columns(2)
-    left.metric("扫描笔数", str(facts.get("scanned_count") or "—"))
-    right.metric("命中可疑笔数", str(facts.get("anomaly_count") or "—"))
-    items = list(facts.get("items") or [])
-    if not items:
-        return
-    rows = [{"时间": str(item.get("ts"))[:16].replace("T", " "),
-             "交易对手": item.get("counterparty") or "—",
-             "金额（元）": item.get("amount_yuan"),
-             "等级": item.get("severity"),
-             "依据": item.get("reason")}
-            for item in items]
-    st.dataframe(rows, hide_index=True, width="stretch")
+    """F03：异常检测 —— 交给 `anomaly_card_ui` 画**依据分布图 + 自适应结论 + 命中清单**。
+
+    2026-10-27 二次改动：卡片升级成「有结论、有分布」后本文件会撞 300 行红线，
+    故按 `txn_card_ui` 的先例整体迁出；这里只做一行转发，调用点与页面桩全部不变。
+    """
+    anomaly_card_ui.render(facts, key="anomaly")
 
 
 def _draw_report(facts: Mapping[str, Any]) -> None:
@@ -214,8 +206,12 @@ def render(turn: Mapping[str, Any], *, key: str, on_ask: Callable[[str], None]) 
         st.caption(CARD_MARK)
         _DRAWERS[intent](facts)
         st.markdown("**接着问：**")
-        columns = st.columns(len(FOLLOW_UPS[intent]))
-        for index, (label, prompt) in enumerate(FOLLOW_UPS[intent]):
+        #: 异常卡的追问按钮**跟着用户刚问的时间段走**（其余意图是固定三问）：
+        #: 问完四月的异常，按钮点下去查的还是四月，不会跳回「上个月」。
+        prompts = (anomaly_card_ui.follow_ups(facts) if intent == "anomaly_check"
+                   else FOLLOW_UPS[intent])
+        columns = st.columns(len(prompts))
+        for index, (label, prompt) in enumerate(prompts):
             if columns[index].button(label, key=f"{key}-ask-{index}", width="stretch"):
                 on_ask(prompt)
         _export(turn, intent, facts, key)

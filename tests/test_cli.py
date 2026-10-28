@@ -38,11 +38,33 @@ def test_offline_verdict_maps_keywords_to_intents(text: str, intent: str) -> Non
 @pytest.mark.parametrize(("text", "period"), [
     ("帮我看看上个月花了多少", "上个月"),
     ("这个月花了多少", "这个月"),
-    ("看看消费", "本月"),                      # 没给时间词 → 本月（归一化仍归 agent/period.py）
+    ("看看消费", "本月"),                      # 账单分析没给时间词 → 本月（惯例，2026-10-27 未改）
 ])
 def test_offline_verdict_fills_the_period_slot(text: str, period: str) -> None:
     """分析类意图要带 `period` 槽位（替身只"抽词"，归一化与缺省口径仍由 `agent/period.py` 决定）。"""
     assert cli.offline_verdict(text)[1] == {"period": period}
+
+
+@pytest.mark.parametrize("text", ["有没有异常交易", "异常分析", "帮我看看有没有异常"])
+def test_anomaly_check_without_a_period_asks_instead_of_defaulting(text: str) -> None:
+    """异常分析**没说时间段 → 槽位留空**，由编排层追问（2026-10-27 验收口径）。
+
+    以前替身会给 `{"period": "本月"}`，于是「有没有异常」被静默答成本月的那几笔，
+    用户以为查的是全部历史。时间范围是异常结论的一部分，必须问清再答。
+    """
+    assert cli.offline_verdict(text) == ("anomaly_check", {})
+    assert cli.period_is_stated(text) is False
+
+
+@pytest.mark.parametrize(("text", "period"), [
+    ("四月份有什么异常", "2026-04"),
+    ("上个月有没有异常交易", "上个月"),
+    ("2026年的异常", "2026"),
+    ("本月有异常吗", "本月"),
+])
+def test_anomaly_check_keeps_the_period_the_user_actually_said(text: str, period: str) -> None:
+    """只要用户说了时间（显式月份 / 相对词 / 整年 / 本月），就照填 —— 追问只在真的没说时发生。"""
+    assert cli.offline_verdict(text) == ("anomaly_check", {"period": period})
 
 
 def test_offline_verdict_asks_when_nothing_matches() -> None:

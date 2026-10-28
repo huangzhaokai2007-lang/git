@@ -40,16 +40,25 @@ TREND_HEIGHT = 240
 #: 明细表的滚动高度：区间动辄几十笔，表格自身滚，页面不被撑爆。
 TABLE_MAX_HEIGHT = 620
 
+#: 每个分类**先列几笔**（其余折叠）：一屏能扫到十几个分类的花钱去向，又不至于一打开全是字。
+GROUP_PREVIEW = 3
+
+#: 每个分类一块一张表，列宽靠这串 `<colgroup>` 对齐（表头单独一张 sticky 表，块与块之间不串列）。
+_COLS = ('<colgroup><col style="width:13%"><col style="width:17%"><col style="width:21%">'
+         '<col style="width:11%"><col style="width:10%"><col style="width:14%">'
+         '<col style="width:14%"></colgroup>')
+
 _STYLE = """
 <style>
 .txn-wrap {border:1px solid #262c3d; border-radius:14px; background:#0e1120;
            padding:4px 6px; max-height:__H__px; overflow:auto;}
-.txn-tbl {width:100%; border-collapse:collapse; font-size:13.5px; line-height:1.45;}
+.txn-tbl {width:100%; border-collapse:collapse; table-layout:fixed;
+          font-size:13.5px; line-height:1.45;}
 .txn-tbl thead th {position:sticky; top:0; background:#12162a; color:#8b93a7; z-index:1;
                    font-size:11.5px; letter-spacing:.08em; text-align:left;
                    padding:10px 12px; border-bottom:1px solid #262c3d; white-space:nowrap;}
 .txn-tbl tbody td {padding:10px 12px; border-bottom:1px solid #1a1f30; white-space:nowrap;
-                   color:#dde3f0;}
+                   color:#dde3f0; overflow:hidden; text-overflow:ellipsis;}
 .txn-tbl tbody tr:nth-child(even) td {background:#101426;}
 .txn-tbl tbody tr:hover td {background:#1c2440;}
 .txn-bar {display:flex; align-items:center; justify-content:space-between; gap:12px;
@@ -68,6 +77,27 @@ _STYLE = """
 .txn-out {color:#f0f2f8; font-variant-numeric:tabular-nums;}
 .txn-bal {color:#8b93a7; font-variant-numeric:tabular-nums;}
 .txn-tbl td.num, .txn-tbl th.num {text-align:right;}
+.txn-tbl-head {position:sticky; top:0; z-index:3; background:#0e1120;}
+.txn-grp {margin:0 0 6px;}
+.txn-grp-head {display:flex; align-items:baseline; justify-content:space-between; gap:10px;
+               padding:11px 12px 7px; border-top:1px solid #1a1f30;}
+.txn-grp:first-of-type .txn-grp-head {border-top:none;}
+.txn-grp-name {font-size:12.5px; font-weight:700; color:#e6ebf7; letter-spacing:.03em;}
+.txn-grp-name::before {content:""; display:inline-block; width:3px; height:11px; margin-right:7px;
+                       border-radius:2px; background:#4f7cff;}
+.txn-grp-meta {font-size:11.5px; color:#7c86a2; font-variant-numeric:tabular-nums;
+               white-space:nowrap;}
+.txn-more summary {cursor:pointer; list-style:none; display:inline-flex; align-items:center;
+                   gap:6px; margin:6px 0 0 12px; padding:5px 12px; border-radius:999px;
+                   border:1px solid #2b3557; background:#141a2e; color:#8fa3ff;
+                   font-size:11.5px; user-select:none;}
+.txn-more summary::-webkit-details-marker {display:none;}
+.txn-more summary:hover {background:#1b2440; border-color:#3a4670; color:#a9b8ff;}
+.txn-more summary::before {content:"▸"; font-size:10px;}
+.txn-more[open] summary::before {content:"▾";}
+.txn-more .when-open {display:none;}
+.txn-more[open] .when-open {display:inline;}
+.txn-more[open] .when-shut {display:none;}
 </style>
 """.replace("__H__", str(TABLE_MAX_HEIGHT))
 
@@ -122,24 +152,78 @@ def _trend(facts: Mapping[str, Any]) -> None:
                    height=TREND_HEIGHT)
 
 
-def _ledger(facts: Mapping[str, Any]) -> None:
-    """高级明细表：`items` 一笔不少、一列不编 —— 流水号与交易状态是这版的主体。
+def _group_meta(facts: Mapping[str, Any]) -> dict[str, str]:
+    """分类 → 组头那句「N 笔 · 支出 X 元」：数字**全查** facts 的 `categories`（工具层算好的）。
 
-    表头栏只写**笔数**（`returned_count`，facts 原值）和一个"滚动查看"的提示：
-    几十笔流水全铺开，没有这句用户会以为又只列了一部分。
+    界面一个数都不自己加 —— 组头跟卡片别处用的是同一份数，不会出现两处对不上。
+    """
+    return {str(group.get("key") or "其他"):
+            f'{group.get("count")} 笔 · 支出 {group.get("amount_yuan") or "—"} 元'
+            for group in facts.get("categories") or []}
+
+
+def _buckets(items: list[Mapping[str, Any]], meta: Mapping[str, str]) -> list[tuple[str, list]]:
+    """按分类装桶 → `[(分类, [item, ...])]`。
+
+    分类顺序：**支出降序**（`categories` 的次序，花钱多的分类在前面）；纯收入分类不在
+    `categories` 里（口径只统计支出），按其在 `items` 里首次出现的次序跟在后面。
+    组**内**的笔序照抄 `items`，一笔不重排 —— 排序是工具层的活。
+    """
+    buckets: dict[str, list] = {}
+    order: list[str] = []
+    for item in items:
+        key = str(item.get("category") or "其他")
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(item)
+    ranked = [key for key in meta if key in buckets]
+    return [(key, buckets[key]) for key in ranked + [k for k in order if k not in meta]]
+
+
+def _group(key: str, rows: list, note: str) -> str:
+    """一个分类一块：组头（分类名 + 笔数/支出）+ 前 `GROUP_PREVIEW` 笔 + 折叠起来的其余笔。
+
+    折叠用原生 `<details>`：Streamlit 的 `st.expander` 会在每类之间插一个空白容器，
+    几十个分类下来页面被撑成一根长条，而且它算"组件" —— 二次验收删的就是那一块。
+    """
+    shown = "".join(_row(item) for item in rows[:GROUP_PREVIEW])
+    rest = rows[GROUP_PREVIEW:]
+    more = ""
+    if rest:
+        body = "".join(_row(item) for item in rest)
+        more = (f'<details class="txn-more"><summary>'
+                f'<span class="when-shut">展开其余 {len(rest)} 笔</span>'
+                f'<span class="when-open">收起其余 {len(rest)} 笔</span></summary>'
+                f'<table class="txn-tbl">{_COLS}<tbody>{body}</tbody></table></details>')
+    return (f'<div class="txn-grp"><div class="txn-grp-head">'
+            f'<span class="txn-grp-name">{escape(key)}</span>'
+            f'<span class="txn-grp-meta">{escape(note)}</span></div>'
+            f'<table class="txn-tbl">{_COLS}<tbody>{shown}</tbody></table>{more}</div>')
+
+
+def _ledger(facts: Mapping[str, Any]) -> None:
+    """高级明细表：按**分类分组**，每类先列 3 笔、其余可展开 —— 流水号与交易状态是这版的主体。
+
+    表头栏写**笔数**（`returned_count`，facts 原值）加一句"每类先列 3 笔，其余点开看"：
+    上次验收的槽点就是"只列一部分还没处点"，这回把"剩下的在哪"写在明面上。
     """
     items = list(facts.get("items") or [])
     count = facts.get("returned_count") or len(items)
     head = ("<tr><th>时间</th><th>流水号</th><th>交易对手</th><th>分类</th>"
             "<th>交易状态</th><th class=\"num\">金额（元）</th>"
             "<th class=\"num\">交易后余额（元）</th></tr>")
-    body = "".join(_row(item) for item in items)
+    meta = _group_meta(facts)
+    blocks = "".join(_group(key, rows, meta.get(key) or f"{len(rows)} 笔")
+                     for key, rows in _buckets(items, meta))
     bar = (f'<div class="txn-bar"><h4>逐笔明细</h4>'
-           f'<span>共 {escape(str(count))} 笔 · 上下滚动查看全部</span></div>')
+           f'<span>共 {escape(str(count))} 笔 · 按分类分组，每类先列 {GROUP_PREVIEW} 笔，'
+           f'其余点开看</span></div>')
     st.markdown(
         _STYLE
-        + f'<div class="txn-wrap">{bar}<table class="txn-tbl"><thead>{head}</thead>'
-        + f"<tbody>{body}</tbody></table></div>",
+        + f'<div class="txn-wrap">{bar}'
+        + f'<table class="txn-tbl txn-tbl-head">{_COLS}<thead>{head}</thead></table>'
+        + f"{blocks}</div>",
         unsafe_allow_html=True,
     )
 

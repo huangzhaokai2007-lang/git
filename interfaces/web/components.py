@@ -22,6 +22,47 @@ SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银�
 #: 编排层没有这层归一化 → 工具直接 INVALID_ARGUMENT。这是 agent/ 层缺口，见交付说明「待拍板」。
 BALANCE_PROMPT = "查一下余额"
 
+#: 回执里的表格**由卡片接管**的意图（2026-10-26 验收口径：曲线图放最前面、表格要有高级感）。
+#: 这些意图的回执在气泡里只留**头句**（区间 / 笔数 / 合计），走势图与逐笔明细交给紧跟其后的
+#: 洞察卡 —— 同一批数在气泡里印一遍、卡片里再画一遍，用户看到的不是"全"，是冗长。
+#: 2026-10-27 追加 `anomaly_check`：异常分析同理 —— 气泡只留「已扫描 N 笔，检测到 M 笔」，
+#: 逐笔清单（时间/对手方/金额/依据）全交给洞察卡的表格；两处各印一遍，用户对着屏幕对账。
+LEDGER_CARD_INTENTS = ("txn_query", "anomaly_check")
+
+
+def _head_only(text: str) -> str:
+    """回执的**头句**（第一段）：遇到表格行、空行、列表项或加粗小标题就停。
+
+    三种截断条件各有来历（都是实机看出来的，不是预防性设计）：
+    1. **表格行**（`|`）：明细表由卡片呈现，气泡里不再铺一遍；
+    2. **列表项**（`- `）：异常清单是「头句 + 每条一行」，不挡列表项会整份留在气泡里，
+       与卡片表格一左一右对印；
+    3. **加粗小标题**（`**…**` 独占一行）：卡片底部的追问按钮组有自己的标题，
+       只截到「**接着问：**」会变成一句孤零零的残句挂在气泡末尾 —— 那行标题归卡片，
+       不该出现在气泡里。
+    """
+    kept: list[str] = []
+    for line in str(text).splitlines():
+        stripped = line.lstrip()
+        if (not stripped or stripped.startswith("|") or stripped.startswith("- ")
+                or (stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4)):
+            break
+        kept.append(line)
+    return "\n".join(kept).strip()
+
+
+def _ledger_card_follows(turn: Mapping[str, Any], *, is_last: bool) -> bool:
+    """这条回执后面**紧接着**会画一张带图表的卡片吗？
+
+    卡片只在**最后一条**助手消息里画（见 `transcript` 里 `insight_card` 的调用条件）→
+    历史消息照旧印全量回执，翻上去还能对账；`ask`（追问）/ `error_code`（报错）/ 空结果
+    都没有表格可接管，一律不砍。
+    """
+    return (is_last and str((turn or {}).get("intent") or "") in LEDGER_CARD_INTENTS
+            and not turn.get("ask") and not turn.get("error_code")
+            and bool((turn.get("facts") or {}).get("items")))
+
+
 def _esc(value: object) -> str:
     """HTML 转义（用户输入与回执都可能带尖括号）。"""
     return html.escape("" if value is None else str(value))
@@ -81,9 +122,14 @@ def transcript(messages: Sequence[Mapping[str, Any]],
             if not drawn:
                 if message["role"] == "assistant":
                     key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
-                    if not spending_pie.render_reply(message["text"], turn or {}, key=key,
+                    #: 卡片会把这批数画成「走势图 + 逐笔明细表」→ 气泡里只留头句（不留重复的表格）。
+                    #: 2026-10-28 合入 main 时这里被改成印全量回执（main 侧删掉了 `_head_only`），
+                    #: 本分支的验收口径是「卡片接管表格，气泡不再铺一遍」，故恢复裁剪。
+                    text = (_head_only(message["text"]) if _ledger_card_follows(
+                        turn or {}, is_last=index == len(messages) - 1) else message["text"])
+                    if not spending_pie.render_reply(text, turn or {}, key=key,
                             animate=index == len(messages) - 1, detail_loader=bill_details):
-                        reply_animation.render(message["text"], key, animate=index == len(messages) - 1)
+                        reply_animation.render(text, key, animate=index == len(messages) - 1)
                 else:
                     st.markdown(message["text"])
             if turn is not None:
