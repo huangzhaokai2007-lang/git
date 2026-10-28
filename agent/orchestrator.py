@@ -253,7 +253,9 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
         reply, facts = risk_flow.profile_reply()
         ctx.enter("PRECHECK")
         ctx.tier = risk_flow.TIER
-        ctx.facts = facts
+        #: `query=True` 是给界面的信号：这是"查等级"，**不是**在等用户填问卷。
+        #: 否则 `forms.render_risk_form` 只看 intent 会把 9 题问卷又弹出来（实测踩过）。
+        ctx.facts = {**facts, "query": True}
         return _finish(ctx, reply, result="success")
     if ctx.intent == risk_flow.INTENT and not risk_flow.answers_ready(ctx.slots.get("answers")):
         #: F10：聊天里只说"做测评"（或一个答案都没说出来）→ 回引导语、界面弹问卷（**不计分**）；
