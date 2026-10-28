@@ -15,9 +15,9 @@ _READS = {'balance_query', 'txn_query', 'bill_report', 'bill_analysis', 'anomaly
           'wealth_holdings', 'wealth_all_products', 'wealth_recommend'}
 
 
-def capture(session: str) -> str | None:
+def capture(session: str, *, allow_empty: bool = False) -> str | None:
     state = scene_context.snapshot(session)
-    if state.get('intent') not in _READS or confirm_card.current(session):
+    if (state.get('intent') not in _READS and not (allow_empty and not state.get('intent'))) or confirm_card.current(session):
         return None
     state = {key: value for key, value in state.items() if key not in ('pending_id', 'last_write')}
     token = uuid4().hex
@@ -35,6 +35,11 @@ def restore(session: str, token: str) -> bool:
                 or monotonic() - value[2] > 1800 or confirm_card.current(session)):
             return False
         _VIEWS.pop(token)
+        current = scene_context.snapshot(session)
+        pending_id = current.get('pending_id')
+        pending = confirm_card.pending_of(pending_id, session) if pending_id else None
         scene_context.reset(session)
         scene_context.update(session, **value[3])
+        if pending and not pending.revoked and not pending.released:
+            scene_context.update(session, pending_id=pending_id)
         return True

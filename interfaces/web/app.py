@@ -76,9 +76,11 @@ def _agent_executor() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent")
 
 # ---------------- 与编排层的唯一入口 ----------------
-def _ask(text: str, *, display: str | None = None) -> None:
+def _ask(text: str, *, display: str | None = None, extension: bool = False) -> None:
     '把一句话交给编排层，记录回执与轨迹（界面不解释业务、不派生数字）。'
     state = st.session_state
+    if not extension:
+        workspace_ui.navigation.clear()
     workspace_ui.remember_view(_agent_executor(), state['session_id'])
     display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
@@ -133,14 +135,19 @@ def _follow_up(prompt: str, *, display: str | None = None, rerun: bool = True) -
     if (prompt != '返回刚才的列表' and st.session_state.get('workspace-result', {}).get('prompt') == prompt
             and not st.session_state.get('workspace-error')):
         return
-    _ask(prompt, display=display)
+    if rerun and not st.session_state.get('workspace-error'):
+        workspace_ui.navigation.push(_agent_executor(), st.session_state['session_id'])
+    _ask(prompt, display=display, extension=rerun)
     if rerun:
         st.rerun()
 
 def _cancel(confirmation) -> None:
     """取消这笔写操作：只清 agent 层的会话确认态 —— 不调工具、不执行（铁律 3）。"""
     confirm_card.clear(confirmation.session_id)
-    workspace_ui.return_after_cancel(_agent_executor(), confirmation.session_id)
+    if st.session_state.get('workspace-nav-stack'):
+        workspace_ui.navigation.back(_agent_executor(), confirmation.session_id)
+    else:
+        workspace_ui.return_after_cancel(_agent_executor(), confirmation.session_id)
     st.session_state["messages"].append(
         {"role": "assistant", "text": "已取消这笔操作：未提交执行，没有产生任何资金变动。", "turn": None})
 
@@ -265,12 +272,9 @@ def _chat_page() -> None:
     if (workspace_ui.current() not in ('', 'bills') or
             (not workspace_ui.current() and st.session_state.get('workspace-error'))):
         with st.container(key='current-business'):
-            st.markdown('### 当前业务')
+            st.markdown('### 扩展查看' if st.session_state.get('workspace-nav-stack') else '### 当前业务')
             workspace_ui.panels(_agent_executor(), st.session_state['session_id'], _follow_up,
                                 _render_pending, _render_forms, _render_confirm)
-    if (picked := premium_ui.examples()) is not None:
-        _ask(picked)
-        st.rerun()
     if (text := st.chat_input("")) and text.strip():
         _ask(text)
         st.rerun()

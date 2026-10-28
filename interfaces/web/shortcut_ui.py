@@ -21,6 +21,8 @@ def start(executor, session: str) -> None:
     真正需要作废的是**待确认的写申请**，那件事由 `shortcut_flow.begin()` 负责
     （它会 revoke 草稿并写审计），这里不要重复插手。
     """
+    import workspace_navigation
+    workspace_navigation.clear()
     card_lock_ui.close(executor, session)
     executor.submit(shortcut_flow.begin, session).result()
     card_binding_ui.reset()

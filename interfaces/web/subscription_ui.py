@@ -76,8 +76,7 @@ def banner(summary: Mapping[str, Any], *, ask: Callable[[str], None]) -> None:
             if st.button("查看订阅", key="subs-banner-open", width="stretch"):
                 ask("我有哪些订阅")
         with dismiss:
-            if st.button('×', key='subs-banner-dismiss', type='tertiary',
-                         help='关闭订阅提醒，仅隐藏通知，不取消订阅'):
+            if st.button('×', key='subs-banner-dismiss', type='tertiary'):
                 st.session_state['subs-banner-dismissed'] = True
                 st.rerun()
 

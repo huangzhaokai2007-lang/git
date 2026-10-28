@@ -4,15 +4,25 @@ from copy import deepcopy
 
 import streamlit as st
 
-from agent import scene_flow, bill_detail_flow, subscription_notice, view_navigation
-from interfaces.web import wealth_ui, subscription_ui
+from agent import scene_flow, bill_detail_flow, subscription_notice
+import agent.view_navigation as view_navigation
+from interfaces.web import wealth_ui
+import interfaces.web.subscription_ui as subscription_ui
 import card_binding_ui, card_limit_ui, card_lock_ui, card_lost_ui
 import payee_card_ui, schedule_card_ui, aa_card_ui, gift_card_ui
 import activity_ui, payee_picker_ui, card_edit_ui, scene_ui, slot_form_ui, legacy_bill_ui
+import workspace_navigation as navigation
 
 READS = {'balance_query', 'txn_query', 'bill_analysis', 'bill_report', 'anomaly_check',
          'card_query', 'payee_list', 'subscription_list', 'subscription_remind',
          'wealth_holdings', 'wealth_all_products', 'wealth_recommend'}
+VIEW_KEYS = ('workspace-result', 'workspace-shortcut', 'cards-view', 'operation-records-open',
+             'workspace-wealth-source', 'active-scene',
+             *(f'bound-{domain}-query' for domain in ('card', 'payee', 'schedule', 'aa', 'gift', 'lost')))
+
+
+def view_state() -> dict:
+    return deepcopy({key: st.session_state[key] for key in VIEW_KEYS if key in st.session_state})
 
 
 def family(turn: dict) -> str:
@@ -44,6 +54,7 @@ def accept(turn: dict, prompt: str) -> None:
         st.session_state['workspace-error'] = {'turn': turn, 'prompt': prompt}
         return
     st.session_state.pop('workspace-error', None)
+    st.session_state.pop('workspace-view', None)
     st.session_state['operation-records-open'] = False
     if turn.get('ask') == 'scene_reset':
         reset()
@@ -61,8 +72,9 @@ def accept(turn: dict, prompt: str) -> None:
 
 
 def reset() -> None:
+    navigation.clear()
     for key in ('workspace-result', 'workspace-error', 'workspace-shortcut', 'active-scene',
-                'workspace-return', 'subs-banner-dismissed', 'workspace-wealth-source'):
+                'workspace-return', 'workspace-wealth-source'):
         st.session_state.pop(key, None)
 
 
@@ -72,11 +84,7 @@ def remember_view(executor, session: str) -> None:
         return
     token = executor.submit(view_navigation.capture, session).result()
     if token:
-        keys = ['workspace-result', 'workspace-shortcut', 'cards-view', 'operation-records-open',
-                'workspace-wealth-source']
-        keys += [f'bound-{domain}-query' for domain in ('card', 'payee', 'schedule', 'aa', 'gift', 'lost')]
-        st.session_state['workspace-return'] = {'token': token, 'state': deepcopy(
-            {key: st.session_state[key] for key in keys if key in st.session_state})}
+        st.session_state['workspace-return'] = {'token': token, 'state': view_state()}
 
 
 def return_after_cancel(executor, session: str) -> None:
@@ -173,6 +181,13 @@ def notifications(executor, session: str, ask) -> None:
 
 
 def transcript(messages, executor, session: str, ask) -> None:
+    navigation.render_origin(executor, session)
+    navigation.history(messages)
+    messages = navigation.visible_messages(messages)
+    if st.session_state.get('workspace-error') and st.session_state.get('workspace-nav-stack'):
+        if current() == 'bills':
+            error(ask)
+        return
     if current() == 'bills':
         legacy_bill_ui.render(messages, executor, session, ask)
         error(ask)
@@ -190,6 +205,8 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
     if scene != 'bills':
         scope(executor, session, ask)
     error(ask)
+    if st.session_state.get('workspace-error') and st.session_state.get('workspace-nav-stack'):
+        return
     result(executor, session, ask,
            lambda source, category: executor.submit(bill_detail_flow.load, session, source, category).result())
     if st.session_state.pop('workspace-scope-updated', False):

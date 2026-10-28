@@ -195,12 +195,13 @@ def _export(turn: Mapping[str, Any], intent: str, facts: Mapping[str, Any], key:
                                mime="text/markdown", key=f"{key}-dl-md", width="stretch")
             st.code(reply, language="markdown")   # 手动复制用：streamlit 代码块自带复制按钮
         if label and (csv_text := _csv(rows, headers)):
-            st.download_button(f"下载{label}（CSV）", data=csv_text,
+            # Excel recognizes UTF-8 reliably on direct open when the file has a BOM.
+            st.download_button(f"下载{label}（CSV）", data=csv_text.encode('utf-8-sig'),
                                file_name=f"{label}-{str(turn.get('trace_id') or key)[:8]}.csv",
-                               mime="text/csv", key=f"{key}-dl-csv", width="stretch")
+                               mime="text/csv; charset=utf-8", key=f"{key}-dl-csv", width="stretch")
 
 
-def render(turn: Mapping[str, Any], *, key: str, on_ask: Callable[[str], None]) -> bool:
+def render(turn: Mapping[str, Any], *, key: str, on_ask: Callable[[str], None], readonly: bool = False) -> bool:
     """在助手气泡里画富卡片；画不出来（意图没有卡片 / facts 为空）→ `False`，调用方已退回纯文本。
 
     `on_ask` 由 `app.py` 注入：点按钮 → 把那句话交给编排层 → rerun。
@@ -216,7 +217,7 @@ def render(turn: Mapping[str, Any], *, key: str, on_ask: Callable[[str], None]) 
         st.markdown("**接着问：**")
         columns = st.columns(len(FOLLOW_UPS[intent]))
         for index, (label, prompt) in enumerate(FOLLOW_UPS[intent]):
-            if columns[index].button(label, key=f"{key}-ask-{index}", width="stretch"):
+            if columns[index].button(label, key=f"{key}-ask-{index}", width="stretch", disabled=readonly):
                 on_ask(prompt)
         _export(turn, intent, facts, key)
     return True

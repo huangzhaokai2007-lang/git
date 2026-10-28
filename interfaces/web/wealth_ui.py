@@ -85,7 +85,7 @@ def _kline(candles: list[Mapping[str, Any]]) -> None:
     st.altair_chart(_kline_spec(candles), width="stretch")
 
 
-def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str) -> None:
+def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str, readonly: bool = False) -> None:
     """一只产品一张卡：名称 → 月 K → 区间数字 → 金额 + 订购。"""
     pid = str(item.get("product_id"))
     floor = max(int(_num(item.get("min_amount_yuan"))), 1)
@@ -128,18 +128,18 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
 
         amount = st.number_input(
             "金额（元）", min_value=floor, value=floor, step=100,
-            key=f"{key_prefix}-amt-{pid}", label_visibility="collapsed")
+            key=f"{key_prefix}-amt-{pid}", label_visibility="collapsed", disabled=readonly)
         #: 买不起就别给可点的按钮：`affordable` 由工具层按「起购额 ≤ 储蓄余额」判定。
         #: 老 facts 没有这个键时按"可买"处理，保持向后兼容。
         if item.get("affordable") is False:
             st.button("订购", key=f"{key_prefix}-buy-{pid}", width="stretch", disabled=True)
             st.markdown("起购金额高于储蓄余额，暂时买不了。")
-        elif st.button("订购", key=f"{key_prefix}-buy-{pid}", width="stretch"):
+        elif st.button("订购", key=f"{key_prefix}-buy-{pid}", width="stretch", disabled=readonly):
             ask(f"买 {item.get('name')} {int(amount)} 元")
 
 
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
-                key_prefix: str = "wealth") -> None:
+                key_prefix: str = "wealth", readonly: bool = False) -> None:
     """紧贴成功的推荐回执，渲染四象限入口及每款产品的订购按钮。"""
     if turn.get('intent') != 'wealth_recommend':
         return
@@ -148,7 +148,7 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
         st.markdown('#### 先做一次风险测评')
         st.markdown('推荐要按您的风险承受能力筛选，所以得先测评（约 1 分钟）。'
                     '结果只保存在本次会话，不会上传。')
-        if st.button('开始风险测评', key=f'{key_prefix}-assess', type='primary', width='stretch'):
+        if st.button('开始风险测评', key=f'{key_prefix}-assess', type='primary', width='stretch', disabled=readonly):
             ask('做风险测评')
         return
     if turn.get('error_code'):
@@ -160,13 +160,13 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     st.markdown('**模拟区间说明：** 红绿区间仅为演示规则的示意估算，'
                 '不代表历史极值、实际最大亏损或收益承诺。订购仍需经过风险与余额校验，并在确认卡确认。')
     #: 查看全部产品必须走编排层的公开目录查询，不把超风险等级的产品伪装成推荐。
-    if st.button('查看全部产品 →', key=f'{key_prefix}-all', width='stretch', type='primary'):
+    if st.button('查看全部产品 →', key=f'{key_prefix}-all', width='stretch', type='primary', disabled=readonly):
         ask('看看全部理财产品')
     for start in range(0, len(items), _COLUMNS):
         cols = st.columns(_COLUMNS)
         for col, item in zip(cols, items[start:start + _COLUMNS]):
             with col:
-                _card(item, ask=ask, key_prefix=key_prefix)
+                _card(item, ask=ask, key_prefix=key_prefix, readonly=readonly)
 
 
 def render(turns: list[Mapping[str, Any]], *, ask: Callable[[str], None],
