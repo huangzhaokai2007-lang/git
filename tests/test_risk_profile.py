@@ -72,3 +72,14 @@ def test_card_offers_the_form_only_when_unassessed() -> None:
     at, _ = render({"assessed": True, "risk_level": "R5", "risk_label": "高风险",
                     "valid_until": "2027-09-12"})
     assert not any(b.label == "开始风险测评" for b in at.button)
+
+def test_expired_assessment_is_reported_as_expired_not_missing(seeded: Path) -> None:
+    """过期 ≠ 没做过：说过期时要带上"哪天过期"，界面按钮也改成「重新测评」。"""
+    from tools import _wealth_risk
+
+    wealth.assess_risk(AGGRESSIVE)
+    _wealth_risk._ASSESSMENTS["u_zhangsan_0001"]["valid_until"] = "2026-01-01"
+    turn = orchestrator.handle("我的风险等级是多少")
+    assert turn.facts["assessed"] is False and turn.facts["expired"] is True
+    assert "过期" in turn.reply and "2026-01-01" in turn.reply
+    assert "还没有" not in turn.reply

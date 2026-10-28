@@ -317,16 +317,23 @@ def _score(answers: dict[str, int]) -> int:
     return total
 
 
-def current_profile() -> dict | None:
-    """当前用户**有效**的测评结果；未测评或已过期 → `None`（不抛异常）。
+def current_profile() -> dict:
+    """当前用户的测评**状态**：`{"status": "ok" | "missing" | "expired", ...}`，不抛异常。
 
     与 `require_assessment()` 的分工：那个给"要买理财"的路径用（缺就 INVALID_STATE 拦住），
     这个给"我只是想看看自己是什么等级"用 —— 没测评不是错误，是要如实告诉用户。
+
+    **为什么区分 missing / expired**：都回"您还没做过测评"是错的 —— 用户明明做过、只是过期了，
+    这么说会让他以为自己白做了。过期时要把"什么时候到期"说出来。
     """
-    try:
-        return require_assessment()
-    except ToolError:
-        return None
+    record = _ASSESSMENTS.get(current_user_id())
+    if record is None:
+        return {"status": "missing"}
+    if record["valid_until"] < AS_OF.isoformat():
+        return {"status": "expired", "risk_level": record["risk_level"],
+                "valid_until": record["valid_until"]}
+    return {"status": "ok", "risk_level": record["risk_level"],
+            "valid_until": record["valid_until"]}
 
 
 def require_assessment() -> dict:
