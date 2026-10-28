@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -62,6 +62,8 @@ CANDLE_MONTHS = 60
 _NAV_BASE = 10_000
 #: 单月波动的分母：见 `_product_candles()` 里的注释（不随窗口长度变）。
 _STEP_DIVISOR = 24
+#: 日 K 默认窗口：近 120 个交易日（约半年）。
+DAILY_DAYS = 120
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
@@ -351,6 +353,92 @@ def assess_risk(answers: dict) -> ToolResult:
     message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」，"
                f"有效期至 {valid_until}。")
     return _ok(data.model_dump(), facts, message)
+
+
+# ---------------- T14b product_daily（日 K，按需拉取） ----------------
+
+def _trading_days(count: int) -> list[date]:
+    """最近 `count` 个**交易日**（只跳周末；演示数据集没有节假日表），末个 = `AS_OF`。"""
+    days: list[date] = []
+    cursor = AS_OF
+    while len(days) < count:
+        if cursor.weekday() < 5:
+            days.append(cursor)
+        cursor -= timedelta(days=1)
+    return list(reversed(days))
+
+
+def _daily_candles(product_id: str, max_gain: float, max_loss: float,
+                   days: int) -> list[list]:
+    """近 `days` 个交易日的模拟日 K，紧凑数组 `[日期, 开, 高, 低, 收]`（整数基点）。
+
+    **为什么用数组不用对象**：日 K 一个产品就 120 行，用 dict 每行多背 5 个键，
+    14 只产品会多出 150 KB。数组形式省 45%，界面解析一行代码的事。
+
+    日波动 = 月波动 / √21；动量系数取 0.85（日频要比月频更"粘"，否则仍是锯齿）。
+    """
+    span = max(max_gain - max_loss, 1.0)
+    step = span / _STEP_DIVISOR * 0.9 / (21 ** 0.5)
+    floor_nav = _NAV_BASE * (1 + max_loss / 100)
+    ceil_nav = _NAV_BASE * (1 + max_gain / 100)
+    yield_pct = max_gain + max_loss
+    drift = min(yield_pct / 252, max_gain * 0.6 / days) / 100
+    nav = float(_NAV_BASE)
+    dev = 0.0
+    rows: list[list] = []
+    for day in _trading_days(days):
+        period = day.isoformat()
+        digest = hashlib.sha256(f"{product_id}:d:{period}".encode()).digest()
+        u1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
+        u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
+        dev = 0.85 * dev + (1 - 0.85 ** 2) ** 0.5 * (u1 * 2 - 1) * step / 100
+        open_nav = nav
+        raw_nav = open_nav * (1 + drift + dev)
+        close_nav = max(floor_nav, min(ceil_nav, raw_nav))
+        if close_nav != raw_nav:
+            dev = -0.6 * dev
+        wick = abs(u2 - 0.5) * step / 100 * open_nav
+        rows.append([period, round(open_nav),
+                     round(max(open_nav, close_nav) + wick),
+                     round(min(open_nav, close_nav) - wick),
+                     round(close_nav)])
+        nav = close_nav
+    return rows
+
+
+class DailyArgs(BaseModel):
+    """T14b 入参：`days` 限定在 20–250 个交易日（约 1–12 个月）。"""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    days: int = Field(default=DAILY_DAYS, ge=20, le=250)
+
+
+def product_daily(product_id: str, days: int = DAILY_DAYS) -> ToolResult:
+    """T14b：单只产品的日 K（近 `days` 个交易日）。**L0 只读**、公共目录、无归属断言。
+
+    为什么单独一个工具：日 K 一个产品就 120 行，14 只全塞进推荐 facts 会多出 150 KB。
+    改成「点开哪只看哪只」，一次只取约 5 KB。
+    """
+    bad = _invalid(DailyArgs, days=days)
+    if bad is not None:
+        return bad
+    try:
+        products = dao.list_products()
+    except ValueError as exc:
+        return _dao_reject(exc)
+    row = next((item for item in products if item["id"] == product_id), None)
+    if row is None:
+        return _fail(ErrorCode.NOT_FOUND, "没有这个理财产品")
+    level = row["risk_level"]
+    swing = RISK_SWING.get(level, 0.0)
+    gain, loss = row["expected_yield"] + swing, -swing
+    candles = _daily_candles(product_id, gain, loss, days)
+    facts = {"product_id": product_id, "name": row["name"], "risk_level": level,
+             "risk_label": risk_label(level), "day_count": len(candles),
+             "candles": candles}
+    data = {"product_id": product_id, "name": row["name"],
+            "candles": [{"period": c[0], "open": c[1], "high": c[2],
+                         "low": c[3], "close": c[4]} for c in candles]}
+    return _ok(data, facts, f"{row['name']} 近 {len(candles)} 个交易日的日 K。")
 
 
 # ---------------- T14 recommend_wealth ----------------
