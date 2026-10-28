@@ -201,7 +201,7 @@ class AaData(BaseModel):
 
 
 class AaAmountsReq(BaseModel):
-    """T31 入参（SPEC-CHANGE 新增）：按人金额的 AA 收款请求。"""
+    """T31 入参（SPEC-CHANGE 新增）：按人金额的 群收款请求。"""
 
     model_config = STRICT
 

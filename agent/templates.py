@@ -118,7 +118,7 @@ INTENT_CN: dict[str, str] = {
     "balance_query": "余额查询", "txn_query": "交易流水查询", "bill_analysis": "账单分析",
     "anomaly_check": "异常交易检测", "bill_report": "账单报告", "subscription_list": "订阅查询",
     "card_query": "卡片查询", "wealth_recommend": "理财推荐", "transfer_single": "转账",
-    "transfer_scheduled": "预约转账", "aa_collect": "AA 收款", "subscription_cancel": "取消订阅",
+    "transfer_scheduled": "预约转账", "aa_collect": "群收款", "subscription_cancel": "取消订阅",
     "subscription_remind": "订阅提醒", "card_apply": "申请新卡", "card_limit_adjust": "调整限额",
     "card_lock": "锁卡", "card_unlock": "解锁", "card_report_lost": "挂失", "risk_assess": "风险测评",
     "wealth_buy": "理财申购", "wealth_redeem": "理财赎回", "gift_plan": "送礼计划",
@@ -178,7 +178,7 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_schedules(facts)
     if intent == "gift_order_list":                          # F20 追加：送礼订单（号码/收货人/金额/状态）
         return render_gift_orders(facts)
-    if intent == "aa_list":                                  # F22 追加：AA 收款（已付人数/状态/截止）
+    if intent == "aa_list":                                  # F22 追加：群收款（已付人数/状态/截止）
         return render_aa_requests(facts)
     if intent == "risk_assess":                              # F10：总分/满分/等级/有效期（不走单行 format）
         try:

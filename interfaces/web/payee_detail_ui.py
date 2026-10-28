@@ -108,32 +108,34 @@ def _editor(executor: ThreadPoolExecutor, session_id: str, person: dict, who: di
 
 
 def _actions(executor: ThreadPoolExecutor, session_id: str, person: dict, who: dict) -> None:
-    """操作按钮：转账（主色）+ 白/黑名单切换 + 删除（删除靠最右）。"""
+    """操作按钮：**四个等宽等距**（转账 / 名单切换 / 拉黑·解除 / 删除）。
+
+    用户 2026-10-28（配图三）：原来「转账」独占一列、其余挤在 4 列里，宽窄不一。
+    现在统一一行四列、`width="stretch"`，删除也在这行最右（不再拉长到整行）。
+    """
     kind, name = _kind_of(person), person["name"]
-    main_col, manage_col = st.columns([1, 3], vertical_alignment="center")
-    if main_col.button("转账", key=f"d-tr-{person['payee_id']}", type="primary", width="stretch"):
+    col_a, col_b, col_c, col_d = st.columns(4, vertical_alignment="center")
+
+    if col_a.button("转账", key=f"d-tr-{person['payee_id']}", type="primary", width="stretch"):
         _dispatch(executor, session_id, "transfer_single", who, f"（按钮）给{name}转账")
-    with manage_col:
-        a, b, _c, d = st.columns(4)
-        if kind == "normal" and a.button("加白名单", key=f"d-wl-{person['payee_id']}",
-                                         width="stretch"):
-            _dispatch(executor, session_id, "payee_whitelist", who, f"（按钮）把{name}加入白名单")
-        if kind == "whitelist" and a.button("移出白名单", key=f"d-wlrm-{person['payee_id']}",
-                                            width="stretch"):
+
+    if kind == "whitelist":
+        if col_b.button("移出白名单", key=f"d-wlrm-{person['payee_id']}", width="stretch"):
             _dispatch(executor, session_id, "payee_whitelist_remove", who,
                       f"（按钮）把{name}移出白名单")
-        if kind == "blacklist" and a.button("加白名单", key=f"d-wl2-{person['payee_id']}",
-                                            width="stretch"):
+    else:                                        # 普通 / 黑名单 → 直接加白
+        if col_b.button("加白名单", key=f"d-wl-{person['payee_id']}", width="stretch"):
             _dispatch(executor, session_id, "payee_whitelist", who, f"（按钮）把{name}加入白名单")
-        if kind != "blacklist" and b.button("拉黑", key=f"d-bl-{person['payee_id']}",
-                                            width="stretch"):
+
+    if kind == "blacklist":
+        if col_c.button("解除黑名单", key=f"d-ub-{person['payee_id']}", width="stretch"):
+            _dispatch(executor, session_id, "payee_unblacklist", who, f"（按钮）把{name}移出黑名单")
+    else:
+        if col_c.button("拉黑", key=f"d-bl-{person['payee_id']}", width="stretch"):
             _dispatch(executor, session_id, "payee_blacklist", who, f"（按钮）把{name}加入黑名单")
-        if kind == "blacklist" and b.button("解除黑名单", key=f"d-ub-{person['payee_id']}",
-                                            width="stretch"):
-            _dispatch(executor, session_id, "payee_unblacklist", who,
-                      f"（按钮）把{name}移出黑名单")
-        if d.button("删除", key=f"d-del-{person['payee_id']}", width="stretch"):
-            _dispatch(executor, session_id, "payee_delete", who, f"（按钮）删除收款人{name}")
+
+    if col_d.button("删除", key=f"d-del-{person['payee_id']}", width="stretch"):
+        _dispatch(executor, session_id, "payee_delete", who, f"（按钮）删除收款人{name}")
 
 
 def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict) -> None:

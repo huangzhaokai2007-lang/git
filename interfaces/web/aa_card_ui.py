@@ -1,4 +1,4 @@
-"""AA 收款**卡面**（web）：列出进行中的 AA，每笔给「登记某人已付 / 撤销」。
+"""群收款**卡面**（web）：列出进行中的群收款，每笔给「登记某人已付 / 撤销」。
 
 与收款人卡、预约卡同一性质：**按钮确定性直达写流水线**（`write_flow.start`，意图由按钮给定），
 不赌 LLM 分类；在途确认卡先作废。
@@ -34,11 +34,11 @@ def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """渲染 AA 卡；没有进行中的 AA 就不画（已完成的只看聊天里的表格）。"""
+    """渲染 AA 卡；没有进行中的群收款 就不画（已完成的只看聊天里的表格）。"""
     items = executor.submit(aa_flow.active).result()
     if not items:
         return
-    premium_ui.card_head(f"🧾 进行中的 AA（{len(items)} 笔）",
+    premium_ui.card_head(f"🧾 进行中的群收款（{len(items)} 笔）",
                      "24 小时内有效；可登记已付 / 提醒 / 撤销", tone="")
     for item in items:
         request_id = str(item["request_id"])
@@ -49,7 +49,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         if cancel_btn.button("撤销", key=f"aa-cancel-{request_id}", width="content",
                              help="撤销这笔 AA（已登记的付款记录保留）"):
             _start(executor, session_id, "aa_cancel", {"request_id": request_id},
-                   f"（按钮）撤销 AA {item['title']}")
+                   f"（按钮）撤销群收款 {item['title']}")
             st.rerun()
         pending = [s for s in (item.get("shares") or []) if s["status"] != "paid"]
         if not pending:

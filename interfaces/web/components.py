@@ -129,7 +129,7 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
 #: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
-_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡",
+_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "群收款确认卡",
                "gift_plan": "送礼计划确认卡", "payee_whitelist": "白名单确认卡",
                "payee_blacklist": "黑名单确认卡", "payee_unblacklist": "解除黑名单确认卡",
                "payee_delete": "删除收款人确认卡",
@@ -139,7 +139,7 @@ _CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA
                "scheduled_modify": "修改预约确认卡",
                "gift_order_cancel": "取消订单确认卡", "gift_order_pay": "支付订单确认卡",
                "gift_order_advance": "订单状态确认卡",
-               "aa_mark_paid": "登记已付确认卡", "aa_cancel": "撤销 AA 确认卡",
+               "aa_mark_paid": "登记已付确认卡", "aa_cancel": "撤销群收款 确认卡",
                "aa_remind": "提醒付款确认卡",
                "payee_whitelist_edit": "修改白名单信息确认卡",
                "payee_whitelist_remove": "移出白名单确认卡",
@@ -153,7 +153,7 @@ _MONEY_INTENTS = frozenset({"transfer_single", "transfer_scheduled", "subscripti
 
 
 def _aa_table(confirmation: Any) -> None:
-    """AA 收款：主卡面就列**每人应收金额**的表格（一键均摊时每人相同、标注均摊）。
+    """群收款：主卡面就列**每人应收金额**的表格（一键均摊时每人相同、标注均摊）。
 
     数据全部来自确认卡快照（`filled`）—— 界面只渲染，不重算、不补数（铁律 2）。
     """

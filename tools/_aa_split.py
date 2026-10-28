@@ -1,4 +1,4 @@
-"""AA 收款的**共享事实包构造** + T31（按人金额版发起）—— 工具层纯实现，无 LLM。
+"""群收款的**共享事实包构造** + T31（按人金额版发起）—— 工具层纯实现，无 LLM。
 
 **为什么单独一个模块**：
 1. `tools/transfer.py` 已 300 行顶格，装不下新函数；
@@ -56,7 +56,7 @@ def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = 
     `split_mode="custom"`；缺省 = **一键均摊**（`split_mode="equal"`，余数给发起人）。
     `extra` 供执行侧补 `request_id` 这类只在真发起后才存在的键。
     """
-    limits = _current_limits()                         # 2026-10-24：AA 总额也吃限额（人类规格）
+    limits = _current_limits()                         # 2026-10-24：群收款总额也吃限额（人类规格）
     if per_person:
         per_person = [int(cents) for cents in per_person]
         lines = [{"id": payee["id"], "name": payee["name"], **_money_facts(cents, "amount")}
@@ -95,7 +95,7 @@ def aa_facts(payees: Sequence[Mapping], amount: int, *, extra: Mapping | None = 
 # 黑名单成员的拦截在编排层解析关卡（与 T9 同一套）。
 
 def create_aa_request_with_amounts(payee_ids: list[str], amounts: list[int]) -> ToolResult:
-    """T31 AA 收款请求（**按人金额版** · L1）。data: `request_id` / `total_amount`。
+    """T31 群收款请求（**按人金额版** · L1）。data: `request_id` / `total_amount`。
 
     与 T9 的区别：每人金额由调用方给定（`amounts` 与 `payee_ids` 等长、全为正整数分），
     T9 只有一键均摊。同样**不落资金**（无 AA 表），只写一条审计；收款人必须属于当前用户。
@@ -129,7 +129,7 @@ def create_aa_request_with_amounts(payee_ids: list[str], amounts: list[int]) -> 
                      params_json={"payee_ids": payee_ids, "amounts": [int(c) for c in amounts]},
                      risk_level="L1", permission_tier="L1", result="success", error_code=None)
     return _ok({"request_id": request_id, "total_amount": total}, facts,
-               f"已发起 AA 收款 {total / 100:.2f} 元（{len(payees)} 人，按人金额）")
+               f"已发起 群收款 {total / 100:.2f} 元（{len(payees)} 人，按人金额）")
 
 def _limit_facts(limits: Mapping) -> dict:
     """把限额渲染成「整数分 + 元」两套（供卡面与数字校验器）。"""

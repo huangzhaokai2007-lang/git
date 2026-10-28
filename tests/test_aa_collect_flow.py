@@ -99,7 +99,7 @@ def test_confirm_card_issues_no_request_before_confirmation(wired, monkeypatch) 
     # 2026-10-25 口径：AA 是收款方向 → 一律免码，卡面不再出现「验证码原因」
     assert "验证码原因" not in card.reply and "等待验证码" not in card.reply
     assert "一键均摊" in card.reply
-    assert "CONFIRM_CARD" in card.states and "【AA 收款确认卡】" in card.reply
+    assert "CONFIRM_CARD" in card.states and "【群收款确认卡】" in card.reply
     assert "每人" in card.reply and "余数" in card.reply
     assert "已发起" not in card.reply                       # 还没发起，不许这么说
     assert aa_audits(wired) == 0                            # ← T9 未被调用（它必写审计）

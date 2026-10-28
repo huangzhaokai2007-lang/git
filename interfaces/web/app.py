@@ -33,7 +33,7 @@ import insight_card_ui                                        # noqa: E402  （m
 import card_edit_ui                                             # noqa: E402  （S5：可编辑卡片）
 import payee_picker_ui                                          # noqa: E402  （解析卡：同名多命中）
 import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
-import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
+import aa_card_ui                                               # noqa: E402  （群收款卡面：登记已付/撤销）
 import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
 import activity_ui
 import wealth_ui                                              # noqa: E402  （main：活动流）
@@ -263,7 +263,12 @@ def _chat_page() -> None:
         _agent_executor().submit(subscription_notice.summary,
                                  st.session_state["session_id"]).result(),
         ask=_follow_up)
-    ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card,
+    #: 2026-10-28（用户要求）：收款人回执不再画那张**静态卡** —— 下方「收款人管理」是
+    #: 同一份数据但**可点开**，两张会被当成重复。其余意图的卡片渲染不变。
+    payee_card_render = (payee_ui.suppress_payee_card
+                         if st.session_state.get("bound-payee-query")
+                         else payee_ui.render_payee_card)
+    ui.transcript(messages, payee_card=payee_card_render, insight_card=_insight_card,
                   bill_details=lambda source, category: _agent_executor().submit(
                       bill_detail_flow.load, st.session_state['session_id'], source, category).result(),
                   wealth_card=lambda turn, key: wealth_ui.render_turn(
@@ -292,7 +297,7 @@ def _chat_page() -> None:
         payee_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-schedule-query"):              # F16：预约卡面 + 执行/改时间/取消
         schedule_card_ui.render(_agent_executor(), st.session_state["session_id"])
-    if st.session_state.get("bound-aa-query"):                    # F22：AA 卡面 + 登记已付/撤销
+    if st.session_state.get("bound-aa-query"):                    # F22：群收款卡面 + 登记已付/撤销
         aa_card_ui.render(_agent_executor(), st.session_state["session_id"])
     if st.session_state.get("bound-gift-query"):                  # F20：送礼查询卡 + 支付/取消
         gift_card_ui.render(_agent_executor(), st.session_state["session_id"])

@@ -274,7 +274,7 @@ def _rollback_token(token: dict) -> None:
     token.pop("message", None)
 
 def create_aa_request(payee_ids: list[str], amount: int) -> ToolResult:
-    """T9 AA 收款请求（L1）。data: `request_id` / `per_person_amount`。
+    """T9 群收款请求（L1）。data: `request_id` / `per_person_amount`。
 
     拆分：`per_person_amount = amount // 人数`（整数分均摊），**余数给发起人**（进 facts 的
     `initiator_share`），故 `per_person * 人数 + initiator_share == amount` 精确相等。
@@ -308,6 +308,6 @@ def create_aa_request(payee_ids: list[str], amount: int) -> ToolResult:
     # 改一处即两处同步，避免「卡上说 33.33、执行回执说 33.34」这类口径漂移（F15）。
     facts = aa_facts(payees, amount, extra={"request_id": request_id})
     data = AaData(request_id=request_id, per_person_amount=facts["per_person_amount"])
-    message = (f"已发起 AA 收款 {facts['amount_yuan']} 元，{facts['payee_count']} 人各 "
+    message = (f"已发起 群收款 {facts['amount_yuan']} 元，{facts['payee_count']} 人各 "
                f"{facts['per_person_amount_yuan']} 元，余数 {facts['initiator_share_yuan']} 元由你承担。")
     return _ok(data.model_dump(), facts, message)

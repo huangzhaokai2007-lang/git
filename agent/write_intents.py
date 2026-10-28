@@ -11,7 +11,7 @@
 | **本模块** | `_SPECS` 注册表 + `spec_of` / `WRITE_INTENTS` / `otp_ok`，并**再导出**核心类型与 `yuan_to_cents` |
 
 **为什么拆**：本文件曾到 **296 行**，距 `CLAUDE.md`「单文件 ≤300 行」红线只剩 4 行，装不下 F15
-（AA 收款）与 F20（送礼计划）的描述符。拆法照 card-04b / card-05b 的先例（按域拆 + 只许单向依赖）：
+（群收款）与 F20（送礼计划）的描述符。拆法照 card-04b / card-05b 的先例（按域拆 + 只许单向依赖）：
 `_write_common` ← 各意图族 ← 本模块，无环。
 
 **orchestrator 只 import 本模块**，其源码里不出现任何写工具名字面量
@@ -211,12 +211,12 @@ _SPECS: dict[str, WriteSpec] = {
     # `otp_in_tool=False` 表示「编排层不管 OTP」；因 L1 的 `requires_otp=False`，
     # `write_flow._execute` 的闸门不会触发（闸门条件已加 `confirmation.requires_otp`）。
     "aa_collect": WriteSpec(
-        intent="aa_collect", intent_cn="AA 收款", title="AA 收款确认卡",
+        intent="aa_collect", intent_cn="群收款", title="群收款确认卡",
         credential_kind="none", otp_in_tool=False,
         missing=("payee_ids", "amount"), tools=(),      # PRECHECK 阶段**不调任何工具**（T9 无 preview）
         execute_tool="create_aa_request",
         target_key="aa_target",
-        what="AA 收款", shape=_shape_aa, prepare=_prepare_aa,
+        what="群收款", shape=_shape_aa, prepare=_prepare_aa,
         card=_card_aa, plain=_plain_aa, execute=_execute_aa),
     # F20：**无凭证族**（T16 签名没有凭证参数），L2 要 OTP —— 闸门落在编排层（同 T11/T15）。
     # 确认卡数字取自 T19 `preview_gift`（L0 只读，SPEC-CHANGE 新增）：它一调不锁款，
@@ -330,13 +330,13 @@ _SPECS["aa_mark_paid"] = WriteSpec(
     what="登记已付", shape=_shape_aa_mark_paid, prepare=_prepare_aa_mark_paid,
     card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_mark_paid)
 
-#: F22 追加（T44）：**撤销 AA** —— L1（已登记的付款记录保留）。
+#: F22 追加（T44）：**撤销群收款** —— L1（已登记的付款记录保留）。
 _SPECS["aa_cancel"] = WriteSpec(
-    intent="aa_cancel", intent_cn="撤销 AA", title="撤销 AA 确认卡",
+    intent="aa_cancel", intent_cn="撤销群收款", title="撤销群收款 确认卡",
     credential_kind="none", otp_in_tool=False,
     missing=("request_id",), tools=("list_aa_requests",), execute_tool="cancel_aa_request",
     target_key="request_id",
-    what="撤销 AA", shape=_shape_aa_cancel, prepare=_prepare_aa_cancel,
+    what="撤销群收款", shape=_shape_aa_cancel, prepare=_prepare_aa_cancel,
     card=_card_aa_op, plain=_plain_aa_op, execute=_execute_aa_cancel)
 
 #: 2026-10-24（人类规格「支持提醒未付人员」）→ L1：只留痕，不真推送。
