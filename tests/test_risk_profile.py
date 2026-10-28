@@ -28,6 +28,7 @@ def test_unassessed_query_says_so_without_scoring(seeded: Path) -> None:
     turn = orchestrator.handle("我的风险等级是多少")
     assert turn.intent == "risk_assess" and turn.error_code is None
     assert turn.facts["assessed"] is False
+    assert turn.facts["query"] is True          # 给界面的信号：只查、不是在等填问卷
     assert "还没有" in turn.reply
     assert turn.executed is False                      # 只读查询，没跑计分
 
@@ -39,6 +40,23 @@ def test_assessed_query_reports_level_and_expiry(seeded: Path) -> None:
     assert turn.facts["risk_level"] == "R5"
     assert "高风险" in turn.reply
     assert turn.facts["valid_until"] in turn.reply     # 数字/日期都能在 facts 里找到
+
+
+def test_query_does_not_pop_the_questionnaire_in_the_app(monkeypatch, seeded: Path) -> None:
+    """回归：查等级之后**不能再弹 9 题问卷**（用户实测：做完测评再点按钮又弹一遍）。
+
+    根因：`forms.render_risk_form` 只看 `turn.intent == risk_assess`，而查询走的也是这个意图。
+    现在查询在 facts 上打 `query=True`，表单见到就跳过。
+    """
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("DB_PATH", str(seeded))
+    path = Path(__file__).resolve().parents[1] / "interfaces" / "web" / "app.py"
+    at = AppTest.from_file(str(path), default_timeout=120).run()
+    next(b for b in at.sidebar.button if b.label == "风险程度").click().run()
+    assert not at.exception
+    assert not at.selectbox                     # 问卷没弹出来
+    assert any(b.label == "开始风险测评" for b in at.button)
 
 
 def test_query_does_not_trigger_the_questionnaire(seeded: Path) -> None:
