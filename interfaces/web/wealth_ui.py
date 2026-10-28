@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any, Callable, Mapping
 import html
 
@@ -53,9 +54,26 @@ def _num(text: object) -> float:
 
 def _kline_spec(candles: list[Mapping[str, Any]]):
     """构建月 K 的 Altair 图表对象（不渲染）—— 拆出来是为了能单测它的结构。"""
+    return _kline_spec_cached(_candle_signature(candles))
+
+
+def _candle_signature(candles: list[Mapping[str, Any]]) -> tuple:
+    """把 K 线压成可哈希签名（缓存键）。K 线由工具层确定性生成，同签名必然同图。"""
+    return tuple((str(row["period"]), int(row["open"]), int(row["high"]),
+                  int(row["low"]), int(row["close"])) for row in candles)
+
+
+@lru_cache(maxsize=128)
+def _kline_spec_cached(signature: tuple):
+    """Altair 建图每张约 100ms；14 张展开后每次 rerun 都要重算，所以按签名缓存。
+
+    缓存键是**数据本身**，不是产品 id —— 换产品/换参数自然失效，不会拿到旧图。
+    """
     import altair as alt
     import pandas as pd
 
+    candles = [{"period": p, "open": o, "high": h, "low": low, "close": c}
+               for p, o, h, low, c in signature]
     frame = pd.DataFrame({
         "date": pd.to_datetime([f"{row['period']}-01" for row in candles]),
         "o": [int(row["open"]) / 100 for row in candles],
