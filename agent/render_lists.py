@@ -40,7 +40,10 @@ from agent.render_tables import (
 # ---------------- 异常检测（F03） ----------------
 #: facts 键见 `tools/query.py` T4（`scanned_count` / `anomaly_count` / `items[]`）。
 #: F03 验收第 2 条：**命中项必须显示"是哪笔交易 + 凭什么判它"** —— 只报"发现 2 笔异常"用户无从核对。
-T_ANOMALY_HEAD = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔异常交易："
+#: 头句**以句号收尾、不留冒号**（2026-10-27）：网页气泡只保留头句、明细由卡片表格呈现，
+#: 冒号后面没有下文就成了残句（「…检测到 1 笔异常交易：」孤零零挂在气泡里像没加载完）。
+#: 离线/终端仍是「头句 + 逐条 `- …`」，句号接列表读着也通顺，一份文案两处都成立。
+T_ANOMALY_HEAD = "已扫描 {scanned_count} 笔交易，检测到 {anomaly_count} 笔异常交易。"
 #: 空结果：自己的句子（与 `T_CARD_NO_CARD` / `T_SUBSCRIPTION_EMPTY` 同口径），
 #: 并且**把四条规则的口径一并说清**（阈值仍从 facts 取，不在文案里硬编码任何一个数字）。
 T_ANOMALY_EMPTY = ("已扫描 {scanned_count} 笔交易，没有发现异常交易 —— 没有单笔支出超过其近 "

@@ -199,6 +199,29 @@ def test_card_ledger_shows_ref_no_and_status_for_every_row(txns) -> None:
     assert rendered.count("<tr>") >= len(txns.facts["items"])      # 一笔不截断（+1 是表头行）
 
 
+def test_card_groups_by_category_and_folds_the_rest(txns) -> None:
+    """明细表按**分类分组**：每类先列 3 笔，其余折进「展开其余 N 笔」，折起来的那几笔也在页面上。
+
+    「只列一部分是啥意思，还没有展开的方式」是 2026-10-26 验收的原话 —— 这条把两件事钉死：
+    分组在，且剩下的**有处可点**（折叠区里的行照样渲染在 HTML 里，不是后端再取一次）。
+    """
+    from html import escape
+
+    at = _run_card(dict(txns.facts))
+    rendered = "\n".join(str(markdown.value) for markdown in at.markdown)
+    sizes: dict[str, int] = {}
+    for item in txns.facts["items"]:
+        key = str(item.get("category") or "其他")
+        sizes[key] = sizes.get(key, 0) + 1
+    assert len(sizes) > 1                                            # 合成数据不止一个分类
+    for name, size in sizes.items():
+        assert f'txn-grp-name">{escape(name)}<' in rendered          # 每个分类各有自己的块
+        if size > 3:
+            assert f"展开其余 {size - 3} 笔" in rendered
+    assert rendered.count("<details") == sum(1 for size in sizes.values() if size > 3)
+    assert rendered.count("<tr>") >= len(txns.facts["items"])         # 折叠的那几笔也算数
+
+
 def test_card_draws_the_daily_trend(txns) -> None:
     """按日走势图：日序来自 facts 的 `daily`，图上点数 ≥ 2 才会画（一天画不出走势）。"""
     at = _run_card(dict(txns.facts))

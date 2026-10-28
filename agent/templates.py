@@ -93,6 +93,9 @@ T_RISK_PROMPT = (f"好的，风险测评一共 {len(_RISK_QUESTIONS)} 题，请�
 
 #: 反问（缺槽/低置信度）：只列缺失项的中文名，不含任何业务数字
 T_CLARIFY_SLOT = "我需要再确认一下：请补充{slots_cn}。"
+#: 异常分析缺时间段：**必须问清范围再答**（2026-10-27 验收口径：不许默认本月就说"检测到 N 笔"）
+T_CLARIFY_ANOMALY_PERIOD = ("请告诉我您想查哪段时间的异常 —— 不同时间段结论不同，"
+                            "我不会替您默认某个月。可以说「四月份」「上个月」「2026 年」或具体区间。")
 T_CLARIFY_LOW_CONFIDENCE = "没太理解您的意思，能再说得具体一点吗？（例如「查一下余额」「上个月花了多少」）"
 T_CLARIFY_TOO_MANY = "连续两次没能确认您的需求，我先转人工客服帮您处理。"
 
@@ -189,8 +192,15 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         raise TemplateError(f"{intent!r} 模板缺少 facts 键：{exc}") from exc
 
 
-def clarify_missing(missing: list[str]) -> str:
-    """缺槽反问：把缺失的槽位名换成人话（无业务数字）。"""
+def clarify_missing(missing: list[str], intent: str = "") -> str:
+    """缺槽反问：把缺失的槽位名换成人话（无业务数字）。
+
+    `anomaly_check` 只说「请补充时间范围（如 2026-09 或 2026）」时用户很难照着答 ——
+    异常分析的结论**随范围变**（这个问题本身就是这么暴露出来的），所以给一句能照着答的
+    示例（「四月份」「上个月」「2026 年」），并把"为什么必须说"讲明白。
+    """
+    if intent == "anomaly_check" and missing == ["period"]:
+        return T_CLARIFY_ANOMALY_PERIOD
     names = "、".join(SLOT_CN.get(slot, slot) for slot in missing)
     return T_CLARIFY_SLOT.format(slots_cn=names)
 

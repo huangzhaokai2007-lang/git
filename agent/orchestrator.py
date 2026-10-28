@@ -271,7 +271,7 @@ def _read_flow(ctx: _Ctx, *, card_reader: Callable[[dict], ToolResult] | None = 
     ctx.enter("SLOT_FILL")
     ctx.slots, ctx.missing = (ctx.slots, []) if getattr(ctx, "scene_request", None) else _fill_slots(ctx.intent, ctx.slots)
     if ctx.missing:
-        return _clarify(ctx, templates.clarify_missing(ctx.missing), reason="missing_slots")
+        return _clarify(ctx, templates.clarify_missing(ctx.missing, ctx.intent), reason="missing_slots")
     ctx.enter("PRECHECK")
     if _precheck(ctx.intent) != READ_TIER or ctx.intent not in TOOL_ROUTES:
         return _finish(ctx, templates.unsupported(ctx.intent), result="rejected")   # 无路由=未接通
