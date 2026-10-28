@@ -29,7 +29,7 @@ def test_four_cards_below_recommendation_and_buttons_work(seeded: Path):
 
     at = AppTest.from_function(page, args=(_reply(result.facts), actions), default_timeout=30).run()
     assert not at.exception
-    assert [b.label for b in at.button].count('订购') == 8
+    assert [b.label for b in at.button].count('订购') == 4
     assert [b.label for b in at.button].count('查看全部产品 →') == 1
     assert len(at.columns) >= 2
     next(b for b in at.button if b.label == '查看全部产品 →').click().run()
@@ -53,7 +53,7 @@ def test_app_renders_buy_buttons_after_recommendation(monkeypatch, seeded: Path)
     turn = at.session_state['turns'][-1]['turn']
     assert turn['intent'] == 'wealth_recommend' and not turn['error_code']
     assert len(turn['facts']['items']) == 14
-    assert sum(button.label == '订购' for button in at.button) == 14
+    assert sum(button.label == '订购' for button in at.button) == 4
     assert any(button.label == '查看全部产品 →' for button in at.button)
     assert any('模拟参考区间' in message['text'] for message in at.session_state['messages'])
 

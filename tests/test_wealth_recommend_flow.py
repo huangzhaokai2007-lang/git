@@ -28,6 +28,7 @@ from tools import wealth
 from tools.schemas import ErrorCode
 
 from tests.conftest import assert_covered
+from tests.test_tools_wealth_risk import AGGRESSIVE
 
 SESSION = "sess-f11"
 BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
@@ -221,7 +222,7 @@ def test_recommendation_cards_appear_below_reply_with_buy_and_all_buttons(seeded
 
     at = AppTest.from_function(page, args=(turn, received), default_timeout=30).run()
     assert not at.exception
-    assert [b.label for b in at.button].count('订购') == 8
+    assert [b.label for b in at.button].count('订购') == 4
     assert [b.label for b in at.button].count('查看全部产品 →') == 1
     assert len(at.columns) >= 2
     next(b for b in at.button if b.label == '查看全部产品 →').click().run()
@@ -249,7 +250,7 @@ def test_web_app_recommendation_renders_buttons_in_real_chat(monkeypatch, seeded
     turn = at.session_state['turns'][-1]['turn']
     assert turn['intent'] == 'wealth_recommend' and not turn['error_code']
     assert len(turn['facts']['items']) == 14
-    assert sum(b.label == '订购' for b in at.button) == 14
+    assert sum(b.label == '订购' for b in at.button) == 4
     assert any(b.label == '查看全部产品 →' for b in at.button)
     assert any('模拟参考区间' in m['text'] for m in at.session_state['messages'])
 
@@ -279,6 +280,33 @@ def test_all_products_button_prompt_uses_catalog_even_if_llm_is_offline(monkeypa
     result = orchestrator.handle('看看全部理财产品', session_id='f11-all-products-button')
     assert result.intent == 'wealth_all_products' and not result.error_code
     assert result.facts['total_count'] == 14
+
+
+def test_recommendation_shows_four_cards_and_can_expand_the_rest(seeded: Path) -> None:
+    """默认只铺 4 张卡（14 张会刷满好几屏），其余折叠在「展开其余 N 只」后面。"""
+    from streamlit.testing.v1 import AppTest
+    from interfaces.web import components, wealth_ui
+
+    wealth.assess_risk(AGGRESSIVE)
+    recommendation = wealth.recommend_wealth('R5')
+    assert len(recommendation.facts['items']) == 14
+    turn = {'trace_id': 'expand', 'intent': 'wealth_recommend', 'error_code': None,
+            'facts': recommendation.facts, 'states': ['REPLY'], 'tier': 'L0'}
+
+    def page(turn):
+        from interfaces.web import components, wealth_ui
+        components.transcript([{'role': 'assistant', 'text': '推荐', 'turn': turn}],
+                              wealth_card=lambda shown, key: wealth_ui.render_turn(
+                                  shown, ask=lambda _: None, key_prefix=key))
+
+    at = AppTest.from_function(page, args=(turn,), default_timeout=60).run()
+    assert not at.exception
+    assert sum(b.label == '订购' for b in at.button) == 4
+    toggle = next(b for b in at.button if b.label.startswith('展开其余'))
+    assert '10' in toggle.label                      # 14 - 4
+    toggle.click().run()
+    assert sum(b.label == '订购' for b in at.button) == 14
+    assert any(b.label.startswith('收起') for b in at.button)
 
 
 def test_recommendation_cards_survive_the_all_products_drilldown(seeded: Path) -> None:

@@ -24,6 +24,8 @@ import streamlit as st
 
 #: 网格列数：2 列 → 4 只产品正好排成四象限；超过 4 只继续往下排。
 _COLUMNS = 2
+#: 默认展示的产品数：14 只全铺开会刷满好几屏，先给 4 张（正好两行），其余折叠。
+_PREVIEW_COUNT = 4
 
 
 def latest_recommendation(turns: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
@@ -162,11 +164,22 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     #: 查看全部产品必须走编排层的公开目录查询，不把超风险等级的产品伪装成推荐。
     if st.button('查看全部产品 →', key=f'{key_prefix}-all', width='stretch', type='primary'):
         ask('看看全部理财产品')
-    for start in range(0, len(items), _COLUMNS):
+
+    #: 默认只铺前 `PREVIEW_COUNT` 张卡（14 张会刷满好几屏），其余折叠在按钮后面。
+    expanded_key = f'{key_prefix}-expanded'
+    expanded = bool(st.session_state.get(expanded_key))
+    shown = items if expanded else items[:_PREVIEW_COUNT]
+    for start in range(0, len(shown), _COLUMNS):
         cols = st.columns(_COLUMNS)
-        for col, item in zip(cols, items[start:start + _COLUMNS]):
+        for col, item in zip(cols, shown[start:start + _COLUMNS]):
             with col:
                 _card(item, ask=ask, key_prefix=key_prefix)
+    if len(items) > _PREVIEW_COUNT:
+        label = (f'收起，只看前 {_PREVIEW_COUNT} 只' if expanded
+                 else f'展开其余 {len(items) - _PREVIEW_COUNT} 只产品')
+        if st.button(label, key=f'{key_prefix}-toggle', width='stretch'):
+            st.session_state[expanded_key] = not expanded
+            st.rerun()
 
 
 def render(turns: list[Mapping[str, Any]], *, ask: Callable[[str], None],
