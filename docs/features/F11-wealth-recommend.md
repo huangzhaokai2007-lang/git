@@ -21,8 +21,8 @@
 | 推荐卡数量 | 默认 **4 张**，其余折叠在「展开其余 N 只产品」后面 | `wealth_ui._PREVIEW_COUNT` |
 | 展示顺序 | **按大类分组**（组序稳健 → 进取，组内收益降序） | `agent/render_wealth.py` |
 | K 线周期 | **日 K / 周 K / 月 K 三档**，图表上方一排按钮切换 | `wealth_ui._card` |
-| 各档窗口 | 日 120 个交易日（≈半年）、周 52 根（≈1 年）、月 **201 根（2010-01 起）** | `tools/_wealth_risk.CANDLE_WINDOWS` |
-| 数据来源 | 月 K 直接用推荐 facts（零请求）；日/周按需拉取，缓存在会话里 | T14b + `agent/wealth_daily` |
+| 各档窗口 | **三档都从 2010-01 起**：日 4356 根、周 872 根、月 201 根 | `tools/_wealth_risk.CANDLE_WINDOWS` |
+| 数据来源 | 月 K 直接用推荐 facts（零请求）；日/周**按需**拉取（单卡 187 KB / 1s），缓存在会话里 | T14b + `agent/wealth_daily` |
 | 均线 | MA5（橙）/ MA20（蓝），界面按收盘价滚动均值计算（纯展示指标） | `wealth_ui._kline_spec_cached` |
 | 买不起 | 起购额 > 储蓄余额 → 订购按钮置灰并说明 | facts `affordable`（工具层判定） |
 
