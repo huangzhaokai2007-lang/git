@@ -17,11 +17,13 @@ from tools import wealth
 from tools.schemas import ErrorCode
 
 
-def test_daily_window_is_120_trading_days(seeded: Path) -> None:
+def test_daily_window_starts_in_2010(seeded: Path) -> None:
+    """日 K 也覆盖 2010 起（用户要求三档都到 2010）：4356 个交易日。"""
     result = wealth.product_daily("prod_r5_growth")
-    assert result.ok and result.facts["day_count"] == 120
+    assert result.ok and result.facts["day_count"] == 4356
     candles = result.facts["candles"]
-    assert len(candles) == 120
+    assert len(candles) == 4356
+    assert candles[0][0] == "2010-01-01"
     # 末个交易日 = 数据锚点（2026-09-12 是周六，取前一个周五）
     assert candles[-1][0] == "2026-09-11"
     # 只跳周末：不能出现周六/周日
@@ -40,9 +42,13 @@ def test_daily_candles_are_well_formed_and_deterministic(seeded: Path) -> None:
 
 
 def test_daily_payload_stays_small(seeded: Path) -> None:
-    """紧凑数组：一只产品约 5 KB。用对象形状会到 9 KB，14 只就是 130 KB。"""
+    """紧凑数组：2010 起 4356 个交易日约 187 KB（对象形状要 340 KB）。
+
+    这个体积**只在用户主动切到日 K 时才付**（默认月 K 用 facts，零请求），
+    所以阈值按「单卡可接受」定，不是按「每轮都带」定。
+    """
     facts = wealth.product_daily("prod_r5_growth").facts
-    assert len(json.dumps(facts)) / 1024 < 8
+    assert len(json.dumps(facts)) / 1024 < 220
 
 
 def test_daily_rejects_bad_window_and_unknown_product(seeded: Path) -> None:
@@ -57,7 +63,7 @@ def test_agent_seam_writes_an_audit_row(seeded: Path) -> None:
 
     before = count(seeded, "audit_log")
     payload = wealth_daily.load("sess-daily", "prod_r1_mmf")
-    assert payload["ok"] and payload["day_count"] == 120
+    assert payload["ok"] and payload["day_count"] == 4356
     assert payload["trace_id"].startswith("trace-")
     assert count(seeded, "audit_log") == before + 1
 
@@ -68,7 +74,7 @@ def test_weekly_and_monthly_are_aggregated_from_the_same_daily_bars(seeded: Path
     weekly = wealth.product_daily("prod_r5_growth", granularity="weekly").facts["candles"]
     monthly = wealth.product_daily("prod_r5_growth", granularity="monthly").facts["candles"]
 
-    assert len(daily) == 120 and len(weekly) == 52 and len(monthly) == 201
+    assert len(daily) == 4356 and len(weekly) == 872 and len(monthly) == 201
     # 最后一根三种周期的收盘价必须相同（都截到同一个交易日）
     assert daily[-1][4] == weekly[-1][4] == monthly[-1][4]
     # 周线的高点 = 该周内日线高点的最大值；整体区间也一致
