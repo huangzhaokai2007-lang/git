@@ -12,12 +12,13 @@ from data import dao
 from tools import wealth
 
 
-def load(session_id: str, product_id: str) -> dict:
-    """取单只产品的日 K（近 120 个交易日）。失败也照常返回 `ok=False`，由界面决定怎么显示。"""
-    result = wealth.product_daily(product_id)
+def load(session_id: str, product_id: str, granularity: str = 'daily') -> dict:
+    """取单只产品的 K 线（日/周/月）。失败也照常返回 `ok=False`，由界面决定怎么显示。"""
+    result = wealth.product_daily(product_id, granularity=granularity)
     trace_id = f'trace-{uuid.uuid4().hex[:12]}'
     dao.insert_audit(trace_id, session_id, actor='user', intent='wealth_recommend',
-                     tool='product_daily', params_json={'product_id': product_id},
+                     tool='product_daily',
+                     params_json={'product_id': product_id, 'granularity': granularity},
                      risk_level='L0', permission_tier='L0',
                      result='success' if result.ok else 'rejected',
                      error_code=result.error_code)

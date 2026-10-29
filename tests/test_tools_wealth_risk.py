@@ -26,20 +26,21 @@ CONSERVATIVE = {"age": 22, **_LOW}
 BALANCED = {"age": 35, **_MID}
 AGGRESSIVE = {"age": 50, **_HIGH}
 #: seed 的 25 个理财产品（id, 等级, 预期年化）
-PRODUCTS = (("prod_r1_mmf", "R1", 2.10), ("prod_r1_cash", "R1", 2.30),
-            ("prod_r1_cd", "R1", 2.65),
-            ("prod_r2_bond30", "R2", 2.80), ("prod_r2_bond90", "R2", 3.20),
-            ("prod_r2_bond180", "R2", 3.60), ("prod_r2_cd_index", "R2", 2.55),
-            ("prod_r2_sharkfin", "R2", 4.20),
-            ("prod_r3_balance", "R3", 3.90), ("prod_r3_mixed365", "R3", 4.50),
-            ("prod_r3_div", "R3", 4.80), ("prod_r3_secondary", "R3", 4.30),
-            ("prod_r3_reits", "R3", 5.20), ("prod_r3_gold", "R3", 3.80),
-            ("prod_r4_asia", "R4", 5.60), ("prod_r4_quant720", "R4", 6.20),
-            ("prod_r4_growth540", "R4", 7.10), ("prod_r4_snowball", "R4", 12.80),
-            ("prod_r4_convertible", "R4", 6.80), ("prod_r4_qdii", "R4", 6.50),
-            ("prod_r5_theme", "R5", 7.90), ("prod_r5_growth", "R5", 8.50),
-            ("prod_r5_pe", "R5", 9.80), ("prod_r5_cta", "R5", 8.60),
-            ("prod_r5_airbag", "R5", 16.50))
+#: 收益率按 2025–2026 年真实市场水平校准（2026-10-29），见 `data/seed.PRODUCT_ROWS`
+PRODUCTS = (("prod_r1_mmf", "R1", 1.35), ("prod_r1_cash", "R1", 1.55),
+            ("prod_r1_cd", "R1", 2.05),
+            ("prod_r2_bond30", "R2", 2.10), ("prod_r2_bond90", "R2", 2.60),
+            ("prod_r2_bond180", "R2", 2.90), ("prod_r2_cd_index", "R2", 1.75),
+            ("prod_r2_sharkfin", "R2", 3.20),
+            ("prod_r3_balance", "R3", 3.80), ("prod_r3_mixed365", "R3", 4.40),
+            ("prod_r3_div", "R3", 5.00), ("prod_r3_secondary", "R3", 4.10),
+            ("prod_r3_reits", "R3", 5.40), ("prod_r3_gold", "R3", 6.20),
+            ("prod_r4_asia", "R4", 5.80), ("prod_r4_quant720", "R4", 6.00),
+            ("prod_r4_growth540", "R4", 6.80), ("prod_r4_snowball", "R4", 13.50),
+            ("prod_r4_convertible", "R4", 5.80), ("prod_r4_qdii", "R4", 8.60),
+            ("prod_r5_theme", "R5", 7.50), ("prod_r5_growth", "R5", 8.20),
+            ("prod_r5_pe", "R5", 9.20), ("prod_r5_cta", "R5", 7.40),
+            ("prod_r5_airbag", "R5", 17.20))
 
 
 # ---------------- T13 assess_risk ----------------
@@ -216,15 +217,15 @@ def test_t14_data_fields_are_frozen_to_the_spec(seeded: Path) -> None:
     ("R1", ["prod_r1_cd", "prod_r1_cash", "prod_r1_mmf"]),
     ("R2", ["prod_r2_sharkfin", "prod_r2_bond180", "prod_r2_bond90", "prod_r2_bond30",
             "prod_r1_cd", "prod_r2_cd_index", "prod_r1_cash", "prod_r1_mmf"]),
-    ("R3", ["prod_r3_reits", "prod_r3_div", "prod_r3_mixed365", "prod_r3_secondary",
-            "prod_r2_sharkfin", "prod_r3_balance", "prod_r3_gold", "prod_r2_bond180",
+    ("R3", ["prod_r3_gold", "prod_r3_reits", "prod_r3_div", "prod_r3_mixed365",
+            "prod_r3_secondary", "prod_r3_balance", "prod_r2_sharkfin", "prod_r2_bond180",
             "prod_r2_bond90", "prod_r2_bond30", "prod_r1_cd", "prod_r2_cd_index",
             "prod_r1_cash", "prod_r1_mmf"]),
-    ("R5", ["prod_r5_airbag", "prod_r4_snowball", "prod_r5_pe", "prod_r5_cta",
-            "prod_r5_growth", "prod_r5_theme", "prod_r4_growth540", "prod_r4_convertible",
-            "prod_r4_qdii", "prod_r4_quant720", "prod_r4_asia", "prod_r3_reits",
-            "prod_r3_div", "prod_r3_mixed365", "prod_r3_secondary", "prod_r2_sharkfin",
-            "prod_r3_balance", "prod_r3_gold", "prod_r2_bond180", "prod_r2_bond90",
+    ("R5", ["prod_r5_airbag", "prod_r4_snowball", "prod_r5_pe", "prod_r4_qdii",
+            "prod_r5_growth", "prod_r5_theme", "prod_r5_cta", "prod_r4_growth540",
+            "prod_r3_gold", "prod_r4_quant720", "prod_r4_convertible", "prod_r4_asia",
+            "prod_r3_reits", "prod_r3_div", "prod_r3_mixed365", "prod_r3_secondary",
+            "prod_r3_balance", "prod_r2_sharkfin", "prod_r2_bond180", "prod_r2_bond90",
             "prod_r2_bond30", "prod_r1_cd", "prod_r2_cd_index", "prod_r1_cash",
             "prod_r1_mmf"]),
 ])
@@ -240,15 +241,15 @@ def test_t14_never_recommends_above_the_user_level(seeded: Path, level: str,
 def test_t14_sorted_by_yield_descending(seeded: Path) -> None:
     """按预期年化降序；`yield` 是百分数字符串（不引入浮点，见模型 docstring）。"""
     yields = [item["yield"] for item in wealth.recommend_wealth("R5").data["items"]]
-    assert yields == ["16.50%", "12.80%", "9.80%", "8.60%", "8.50%", "7.90%", "7.10%",
-                      "6.80%", "6.50%", "6.20%", "5.60%", "5.20%", "4.80%", "4.50%",
-                      "4.30%", "4.20%", "3.90%", "3.80%", "3.60%", "3.20%", "2.80%",
-                      "2.65%", "2.55%", "2.30%", "2.10%"]
+    assert yields == ["17.20%", "13.50%", "9.20%", "8.60%", "8.20%", "7.50%", "7.40%",
+                      "6.80%", "6.20%", "6.00%", "5.80%", "5.80%", "5.40%", "5.00%",
+                      "4.40%", "4.10%", "3.80%", "3.20%", "2.90%", "2.60%", "2.10%",
+                      "2.05%", "1.75%", "1.55%", "1.35%"]
 
 
 def test_t14_horizon_and_amount_filters(seeded: Path) -> None:
     ids = [item["product_id"] for item in wealth.recommend_wealth("R3", 200, 1_200_000).data["items"]]
-    assert ids == ["prod_r3_balance", "prod_r3_gold", "prod_r2_bond180",  # 365 天的被过滤
+    assert ids == ["prod_r3_gold", "prod_r3_balance", "prod_r2_bond180",  # 365 天的被过滤
                    "prod_r2_bond90", "prod_r2_bond30", "prod_r2_cd_index",
                    "prod_r1_cash", "prod_r1_mmf"]
     only_short = wealth.recommend_wealth("R5", 0).data["items"]
@@ -261,7 +262,7 @@ def test_t14_uses_the_stored_assessment_when_level_is_omitted(seeded: Path) -> N
     assert wealth.recommend_wealth().error_code == ErrorCode.INVALID_STATE   # 未测评
     wealth.assess_risk(BALANCED)
     assert [item["risk_level"] for item in wealth.recommend_wealth().data["items"]] == (
-        ["R3", "R3", "R3", "R3", "R2", "R3", "R3", "R2", "R2", "R2",
+        ["R3", "R3", "R3", "R3", "R3", "R3", "R2", "R2", "R2", "R2",
          "R1", "R2", "R1", "R1"])
 
 

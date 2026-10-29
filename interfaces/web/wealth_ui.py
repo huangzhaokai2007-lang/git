@@ -99,6 +99,10 @@ def _kline_spec_cached(signature: tuple):
         "l": [int(row["low"]) / 100 for row in candles],
         "c": [int(row["close"]) / 100 for row in candles],
     })
+    #: 均线：**收盘价的滚动均值**，纯展示指标（不参与任何业务口径）。
+    #: 点数不足窗口时前几根是 NaN，Altair 自动跳过 —— 不用特殊处理。
+    frame["ma5"] = frame["c"].rolling(5).mean()
+    frame["ma20"] = frame["c"].rolling(20).mean()
     base = alt.Chart(frame).encode(
         x=alt.X("date:T", title=None,
                 axis=alt.Axis(format="%m-%d" if daily else "%Y-%m",
@@ -112,8 +116,11 @@ def _kline_spec_cached(signature: tuple):
         tooltip=[alt.Tooltip("date:T", format="%Y-%m-%d" if daily else "%Y-%m", title="日期"),
                  alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
                  alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
+    #: 均线两条：MA5（橙）看短期、MA20（蓝）看中期。比单看裸 K 更容易读出趋势。
+    ma5 = base.mark_line(color="#f59e0b", strokeWidth=1.4).encode(y="ma5:Q")
+    ma20 = base.mark_line(color="#3b82f6", strokeWidth=1.4).encode(y="ma20:Q")
     #: `interactive()` = 滚轮缩放 + 拖拽平移；用户明确要求「可以放大」。
-    return (wick + body).properties(height=200).interactive()
+    return (wick + body + ma5 + ma20).properties(height=200).interactive()
 
 
 def _kline(candles: list[Mapping[str, Any]]) -> None:
@@ -171,50 +178,37 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
                     f"起购 {item.get('min_amount_yuan')} 元")
 
         _structure(item)
-        #: 月 K 图（替代原来的红绿区间条）：可缩放、可拖拽。
+        #: **周期切换**（用户要求：图表上方一排按钮，点哪个看哪个）：
+        #: 月 K 直接用推荐 facts 里的 5 年数据（零请求）；日 K / 周 K 按需拉取并缓存在会话里。
         candles = item.get("candles") or []
-        if candles:
-            _kline(candles)
+        granular = st.radio(
+            "K 线周期", ["日K", "周K", "月K"], index=2, horizontal=True,
+            key=f"{key_prefix}-gran-{pid}", label_visibility="collapsed")
+        if granular == "月K":
+            if candles:
+                _kline(candles)
+        elif daily_loader is not None:
+            cache_key = f"{key_prefix}-k-{pid}-{granular}"
+            loaded = st.session_state.get(cache_key)
+            if not loaded:
+                result = daily_loader(pid, "daily" if granular == "日K" else "weekly")
+                loaded = result if result and result.get("ok") else {}
+                st.session_state[cache_key] = loaded
+            if loaded.get("candles"):
+                _kline(loaded["candles"])
+
+        #: 均线图例 + 操作提示（颜色与 `_kline_spec` 里的两条线一致）。
+        st.markdown(
+            "<div style='font-size:.75rem;color:#94a3b8;'>"
+            "<span style='color:#f59e0b;'>━</span> MA5 "
+            "<span style='color:#3b82f6;'>━</span> MA20 · 滚轮缩放 · 拖拽平移</div>",
+            unsafe_allow_html=True)
         #: 区间文字保留：K 线看的是走势，这两个数字说清「最坏 / 最好能到什么程度」。
         st.markdown(
             "<div style='display:flex;justify-content:space-between;font-size:.8rem;'>"
             f"<span style='color:#ef4444;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
             f"<span style='color:#22c55e;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
             "</div>", unsafe_allow_html=True)
-
-        #: 日 K **按需拉取**：日线一个产品就 120 行，14 只全塞进推荐 facts 会多出 150 KB，
-        #: 所以点开哪只才取哪只（约 5 KB，走 `agent/wealth_daily.load`）。
-        if daily_loader is not None:
-            daily_key = f"{key_prefix}-daily-{pid}"
-            loaded = st.session_state.get(daily_key)
-            if st.button("收起日 K" if loaded else "📅 日 K（近半年 · 可缩放）",
-                         key=f"{key_prefix}-dbtn-{pid}", width="stretch"):
-                if loaded:
-                    st.session_state.pop(daily_key, None)
-                else:
-                    result = daily_loader(pid)
-                    st.session_state[daily_key] = result if result.get("ok") else None
-                st.rerun()
-            if loaded:
-                _kline(loaded.get("candles") or [])
-                st.markdown("**滚轮缩放 · 拖拽平移**，可以放大看某一段的日线。")
-
-        #: 点开图例看历年表现。数字全部来自 facts（工具层按产品 id 确定性生成，见 `_product_history`），
-        #: 界面只排版；标题里必须写明「模拟」——数据集没有真实净值。
-        history = item.get("history") or []
-        if history:
-            with st.expander("📈 历年收益与亏损（模拟）", expanded=False):
-                st.markdown(
-                    "| 年度 | 年度收益 | 年内最大回撤 |\n|---|---|---|\n" + "\n".join(
-                        f"| {row.get('year')} | {row.get('return_text')} | "
-                        f"{row.get('drawdown_text')} |" for row in history))
-                st.bar_chart(
-                    {"年度": [str(row.get("year")) for row in history],
-                     "年度收益(%)": [int(row.get("return") or 0) / 100 for row in history],
-                     "最大回撤(%)": [int(row.get("drawdown") or 0) / 100 for row in history]},
-                    x="年度", y=["年度收益(%)", "最大回撤(%)"])
-                st.markdown("以上为**模拟数据**，仅用于演示风险与收益的对应关系，"
-                            "不代表历史真实业绩，也不构成收益承诺。")
 
         amount = st.number_input(
             "金额（元）", min_value=floor, value=floor, step=100,
