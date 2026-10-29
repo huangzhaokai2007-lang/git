@@ -9,6 +9,9 @@
 
 from __future__ import annotations
 
+import calendar
+import datetime
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -32,6 +35,16 @@ def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
     confirm_card.clear(session_id)
     step = executor.submit(write_flow.start, intent, slots, session_id).result()
     _record(step, display)
+
+
+def is_too_early(day: datetime.date, clock: datetime.time,
+                 now: datetime.datetime | None = None) -> bool:
+    """「改到这个时间」是否该被禁用：目标时刻必须**严格晚于现在**。
+
+    纯函数（不碰 Streamlit），单测直接喂三个时间点即可。
+    """
+    moment = datetime.datetime.combine(day, clock)
+    return moment <= (now or datetime.datetime.now())
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
@@ -61,17 +74,32 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
             _start(executor, session_id, "scheduled_cancel", {"schedule_id": schedule_id},
                    f"（按钮）取消预约 {when}")
             st.rerun()
-    #: 「改时间」要填新时间 → 单独一个表单（避免逐行塞输入框挤成一团）
+    #: 「改时间」：**日历 + 时间选择器**（用户 2026-10-29 要求）
+    #: 原来只有一个文本框，用户得自己敲 `2026-11-05 09:00`，还会输错月份/日。
+    #: 现在：日期用 `st.date_input`（点开就是日历，年月日分别选，非法日期选不出来），
+    #: 时刻用 `st.time_input`，并强制 **必须晚于此刻**。
     with st.container(border=True):
-        st.markdown("###### ✏️ 改某笔预约的时间")
+        premium_ui.card_head("✏️ 改某笔预约的时间", "选日期与时刻；必须晚于现在", tone="warn")
         options = {f"{str(it['execute_at']).replace('T', ' ')} · {it['payee_name']}": it["schedule_id"]
                    for it in items}
         picked = st.selectbox("改哪一笔", list(options), key="sched-edit-pick")
-        new_time = st.text_input("新时间", value="", key="sched-edit-time",
-                                 placeholder="例如 2026-11-05 09:00")
+        day_col, time_col = st.columns(2, vertical_alignment="bottom")
+        now = datetime.datetime.now()
+        picked_day = day_col.date_input("新日期", value=now.date() + datetime.timedelta(days=1),
+                                        min_value=now.date(), key="sched-edit-day",
+                                        format="YYYY-MM-DD")
+        picked_time = time_col.time_input("新时刻", value=datetime.time(9, 0),
+                                          key="sched-edit-clock", step=300)
+        when = datetime.datetime.combine(picked_day, picked_time)
+        too_early = is_too_early(picked_day, picked_time, now)
+        if too_early:
+            st.caption("⚠️ 这个时间已经过去了 —— 请选一个**晚于现在**的时刻。")
+        elif picked_day.day > calendar.monthrange(picked_day.year, picked_day.month)[1]:
+            st.caption("⚠️ 这一天在这个月里不存在，请重新选。")
         if st.button("改到这个时间", key="sched-edit-ok", type="primary",
-                     disabled=not new_time.strip()):
+                     disabled=too_early, width="stretch"):
+            iso = when.isoformat(timespec="minutes")
             _start(executor, session_id, "scheduled_modify",
-                   {"schedule_id": options[picked], "schedule": new_time.strip()},
-                   f"（按钮）改预约时间 → {new_time.strip()}")
+                   {"schedule_id": options[picked], "schedule": iso},
+                   f"（按钮）改预约时间 → {iso}")
             st.rerun()
