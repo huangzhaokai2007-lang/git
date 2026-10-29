@@ -28,6 +28,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from data import dao
 from data.seed import AS_OF
+from tools import _wealth_products
 from tools._query_common import (
     ToolError, _dao_reject, _fail, _invalid, _money_facts, _ok, current_user_id,
 )
@@ -69,8 +70,10 @@ RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until�
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
 
 #: 【计分规则表】来源：卡 07 第 1 条（问卷 → 代码计分得 R1–R5，LLM 不参与）。
-#: 8 道选择题按**选项下标 0..4** 计 1..5 分；年龄题（`age`，直接填岁数）按 `AGE_BANDS` 分段计 1..5 分。
-#: 问卷维度参考券商开户（经验/收入/年收入/资金占比/亏损承受/期限/目标/亏损反应），题面在
+#: 14 道选择题按**选项下标 0..4** 计 1..5 分；年龄题（`age`，直接填岁数）按 `AGE_BANDS` 分段计 1..5 分。
+#: 共 15 题。维度覆盖券商/基金投资者适当性的四类：能力与经验（经验/知识/结构化产品经验）、
+#: 财务状况（收入稳定性/年收入/资金占比/负债/集中度）、意愿（期限/目标/流动性）、
+#: 行为与心理（亏损承受/亏损反应/波动容忍），加年龄看生命周期 —— 题面在
 #: `agent/_risk_questions.py`，两处**必须同序**（下标 i → i+1 分）。
 QUESTION_SCORE_RULE = {
     "experience": (1, 2, 3, 4, 5),      # 投资经验：无 / <1年 / 1-3年 / 3-5年 / >5年
@@ -81,13 +84,19 @@ QUESTION_SCORE_RULE = {
     "horizon": (1, 2, 3, 4, 5),         # 投资期限：≤3月 / 3-12月 / 1-3年 / 3-5年 / >5年
     "goal": (1, 2, 3, 4, 5),            # 投资目标：保本 / 稳健增值 / 平衡 / 较高收益 / 高收益
     "reaction": (1, 2, 3, 4, 5),        # 亏损反应：全部卖出 / 卖一部分 / 持有观望 / 补仓 / 大幅加仓
+    "knowledge": (1, 2, 3, 4, 5),       # 金融知识：不了解 / 略知 / 一般 / 熟悉 / 熟悉衍生品
+    "structure_exp": (1, 2, 3, 4, 5),   # 结构化产品经验：没接触 / 听说过 / 买过保本型 / 买过雪球类 / 常买
+    "liquidity": (1, 2, 3, 4, 5),       # 流动性需求：随时要用 / 半年内 / 1-2年 / 2-3年 / 3年以上不动
+    "liability": (1, 2, 3, 4, 5),       # 家庭负债：无 / ≤20% / 20%-40% / 40%-60% / >60%
+    "concentration": (1, 2, 3, 4, 5),   # 单一产品集中度：很分散 / 较分散 / 一般 / 较集中 / 全押一只
+    "volatility": (1, 2, 3, 4, 5),      # 日常净值波动容忍：天天看受不了 / 在意 / 一般 / 不太在意 / 不在意
 }
 #: 年龄分段得分（下限闭、上限开）：18-25 → 1，26-40 → 2，41-55 → 3，56-65 → 4，>65 → 5
 AGE_BANDS = ((18, 26, 1), (26, 41, 2), (41, 56, 3), (56, 66, 4), (66, 200, 5))
-#: 总分（9–45）→ 风险等级分段（每档 8 分，末档到 45）
-LEVEL_BANDS = ((9, 17, "R1"), (17, 25, "R2"), (25, 33, "R3"), (33, 41, "R4"), (41, 46, "R5"))
-MAX_SCORE = 5 * (len(QUESTION_SCORE_RULE) + 1)    # 9 题 × 每题最高 5 分 = 45（供 facts 展示）
-MIN_SCORE = 1 * (len(QUESTION_SCORE_RULE) + 1)    # 全选最低档 = 9 分（供 facts 展示「分数区间」）
+#: 总分（15–75）→ 风险等级分段：15 题 × 5 分 = 75，五档均分（每档 12 分）
+LEVEL_BANDS = ((15, 27, "R1"), (27, 39, "R2"), (39, 51, "R3"), (51, 63, "R4"), (63, 76, "R5"))
+MAX_SCORE = 5 * (len(QUESTION_SCORE_RULE) + 1)    # 15 题 × 每题最高 5 分 = 75（供 facts 展示）
+MIN_SCORE = 1 * (len(QUESTION_SCORE_RULE) + 1)    # 全选最低档 = 15 分（供 facts 展示「分数区间」）
 
 STRICT = ConfigDict(strict=True, extra="forbid")
 #: 进程内私有存储：user_id → 测评结果（见文件头「用户风险等级存哪」）
@@ -296,6 +305,31 @@ def risk_label(level: str) -> str:
     return RISK_LABELS.get(str(level), str(level))
 
 
+def option_scores(key: str) -> tuple[int, ...]:
+    """某一题**各选项的分值**（界面标在选项后面，界面不做任何推算）。
+
+    年龄题没有选项（按岁数分段），返回空元组 —— 界面据此不标分，改标分段说明。
+    """
+    return QUESTION_SCORE_RULE.get(key, ())
+
+
+def _age_score(age: int) -> int:
+    """岁数 → 分段得分（`_score` 与逐题明细共用一处口径）。"""
+    return next(score for low, high, score in AGE_BANDS if low <= age < high)
+
+
+def _score_detail(answers: dict[str, int]) -> list[dict]:
+    """逐题得分明细（结果卡要展示「每题各得多少分」）。
+
+    **只给 key 与 score**：题名的中文短名在 `agent/_risk_questions.QUESTION_KEYS_CN`
+    （工具层不 import agent 层），界面自己翻 —— 分工与 `tools/` 的 facts 契约一致。
+    """
+    rows = [{"key": key, "score": QUESTION_SCORE_RULE[key][answers[key]]}
+            for key in QUESTION_SCORE_RULE]
+    rows.append({"key": "age", "score": _age_score(answers["age"])})
+    return rows
+
+
 def _score(answers: dict[str, int]) -> int:
     """按 `QUESTION_SCORE_RULE` / `AGE_BANDS` 计分；缺题、越界、非整数一律拒。"""
     if set(answers) != set(QUESTION_SCORE_RULE) | {"age"}:
@@ -313,7 +347,7 @@ def _score(answers: dict[str, int]) -> int:
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "age 必须是正整数岁数")
     if age < ADULT_AGE:
         raise ToolError(ErrorCode.FORBIDDEN, "未成年人不能做风险测评，也无法购买理财产品")
-    total += next(score for low, high, score in AGE_BANDS if low <= age < high)
+    total += _age_score(age)
     return total
 
 
@@ -366,8 +400,15 @@ def assess_risk(answers: dict) -> ToolResult:
     valid_until = (AS_OF + timedelta(days=RISK_VALID_DAYS)).isoformat()
     _ASSESSMENTS[current_user_id()] = {"risk_level": level, "valid_until": valid_until}
     data = AssessRiskData(risk_level=level, valid_until=valid_until)
+    #: 可买范围：风险等级是"不超过"，所以 R3 = R1–R3 全都能买（结果卡要说清这个区间）。
+    buyable = [code for code in RISK_LEVELS if _rank(code) <= _rank(level)]
     facts = {"risk_level": level, "risk_label": risk_label(level), "valid_until": valid_until,
-             "total_score": total, "max_score": MAX_SCORE, "valid_days": RISK_VALID_DAYS,
+             "total_score": total, "max_score": MAX_SCORE, "min_score": MIN_SCORE,
+             "valid_days": RISK_VALID_DAYS, "risk_desc": RISK_DESC.get(level, ""),
+             "score_detail": _score_detail(answers),
+             "buyable_levels": buyable,
+             "buyable_text": f"{buyable[0]}-{buyable[-1]}" if len(buyable) > 1 else buyable[0],
+             "question_count": len(QUESTION_SCORE_RULE) + 1,
              "answers": dict(answers)}
     message = (f"根据问卷计分（{total} 分），您的风险承受能力为「{risk_label(level)}」，"
                f"有效期至 {valid_until}。")
@@ -508,7 +549,7 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
              "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
              **(_money_facts(available, "available") if available is not None else {}),
-             "items": [{**item.model_dump(by_alias=True),
+             "items": [{**_wealth_products.merge(item.model_dump(by_alias=True)),
                         "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),

@@ -23,6 +23,10 @@ import html
 
 import streamlit as st
 
+#: 分组展示的唯一口径在编排层（工具层常量经 `agent/render_wealth` 翻译）：
+#: 界面只负责"一组一栏"，不自己分类、不自己定顺序（铁律 1）。
+from agent.render_wealth import category_label, wealth_groups
+
 #: 网格列数：2 列 → 4 只产品正好排成四象限；超过 4 只继续往下排。
 _COLUMNS = 2
 #: 默认展示的产品数：14 只全铺开会刷满好几屏，先给 4 张（正好两行），其余折叠。
@@ -121,9 +125,37 @@ def _kline(candles: list[Mapping[str, Any]]) -> None:
     st.altair_chart(_kline_spec(candles), width="stretch")
 
 
+#: 结构化产品条款行的展示顺序（**键来自 facts**，标签只是排版文字）
+_STRUCTURE_ROWS = (("挂钩标的", "underlying"), ("观察频率", "observe"),
+                   ("敲出条款", "knock_out"), ("敲入条款", "knock_in"),
+                   ("票息/收益", "coupon"), ("本金保护", "protect"))
+
+
+def _structure(item: Mapping[str, Any]) -> None:
+    """结构化产品的条款区（普通产品没有条款 → 什么都不画）。
+
+    为什么必须展示：雪球、鲨鱼鳍的风险不在"波动多大"而在**条款本身** ——
+    敲入之后要承担指数跌幅、收益有上限、部分结构非保本。不给条款，
+    用户只看得见那个高票息。数字与文案全部来自 facts（工具层按条款原文下发），
+    界面不解析、不算。
+    """
+    if not item.get("structure"):
+        return
+    st.markdown(f"🧩 {item['structure']}")
+    with st.expander("条款细则（模拟）", expanded=False):
+        st.markdown("| 条款 | 内容 |\n|---|---|\n" + "\n".join(
+            f"| {label} | {item.get(key) or '—'} |"
+            for label, key in _STRUCTURE_ROWS if item.get(key)))
+        if item.get("structure_note"):
+            st.markdown(item["structure_note"])
+        st.markdown("以上为**模拟条款**，仅用于演示结构化产品的收益与风险机制，"
+                    "不构成任何产品的合同内容或收益承诺。")
+
+
 def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
-          daily_loader: Callable[[str], Mapping[str, Any]] | None = None, readonly: bool = False) -> None:
-    """一只产品一张卡：名称 → 月 K → 区间数字 → 金额 + 订购。"""
+          daily_loader: Callable[[str], Mapping[str, Any]] | None = None,
+          readonly: bool = False) -> None:
+    """一只产品一张卡：名称 → 类型/条款 → 月 K → 区间数字 → 金额 + 订购。"""
     pid = str(item.get("product_id"))
     floor = max(int(_num(item.get("min_amount_yuan"))), 1)
 
@@ -131,10 +163,14 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
         st.markdown(f"**{item.get('name')}**")
         #: 聊天气泡的全局样式会隐藏 st.caption；关键产品信息必须用普通 Markdown。
         #: 起购额必须露出来 —— 否则用户点「订购」才知道买不起（演示实测）。
+        #: 类型标签（如「结构化」「货币型」）：货架上有 25 只产品，不给类型标签
+        #: 用户只能从名字猜它是什么 —— 结构化产品尤其看不出来（名字里没有"结构化"三个字）。
         st.markdown(f"{item.get('risk_label') or '风险等级待核实'} · "
+                    f"{item.get('kind_label') or '未分类'} · "
                     f"预期年化 {item.get('yield')} · 期限 {item.get('term')} 天 · "
                     f"起购 {item.get('min_amount_yuan')} 元")
 
+        _structure(item)
         #: 月 K 图（替代原来的红绿区间条）：可缩放、可拖拽。
         candles = item.get("candles") or []
         if candles:
@@ -213,22 +249,28 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     items = (turn.get('facts') or {}).get('items') or []
     if not items:
         return
-    st.markdown('#### 推荐产品 · 可直接订购')
+    st.markdown('#### 推荐产品 · 可直接订购（按产品大类分组）')
     st.markdown('**模拟区间说明：** 红绿区间仅为演示规则的示意估算，'
                 '不代表历史极值、实际最大亏损或收益承诺。订购仍需经过风险与余额校验，并在确认卡确认。')
     #: 查看全部产品必须走编排层的公开目录查询，不把超风险等级的产品伪装成推荐。
     if st.button('查看全部产品 →', key=f'{key_prefix}-all', width='stretch', type='primary', disabled=readonly):
         ask('看看全部理财产品')
 
-    #: 默认只铺前 `PREVIEW_COUNT` 张卡（14 张会刷满好几屏），其余折叠在按钮后面。
+    #: 默认只铺前 `PREVIEW_COUNT` 张卡（25 张会刷满好几屏），其余折叠在按钮后面。
+    #: **按产品大类分组铺卡**（2026-10-29 用户要求"推荐必须分类，不要毫无规律扔出来"）：
+    #: 一组一个标题 + 该组内的 2 列网格；预览模式先铺前 N 只（可能截断某个组），
+    #: 组序稳健 → 进取，组内保持 facts 原序（收益降序）。
     expanded_key = f'{key_prefix}-expanded'
     expanded = bool(st.session_state.get(expanded_key))
     shown = items if expanded else items[:_PREVIEW_COUNT]
-    for start in range(0, len(shown), _COLUMNS):
-        cols = st.columns(_COLUMNS)
-        for col, item in zip(cols, shown[start:start + _COLUMNS]):
-            with col:
-                _card(item, ask=ask, key_prefix=key_prefix, daily_loader=daily_loader, readonly=readonly)
+    for category, group in wealth_groups(shown):
+        st.markdown(f'**{category_label(category)}**')
+        for start in range(0, len(group), _COLUMNS):
+            cols = st.columns(_COLUMNS)
+            for col, item in zip(cols, group[start:start + _COLUMNS]):
+                with col:
+                    _card(item, ask=ask, key_prefix=key_prefix,
+                          daily_loader=daily_loader, readonly=readonly)
     if len(items) > _PREVIEW_COUNT:
         label = (f'收起，只看前 {_PREVIEW_COUNT} 只' if expanded
                  else f'展开其余 {len(items) - _PREVIEW_COUNT} 只产品')

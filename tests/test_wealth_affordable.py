@@ -31,10 +31,10 @@ def test_facts_expose_balance_and_affordable_flags(seeded: Path) -> None:
 
 
 def test_affordable_flags_follow_the_risk_ceiling(seeded: Path) -> None:
-    """R1 只能看到两只货基（起购 1 元 / 10 元）—— 全部买得起，不会误判。"""
+    """R1 只看到三只最低档产品（起购 1 元 / 10 元 / 2 万元）—— 全部买得起，不会误判。"""
     wealth.assess_risk(BALANCED)
     facts = wealth.recommend_wealth("R1").facts
-    assert [item["affordable"] for item in facts["items"]] == [True, True]
+    assert [item["affordable"] for item in facts["items"]] == [True, True, True]
 
 
 def test_balance_read_failure_does_not_break_the_recommendation(seeded: Path, monkeypatch) -> None:

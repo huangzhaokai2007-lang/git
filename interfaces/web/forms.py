@@ -20,30 +20,45 @@ from agent import orchestrator, payee_flow, risk_flow
 import components as ui
 
 
-def risk_form(questions: Mapping[str, tuple[str, tuple[str, ...]]]) -> dict[str, int] | None:
-    """F10：风险测评问卷（5 题一次收齐）。
+def risk_form(questions: Mapping[str, tuple[str, tuple[str, ...]]],
+              groups: tuple[tuple[str, tuple[str, ...]], ...] = ()) -> dict[str, int] | None:
+    """F10：风险测评问卷（15 题一次收齐，**每个选项标出对应分值**）。
 
     `questions` 由调用方从 `agent.risk_flow.QUESTIONS` 传入 —— **题干与选项文案的唯一来源在
     agent 层**，界面不复制一份（复制就会漂移）。本函数只**收集**答案并原样返回；
     计分 / 校验 / 未成年拦截一律在 `tools/` → `agent/`（界面不写业务逻辑）。
 
-    四道选择题用 `selectbox`（选项顺序 = 分值的唯一定义，见 `tools/_wealth_risk.QUESTION_SCORE_RULE`）；
-    年龄题用 `number_input`（收的是**岁数**，不是选项下标 —— 工具层 `AGE_BANDS` 按岁数分段）。
-    未提交 → `None`；提交 → `{题号: 分值或岁数}`。
+    **选项后面那个「N 分」是工具层给的**（`risk_flow.option_scores` →
+    `tools/_wealth_risk.QUESTION_SCORE_RULE`），界面只是把它拼在文案后面 ——
+    界面不做任何算术，也不自己记"第几个选项几分"（否则两处口径早晚漂移）。
+
+    选择题用 `selectbox`（选项下标 = 分值下标，见工具层口径）；
+    年龄题用 `number_input`（收的是**岁数**，不是下标 —— 工具层 `AGE_BANDS` 按岁数分段，
+    所以这一题没有选项可标分，改标"按年龄段计 1-5 分"）。
+    未提交 → `None`；提交 → `{题号: 分值下标或岁数}`。
     """
     answers: dict[str, int] = {}
     with st.container(border=True):
-        st.markdown(f"##### 📋 风险承受能力测评（{len(questions)} 题）")
-        st.caption("全部由代码计分，结果仅保存在本次会话中。未满 18 岁无法测评。")
+        st.markdown(f"##### 📋 风险承受能力测评（{len(questions)} 题 · 每题 1-5 分）")
+        st.caption("每题选项后面标着该题得分，全部由代码计分，结果仅保存在本次会话中。"
+                   "未满 18 岁无法测评。")
         with st.form("risk-form", clear_on_submit=False):
-            for key, (title, options) in questions.items():
-                if key == "age":
-                    answers[key] = int(st.number_input(title, min_value=0, max_value=120,
-                                                       value=30, step=1, key=f"risk-{key}"))
-                else:
-                    picked = st.selectbox(title, options, key=f"risk-{key}",
-                                          index=min(2, len(options) - 1))
-                    answers[key] = options.index(picked)      # 选项下标 = 分值下标（工具层口径）
+            for group, keys in groups or ((("", tuple(questions)),)):
+                if group:
+                    st.markdown(f"**{group}**")
+                for key in keys:
+                    title, options = questions[key]
+                    if key == "age":
+                        st.caption("按年龄段自动计 1-5 分（岁数不是选项）。")
+                        answers[key] = int(st.number_input(title, min_value=0, max_value=120,
+                                                           value=30, step=1, key=f"risk-{key}"))
+                        continue
+                    scores = risk_flow.option_scores(key)
+                    labels = [f"{option}（{score} 分）"
+                              for option, score in zip(options, scores)]
+                    picked = st.selectbox(title, labels, key=f"risk-{key}",
+                                          index=min(2, len(labels) - 1))
+                    answers[key] = labels.index(picked)   # 下标 = 选项序号 = 分值下标
             submitted = st.form_submit_button("提交测评", type="primary", width="stretch")
         if submitted:
             return answers
@@ -121,7 +136,7 @@ def render_risk_form(state: Mapping[str, Any], executor: Any) -> bool:
         return False                  # 计分成功就把问卷收起来；失败则保留可重试
     if (turn.get("facts") or {}).get("query"):
         return False                  # 「查等级」只读，不该弹问卷（否则每次查询都被打断）
-    answers = risk_form(risk_flow.QUESTIONS)
+    answers = risk_form(risk_flow.QUESTIONS, risk_flow.QUESTION_GROUPS)
     if answers is None:
         return False
     _ask_submit(state, "（问卷提交）风险测评")

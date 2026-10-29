@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from agent import llm, orchestrator, render_lists, risk_flow
+from agent import render_wealth
 from tools import wealth
 from tools.schemas import ErrorCode
 
@@ -32,7 +33,9 @@ from tests.test_tools_wealth_risk import AGGRESSIVE
 
 SESSION = "sess-f11"
 BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
-            "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2}      # → 26 分 → R3
+            "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2,
+            "knowledge": 2, "structure_exp": 2, "liquidity": 2, "liability": 2,
+            "concentration": 2, "volatility": 2}                        # → 44 分 → R3
 
 
 def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
@@ -201,6 +204,23 @@ def test_render_wealth_raises_on_missing_facts_key() -> None:
     assert render_lists.TemplateError is __import__("agent.templates", fromlist=["x"]).TemplateError
 
 
+def test_recommendation_replies_are_grouped_by_regulatory_category(seeded: Path) -> None:
+    """2026-10-29 用户要求：推荐**必须按大类分组**，不许把 25 只产品毫无规律地一锅烩。
+
+    组序照工具层 `CATEGORY_ORDER`（稳健 → 进取），组内保持 facts 原序（收益降序）；
+    `render_lists` 与 `agent.render_wealth` 是同一份实现（拆文件再导出），两边都能调。
+    """
+    result = wealth.recommend_wealth("R5")
+    reply = render_lists.render_wealth(result.facts)
+    headers = [line.strip("*") for line in reply.splitlines()
+               if line.startswith("**") and line.endswith("**")]
+    assert headers[0] == "现金管理类" and headers.index("现金管理类") < headers.index("权益类")
+    assert "券商收益凭证（雪球结构 · 非保本）" in headers
+    #: 每只产品都落在某个组下面：组数 = 不同大类数，明细行数 = 产品数
+    assert sum(1 for line in reply.splitlines() if line.startswith("- ")) == len(result.facts["items"])
+    assert render_wealth.wealth_groups([]) == []
+
+
 def test_recommendation_cards_appear_below_reply_with_buy_and_all_buttons(seeded: Path) -> None:
     """回归真实问题：卡片要在推荐回执下面，而不是聊天末尾的独立区块。"""
     from streamlit.testing.v1 import AppTest
@@ -208,7 +228,7 @@ def test_recommendation_cards_appear_below_reply_with_buy_and_all_buttons(seeded
 
     wealth.assess_risk(BALANCED)
     recommendation = wealth.recommend_wealth('R3')
-    assert recommendation.ok and len(recommendation.facts['items']) == 8
+    assert recommendation.ok and len(recommendation.facts['items']) == 14
     received = []
     turn = {'trace_id': 'wealth-test', 'intent': 'wealth_recommend', 'error_code': None,
             'reply': recommendation.message, 'facts': recommendation.facts,
@@ -249,7 +269,7 @@ def test_web_app_recommendation_renders_buttons_in_real_chat(monkeypatch, seeded
     assert not at.exception
     turn = at.session_state['turns'][-1]['turn']
     assert turn['intent'] == 'wealth_recommend' and not turn['error_code']
-    assert len(turn['facts']['items']) == 14
+    assert len(turn['facts']['items']) == 25
     assert sum(b.label == '订购' for b in at.button) == 4
     assert any(b.label == '查看全部产品 →' for b in at.button)
     assert any('模拟参考区间' in m['text'] for m in at.session_state['messages'])
@@ -279,17 +299,17 @@ def test_all_products_button_prompt_uses_catalog_even_if_llm_is_offline(monkeypa
     assert previous.intent == 'wealth_recommend' and not previous.error_code
     result = orchestrator.handle('看看全部理财产品', session_id='f11-all-products-button')
     assert result.intent == 'wealth_all_products' and not result.error_code
-    assert result.facts['total_count'] == 14
+    assert result.facts['total_count'] == 25
 
 
 def test_recommendation_shows_four_cards_and_can_expand_the_rest(seeded: Path) -> None:
-    """默认只铺 4 张卡（14 张会刷满好几屏），其余折叠在「展开其余 N 只」后面。"""
+    """默认只铺 4 张卡（25 张会刷满好几屏），其余折叠在「展开其余 N 只」后面。"""
     from streamlit.testing.v1 import AppTest
     from interfaces.web import components, wealth_ui
 
     wealth.assess_risk(AGGRESSIVE)
     recommendation = wealth.recommend_wealth('R5')
-    assert len(recommendation.facts['items']) == 14
+    assert len(recommendation.facts['items']) == 25
     turn = {'trace_id': 'expand', 'intent': 'wealth_recommend', 'error_code': None,
             'facts': recommendation.facts, 'states': ['REPLY'], 'tier': 'L0'}
 
@@ -303,9 +323,9 @@ def test_recommendation_shows_four_cards_and_can_expand_the_rest(seeded: Path) -
     assert not at.exception
     assert sum(b.label == '订购' for b in at.button) == 4
     toggle = next(b for b in at.button if b.label.startswith('展开其余'))
-    assert '10' in toggle.label                      # 14 - 4
+    assert '21' in toggle.label                      # 25 - 4
     toggle.click().run()
-    assert sum(b.label == '订购' for b in at.button) == 14
+    assert sum(b.label == '订购' for b in at.button) == 25
     assert any(b.label.startswith('收起') for b in at.button)
 
 

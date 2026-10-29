@@ -7,9 +7,9 @@
 
 两条路径分开（与 `payee_flow` 同构）：
 - 聊天触发：`orchestrator.handle()` 判出 `risk_assess` → 回一句引导语 + 让界面弹问卷（**不计分**）；
-- 表单提交：`submit_assessment(answers, session_id=...)` → 一次把 5 题交给 `tools.assess_risk` 计分。
+- 表单提交：`submit_assessment(answers, session_id=...)` → 一次把 15 题交给 `tools.assess_risk` 计分。
 
-**为什么是「一次收齐 5 题」而不是「逐题追问」**（本卡的口径，记交付说明）：
+**为什么是「一次收齐 15 题」而不是「逐题追问」**（本卡的口径，记交付说明）：
 问卷如果走逐题 CLARIFY，5 题会直接吃光编排层 `MAX_CLARIFY_ROUNDS = 2` 的额度 ——
 用户答到第 3 题就被「转人工」。而 `tools/_wealth_risk.py` 的 `_score()` 本就要求
 `answers` **恰好包含 5 题**（多一题少一题都拒），所以「一次收齐」才是与工具层契约对齐的形态。
@@ -37,13 +37,14 @@ from data import dao
 from agent import templates
 from agent._risk_questions import (      # noqa: F401 —— 再导出，保住 `risk_flow.<name>` 历史调用点
     ANSWER_ALIASES as _ANSWER_ALIASES,
+    QUESTION_GROUPS,
     QUESTION_KEYS_CN,
     QUESTION_WORDS as _QUESTION_WORDS,
     QUESTIONS,
     missing_questions,
 )
 from tools import wealth as wealth_tool
-from tools._wealth_risk import QUESTION_SCORE_RULE
+from tools._wealth_risk import QUESTION_SCORE_RULE, option_scores  # noqa: F401 —— option_scores 为再导出（界面标分用）
 from tools.schemas import ToolResult
 
 logger = logging.getLogger(__name__)

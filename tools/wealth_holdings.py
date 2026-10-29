@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from data import dao
 from tools._query_common import ToolError, _dao_reject, _fail, _money_facts, _ok, current_user_id
+from tools import _wealth_products
 from tools._wealth_risk import RISK_LABELS, _rank, _yield_text, require_assessment
 from tools.schemas import ErrorCode, ToolResult
 
@@ -65,7 +66,10 @@ def list_all_products() -> ToolResult:
               **_money_facts(int(row["min_amount"]), "min_amount")} for row in products]
     items.sort(key=lambda item: _rank(item["risk_level"]))
     fit = sum(1 for item in items if item["recommended"])
-    facts = {"items": items, "total_count": len(items), "fit_count": fit,
+    #: facts 里的每只产品带上"类型 + 结构化条款"（界面据此排版）；`data` 契约不含这两项
+    #:  —— 它们是展示口径，不是对外契约，改契约要动规格。
+    facts = {"items": [_wealth_products.merge(item) for item in items],
+             "total_count": len(items), "fit_count": fit,
              "user_risk_level": level, "user_risk_label": RISK_LABELS.get(level, level)}
     data = {"items": items, "total_count": len(items), "fit_count": fit,
             "user_risk_level": level}
