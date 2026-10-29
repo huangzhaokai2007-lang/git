@@ -37,7 +37,13 @@ def _dispatch(executor: ThreadPoolExecutor, session_id: str, intent: str,
               slots: dict, text: str) -> None:
     """按钮直达：清在途卡 → `write_flow.start` → 回执记进会话（与 `app._ask` 同口径）。"""
     confirm_card.clear(session_id)
+    if intent in ('payee_whitelist_edit', 'payee_note', 'payee_tags'):
+        st.session_state['payee-inline-intent'] = intent
+        st.session_state.pop('payee-edit-feedback', None)
     step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    if (st.session_state.get('payee-inline-intent') == intent
+            and executor.submit(confirm_card.current, session_id).result() is None):
+        st.session_state['payee-edit-feedback'] = step.reply or step.ask or ''
     state = st.session_state
     state["messages"].append({"role": "assistant", "text": step.reply or step.ask or "",
                               "turn": None})
@@ -69,7 +75,8 @@ def _editor(executor: ThreadPoolExecutor, session_id: str, person: dict, who: di
                                      key=f"d-q-{person['payee_id']}")
             expire_new = col_b.text_input("新的有效期（留空=不改）", key=f"d-e-{person['payee_id']}",
                                           placeholder="2026-12-31 或 月底")
-            if st.button("保存白名单信息（需验证码）", key=f"d-q-ok-{person['payee_id']}"):
+            if st.button("保存白名单信息（需验证码）", key=f"d-q-ok-{person['payee_id']}",
+                         disabled=not (quota.strip() or expire_new.strip())):
                 slots = dict(who)
                 if quota.strip():
                     slots["quota"] = quota.strip()
@@ -120,38 +127,56 @@ def _actions(executor: ThreadPoolExecutor, session_id: str, person: dict, who: d
         _dispatch(executor, session_id, "payee_delete", who, f"（按钮）删除收款人{name}")
 
 
-def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict) -> None:
+def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict, confirmation=None) -> None:
     """展开的详情：名字色条 → **编辑资料（放大）** → 标签 → 额度进度 → 元信息 → 操作。"""
     kind = _kind_of(person)
     who = {"payee_id": person["payee_id"], "payee": person["name"],
            "masked_phone": person["masked_phone"]}
     with st.container(border=True, key="payee-detail"):
-        premium_ui.card_head(f"{person['name']} · {person['masked_phone']}",
-                             f"银行 {person.get('bank') or '—'}　{KIND_CN[kind]}", tone=TONE[kind])
-        _editor(executor, session_id, person, who)          # ← 名字之下、放大
-        tags = person.get("tags") or []
-        if tags:
-            st.markdown(" ".join(f":blue-badge[{tag}]" for tag in tags))
-        if person.get("note"):
-            st.caption(f"备注：{person['note']}")
-        _quota_block(executor, person)
-        expire = person.get("whitelist_expire") or "长期"
-        card_no = person.get("card_no") or "未记录"
-        recent = (f"最近转账 {str(person['last_used_ts'])[:10]}"
-                  if person.get("last_used_ts") else "还没有转账记录")
-        st.caption(f"卡号 {card_no} · 白名单有效期 {expire} · {recent}")
-        _actions(executor, session_id, person, who)
+        verifying = bool(st.session_state.get('payee-inline-intent')) and confirmation is not None
+        main, side = st.columns([1.5, 1], gap='medium') if verifying else (st.container(), None)
+        with main:
+            premium_ui.card_head(f"{person['name']} · {person['masked_phone']}",
+                                 f"银行 {person.get('bank') or '—'}　{KIND_CN[kind]}", tone=TONE[kind])
+            _editor(executor, session_id, person, who)          # ← 名字之下、放大
+            tags = person.get("tags") or []
+            if tags:
+                st.markdown(" ".join(f":blue-badge[{tag}]" for tag in tags))
+            if person.get("note"):
+                st.caption(f"备注：{person['note']}")
+            _quota_block(executor, person)
+            expire = person.get("whitelist_expire") or "长期"
+            card_no = person.get("card_no") or "未记录"
+            recent = (f"最近转账 {str(person['last_used_ts'])[:10]}"
+                      if person.get("last_used_ts") else "还没有转账记录")
+            st.caption(f"卡号 {card_no} · 白名单有效期 {expire} · {recent}")
+            _actions(executor, session_id, person, who)
+        if side is not None:
+            with side, st.container(border=True, key="payee-verification"):
+                st.markdown('##### 保存修改')
+                st.caption(f"{person['name']} · {person['masked_phone']}")
+                draft = executor.submit(confirm_card.current, session_id).result()
+                if draft and draft.intent == st.session_state.get('payee-inline-intent'):
+                    if feedback := st.session_state.get('payee-edit-feedback'):
+                        st.info(feedback)
+                    confirmation(inline=True)
+                else:
+                    if feedback := st.session_state.get('payee-edit-feedback'):
+                        st.info(feedback)
+                    if st.button('收起', key='payee-verification-close'):
+                        st.session_state.pop('payee-inline-intent', None)
+                        st.session_state.pop('payee-edit-feedback', None)
+                        st.rerun()
+
 
 
 def _row_label(person: dict, kind: str) -> str:
-    """整行按钮的文案：头像字 + 姓名 + 脱敏号 + 银行 + 类型（一行内对齐）。"""
-    initial = str(person["name"])[:1] or "?"
-    text, _color, _bg = BADGE[kind]
-    return (f"**{initial}**　**{person['name']}**　　{person['masked_phone']}"
-            f"　　{person.get('bank') or '—'}　　{text}")
+    """整行按钮的文案：姓名 + 脱敏号 + 银行 + 类型（一行内对齐）。"""
+    return (f"**{person['name']}** {person['masked_phone']}"
+            f" {person.get('bank') or '—'} {KIND_CN[kind]}")
 
 
-def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) -> None:
+def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict], confirmation=None) -> None:
     """一列「整行按钮」；点谁就在谁下面拉开详情（再点收起）。"""
     opened = st.session_state.get("payee-open")
     premium_ui.card_head(f"👥 收款人管理（{len(people)} 位）",
@@ -164,8 +189,12 @@ def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict]) ->
         with st.container(key=f"payee-row-{payee_id}"):
             if st.button(f"{_row_label(person, kind)}", key=f"payee-open-{payee_id}",
                          width="stretch", help=f"点这一行{'收起' if opened == payee_id else '展开'}详情"):
+                if st.session_state.get('payee-inline-intent'):
+                    executor.submit(confirm_card.clear, session_id).result()
+                for key in ('payee-inline-intent', 'payee-edit-feedback'):
+                    st.session_state.pop(key, None)
                 st.session_state["payee-open"] = None if opened == payee_id else payee_id
                 st.rerun()
             st.caption(arrow) if False else None
         if opened == payee_id:
-            _detail(executor, session_id, person)
+            _detail(executor, session_id, person, confirmation)

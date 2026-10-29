@@ -15,12 +15,11 @@
 
 from __future__ import annotations
 
-import time
 from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import confirm_card, pending_slots, write_flow
+from agent import pending_slots, write_flow
 
 import premium_ui
 
@@ -65,25 +64,17 @@ def _field(slot: str) -> str:
 
 
 def _submit(executor: ThreadPoolExecutor, session_id: str, item: dict, values: dict) -> None:
-    """把表单内容合并进原槽位并继续（与文字补槽同一条路径）。"""
-    merged = {**item["slots"], **{k: v for k, v in values.items() if v}}
-    confirm_card.clear(session_id)
-    step = executor.submit(write_flow.start, item["intent"], merged, session_id).result()
-    state = st.session_state
-    state["messages"].append({"role": "assistant", "text": step.reply or step.ask or "",
-                              "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": "（表单填写）", "turn": None})
-    if step.missing:                                   # 还缺 → 继续登记（表单还会出现）
-        pending_slots.remember(session_id, item["intent"], merged, list(step.missing))
-    else:                                              # 补齐了 → **清掉登记**，表单不该再出现
-        pending_slots.clear(session_id)
+    """表单回灌统一编排，记录当前回执及可审计的确认状态。"""
+    import forms
+    turn = executor.submit(pending_slots.submit_form, session_id, values).result()
+    forms._record(st.session_state, turn, '（表单填写）')
     st.rerun()
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """有未完成的补槽 → 画一张表单卡；没有就不画。"""
     item = executor.submit(pending_slots.peek, session_id).result()
-    if not item:
+    if not item or item.get('intent') == 'gift_plan':
         return
     missing = [slot for slot in (item.get("missing") or []) if slot]
     #: 2026-10-28（用户要求）：群收款由卡面自己收集（总额/选人/按人金额），

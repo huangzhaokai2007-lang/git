@@ -30,6 +30,8 @@ button[kind="secondary"]:hover,button[kind="secondaryFormSubmit"]:hover,button[k
 }
 button[kind]:disabled{color:#858a94;border-color:#2c2f34;background:linear-gradient(155deg,#1c1e21,#141517);box-shadow:inset 0 1px 0 #ffffff05;cursor:not-allowed}
 button:focus-visible{outline:2px solid var(--bank-accent);outline-offset:3px}
+.st-key-subs-banner-dismiss button[kind]{min-width:28px;min-height:28px;padding:0;background:transparent;border:0;box-shadow:none;color:var(--bank-muted);font-size:20px}
+.st-key-subs-banner-dismiss button[kind]:hover{background:#ffffff08;color:var(--bank-title)}
 .st-key-detail-balance button[kind]{width:28px;height:28px;min-height:28px;padding:3px;border:0;background:transparent;box-shadow:none;border-radius:50%}
 .st-key-detail-balance button[kind]:hover{background:#24262b;border:0;box-shadow:none}
 .st-key-reveal-open button[kind],.st-key-detail-close button[kind],.st-key-lock-open button[kind],.st-key-lost-open button[kind]{box-sizing:border-box;width:144px;max-width:100%;height:40px;min-height:40px}
@@ -88,3 +90,11 @@ ul.tl .v{color:var(--bank-text);font-size:14px;word-break:break-word}
 .st-key-credit-limit-panel h3{font-size:20px;padding:.15rem 0 .5rem}
 @media(max-width:760px){[data-testid="stMainBlockContainer"]{padding:1.5rem 1rem 6rem}[data-testid="stBottomBlockContainer"]{padding:1rem}[data-testid="stChatMessage"]{padding:1rem .25rem}[data-testid="stForm"]{padding:14px}}
 @media(prefers-reduced-motion:reduce){button[kind]{transition:none}}
+:root{--bank-space:16px;--bank-radius:12px;--bank-motion:240ms;--bank-amount-font:Georgia,"Times New Roman",serif}
+.st-key-current-business{border-top:1px solid var(--bank-border);padding-top:var(--bank-space);margin-top:8px}
+.st-key-current-business>[data-testid="stVerticalBlock"]{gap:var(--bank-space)}
+.st-key-current-business [data-testid="stMetricValue"]{font-family:var(--bank-amount-font);font-weight:400;font-variant-numeric:tabular-nums}
+.st-key-workspace-scope{border:1px solid var(--bank-border);border-radius:var(--bank-radius);background:var(--bank-surface);padding:12px 16px}
+.st-key-workspace-scope [data-testid="stCaptionContainer"] p{font-size:14px;color:var(--bank-text)}
+[class*="st-key-workspace-next-"] button[kind],.st-key-workspace-retry button[kind]{min-height:40px}
+.st-key-current-business [data-testid="stMarkdownContainer"] table{font-family:"Segoe UI","Microsoft YaHei",sans-serif;font-size:14px;font-variant-numeric:tabular-nums}

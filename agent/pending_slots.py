@@ -96,6 +96,18 @@ def remaining(item: dict, filled: dict) -> list[str]:
     return [slot for slot in item["missing"] if not str(filled.get(slot) or "").strip()]
 
 
+def submit_form(session_id: str, values: dict):
+    """Continue the owned pending request through normal orchestration and audit."""
+    from agent import classifier, orchestrator
+    item = peek(session_id)
+    if item is None:
+        raise ValueError('这张填表卡已失效，请重新发起请求。')
+    slots = {**item['slots'], **{key: value for key, value in values.items()
+                               if key in item['missing'] and value}}
+    return orchestrator.handle('（表单填写）', session_id=session_id,
+        intent_resolver=lambda *_: classifier.IntentOut(intent=item['intent'], confidence=1, slots=slots))
+
+
 def resume(session_id: str, text: str, verdict: Any, *, trace_id: str = "") -> Any | None:
     """尝试续接（**在分类之后**调用，用分类结果决定怎么合并）。
 

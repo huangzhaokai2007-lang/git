@@ -15,9 +15,9 @@ ALIASES = {"card_bills": "cards", "card_transactions": "transactions",
            "wealth_maturity": "holdings", "wealth_risk_match": "products",
            "subscription_monthly_cost": "subscriptions", "subscription_upcoming": "subscriptions",
            "subscription_detail": "subscriptions", "product_detail": "products",
-           "merchant_breakdown": "transactions"}
+           "merchant_breakdown": "transactions", "txn_largest": "largest"}
 MODES = {"cards", "transactions", "detail", "comparison", "duplicates", "refunds",
-         "subscriptions", "holdings", "products", "card_detail", "card_limits", "payee_detail"}
+         "subscriptions", "holdings", "products", "card_detail", "card_limits", "payee_detail", "largest", "txn_cards"}
 
 
 def _validate(request: dict) -> str:
@@ -137,11 +137,24 @@ def read(intent: str, request: dict) -> ToolResult:
         mode = _validate(request)
         if (result := _delegated(mode, request)) is not None:
             return result
-        if mode != "detail" and not request.get("period") and not (request.get('date_from') and request.get('date_to')):
+        if mode not in ('detail', 'txn_cards') and not request.get("period") and not (request.get('date_from') and request.get('date_to')):
             raise ValueError("请提供有效账期")
-        if mode == "detail" and not request.get("txn_id"):
+        if mode in ('detail', 'txn_cards') and not request.get("txn_id"):
             raise ValueError("请提供流水标识")
         selected, bound = scope(request)
+        if mode == 'txn_cards':
+            source = rows(request, selected)
+            if not source:
+                return _fail(ErrorCode.FORBIDDEN, '该交易不在本人可查看范围内。')
+            associated = [{'card_id': c['id'], 'card_no_mask': c['card_no_mask'],
+                           'type': c['type'], 'status': c['status']} for c in bound
+                          if c['account_id'] == source[0]['account_id']]
+            data = {'items': associated, 'cards': associated, 'txn_id': source[0]['id'],
+                    'scope': selected, 'direct_card_attribution': False}
+            text = '流水仅记录关联账户，无法确认实际付款卡。'
+            text += ('已核验该账户的本人已绑定银行卡：' + '、'.join(safe(c['card_no_mask']) for c in associated)
+                     if associated else '该账户没有本人已绑定银行卡。')
+            return _ok(data, data, text)
         if request.get('txn_id') and mode != 'detail':
             source = rows({'txn_id': request['txn_id']}, selected)
             if not source:
@@ -150,6 +163,11 @@ def read(intent: str, request: dict) -> ToolResult:
                 request['counterparty'] = source[0]['counterparty']
             request.pop('txn_id')
         raw = rows(request, selected)
+        if mode == 'largest':
+            raw = sorted(raw, key=lambda row: (-abs(row['amount']), row['ts'], row['id']))[:1]
+            if not raw:
+                data = {'items': [], 'scope': selected, 'period': request.get('period'), 'mode': mode}
+                return _ok(data, data, '当前所选范围没有符合条件的交易，请更换月份或分类。')
         if request.get('large_only'):
             raw = sorted(raw, key=lambda row: abs(row['amount']), reverse=True)
         if mode == "detail" and not raw:

@@ -27,7 +27,7 @@ def accept(executor, session: str, turn) -> None:
         st.session_state['bound-card-query'] = True
 
 
-def render(executor, session: str, ask) -> None:
+def render(executor, session: str, ask, *, show_scope: bool = True) -> None:
     context = executor.submit(scene_flow.context, session).result()
     if not context.get('intent'):
         return
@@ -37,20 +37,31 @@ def render(executor, session: str, ask) -> None:
                      if r.get('card_id') == context.get('card_id')), None)
         if card:
             parts.append(card.get('card_no_mask', ''))
-        if parts:
+        if parts and show_scope:
             st.caption(' › '.join(parts))
         _selection(context, ask)
 
 
 def _selection(context: dict, ask) -> None:
-    domain = {'txn_query': 'txn', 'payee_list': 'payee', 'subscription_list': 'subscription',
+    domain = {'txn_query': 'txn', 'subscription_list': 'subscription',
               'wealth_holdings': 'product', 'wealth_all_products': 'product'}.get(context.get('intent'))
     rows = context.get('candidates', {}).get(domain, [])
-    if not rows:
+    if not rows or (domain == 'txn' and context.get('txn_id')):
         return
     labels = [str(row.get('merchant') or row.get('name') or row.get('counterparty') or row.get('id', ''))
               + (' · ' + str(row['ts']) if row.get('ts') else '') for row in rows]
     index = st.selectbox('选择项目继续查看', range(len(rows)), format_func=lambda i: labels[i],
                         key='scene-candidate-' + domain)
     st.button('查看所选详情', key='scene-select-' + domain,
-              on_click=ask, args=(f'第{index + 1}个',))
+              on_click=ask, args=(f'第{index + 1}个',),
+              kwargs={} if domain == 'txn' else
+              {'display': _selection_description(domain, rows[index], labels[index])})
+
+
+def _selection_description(domain: str, row: dict, label: str) -> str:
+    if domain == 'txn':
+        parts = [str(row.get('ts') or '').replace('T', ' '),
+                 str(row.get('counterparty') or row.get('merchant') or '交易'),
+                 str(row['amount_yuan']) + ' 元' if row.get('amount_yuan') is not None else '']
+        return '查看交易：' + ' · '.join(part for part in parts if part)
+    return '查看详情：' + label

@@ -148,7 +148,7 @@ def test_no_facts_means_no_card(monkeypatch: pytest.MonkeyPatch) -> None:
     at.chat_input[0].set_value("今天天气怎么样").run()
     assert not at.exception, at.exception
     page = _text(at)
-    assert "意图 `out_of_scope`" in page, [                  # 先确认这一问确实没接通（不是测错了对象）
+    assert at.session_state['messages'][-1]['turn']['intent'] == 'out_of_scope', [
         (m["role"], (m.get("turn") or {}).get("intent")) for m in at.session_state["messages"]]
     assert insight_ui.CARD_MARK not in page
     assert len(at.get("vega_lite_chart")) == baseline

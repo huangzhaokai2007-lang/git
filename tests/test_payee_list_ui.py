@@ -89,3 +89,46 @@ def test_list_styles_and_expand_animation_exist() -> None:
     assert "@keyframes dsh-expand" in css and ".st-key-payee-detail" in css
     assert 'class*="st-key-payee-row-"' in css                    # 行 hover
     assert "prefers-reduced-motion" in css
+
+
+def test_editor_and_verification_stay_beside_selected_payee(monkeypatch):
+    from agent import confirm_card
+    app = _app(monkeypatch)
+    app.chat_input[0].set_value("我的收款人有哪些").run()
+    next(b for b in app.button if "139****1001" in b.label).click().run()
+    assert not any(b.proto.id.endswith("-payee-verification") for b in app.get("flex_container"))
+    next(t for t in app.text_input if "新的专属额度" in t.label).set_value("2000").run()
+    next(b for b in app.button if b.label == "保存白名单信息（需验证码）").click().run()
+    assert not app.exception
+    panel = next(b for b in app.get("flex_container") if b.proto.id.endswith("-payee-verification"))
+    assert len([b for b in panel.button if b.key == "confirm-ok"]) == 1
+    assert len([b for b in app.button if b.key == "confirm-ok"]) == 1
+    next(b for b in app.button if b.key == "confirm-ok").click().run()
+    assert not app.exception
+    assert app.session_state['workspace-result']['scene'] == 'payee_list'
+    panel = next(b for b in app.get("flex_container") if b.proto.id.endswith("-payee-verification"))
+    assert any(t.key == "otp-code" for t in panel.text_input)
+    assert any("139****1001" in b.label for b in app.button)
+    app.text_input(key="otp-code").set_value("000000")
+    next(b for b in app.button if b.key == "otp-submit").click().run()
+    assert not app.exception
+    assert confirm_card.current(app.session_state['session_id']).stage == 'otp'
+    assert app.session_state['workspace-result']['scene'] == 'payee_list'
+    next(b for b in app.button if b.key == "otp-cancel").click().run()
+    assert not app.exception
+    assert confirm_card.current(app.session_state['session_id']) is None
+    assert app.session_state['workspace-result']['scene'] == 'payee_list'
+
+    import os
+    from tests.conftest import raw
+    next(b for b in app.button if b.label == "保存白名单信息（需验证码）").click().run()
+    next(b for b in app.button if b.key == "confirm-ok").click().run()
+    before = raw(os.environ['DB_PATH'], "SELECT whitelist_quota FROM payee WHERE name = '李四'")[0]['whitelist_quota']
+    assert before != 200000
+    app.text_input(key="otp-code").set_value("123456")
+    next(b for b in app.button if b.key == "otp-submit").click().run()
+    assert not app.exception
+    assert raw(os.environ['DB_PATH'], "SELECT whitelist_quota FROM payee WHERE name = '李四'")[0]['whitelist_quota'] == 200000
+    assert app.session_state['workspace-result']['scene'] == 'payee_list'
+    assert confirm_card.current(app.session_state['session_id']) is None
+    assert any(b.proto.id.endswith('-payee-verification') for b in app.get('flex_container'))

@@ -112,10 +112,10 @@ def test_whitelist_reply_is_drawn_as_an_interactive_list(monkeypatch: pytest.Mon
     at.chat_input[0].set_value("我的白名单有哪些").run()
     assert not at.exception, at.exception
     page = _markdown(at)
-    assert 'class="payee-card"' not in page                    # 静态卡不再上屏
-    assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page    # 裸 Markdown 表格也没有
-    # 可交互列表：每人一行 + 行尾 ▸
+    assert at.session_state['workspace-result']['scene'] == 'payee_list'
+    assert 'class="payee-card"' not in page
+    assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page
     row_buttons = [button for button in at.button if "****" in button.label]
-    assert len(row_buttons) == 5, f"应有 5 个整行按钮，实际 {len(row_buttons)}"
+    assert len(row_buttons) == 5
     assert "139****1001" in "\n".join(button.label for button in row_buttons)
-    assert "trace_id" in "\n".join(str(e.value) for e in at.caption)   # 回执元信息照旧
+    assert "trace_id" not in "\n".join(str(e.value) for e in at.caption)

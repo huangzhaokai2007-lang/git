@@ -62,7 +62,6 @@ def _ledger_card_follows(turn: Mapping[str, Any], *, is_last: bool) -> bool:
             and not turn.get("ask") and not turn.get("error_code")
             and bool((turn.get("facts") or {}).get("items")))
 
-
 def _esc(value: object) -> str:
     """HTML 转义（用户输入与回执都可能带尖括号）。"""
     return html.escape("" if value is None else str(value))
@@ -84,31 +83,36 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                *, payee_card: Callable[[str], bool] | None = None,
                insight_card: Callable[[Mapping[str, Any], str], bool] | None = None,
                bill_details: Callable[[dict, str], dict] | None = None,
+               compact: bool = False,
+               legacy_bills: bool = False,
                wealth_card: Callable[[Mapping[str, Any], str], None] | None = None,
                risk_card: Callable[[Mapping[str, Any], str], None] | None = None,
                subscription_card: Callable[[Mapping[str, Any], str], None] | None = None,
                wealth_start: int = 0) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
-    #: 卡片挂在「哪一条回执」上，两类不同（见下）：推荐挂最近一次，订阅挂最后一条。
+    #: 不改变账单卡片接管表格的既有行为；理财 / 订阅卡片仅追随当前工作区最后一条回执。
     recent_reply = next((i for i in range(len(messages) - 1, wealth_start - 1, -1)
                          if messages[i].get('role') == 'assistant' and messages[i].get('turn')), -1)
     recent_intent = (messages[recent_reply]['turn'].get('intent') if recent_reply >= 0 else None)
-    #: 订阅卡片仍只在「最后一条业务回执确为订阅列表」时画：卡上的按钮是**取消**，
-    #: 后续操作后还留着，用户可能误以为它作用于当前结果。
-    recent_subs = (recent_reply if recent_intent in ('subscription_list', 'subscription_remind')
-                   else -1)
-    #: 推荐卡片默认同样挂最后一条；**例外**：「全部产品」是推荐卡上那个按钮点进来的下钻视图，
-    #: 这时必须保留上一条推荐卡 —— 否则用户回头看，K 线和区间图例整块消失了（用户反馈的 bug）。
     recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
     #: 风险卡（"还没测评"的入口）同样只挂最后一条：后续操作后还留着按钮会让人以为要重测。
     recent_risk = recent_reply if recent_intent == 'risk_assess' else -1
     if recent_wealth < 0 and recent_intent == 'wealth_all_products':
         recent_wealth = next((i for i in range(recent_reply - 1, wealth_start - 1, -1)
-                              if messages[i].get('role') == 'assistant'
-                              and (messages[i].get('turn') or {}).get('intent') == 'wealth_recommend'),
-                             -1)
+            if (messages[i].get('turn') or {}).get('intent') == 'wealth_recommend'), -1)
+    recent_subs = (recent_reply if recent_intent in ('subscription_list', 'subscription_remind')
+                   else -1)
+    insight_index = next((i for i in range(len(messages) - 1, -1, -1)
+        if (messages[i].get('turn') or {}).get('intent') in
+        ('txn_query', 'bill_analysis', 'bill_report', 'anomaly_check')), -1) if legacy_bills else len(messages) - 1
     for index, message in enumerate(messages):
         turn = message.get("turn") or {}
+        if compact and not (legacy_bills and turn.get('intent') in
+                            ('txn_query', 'bill_analysis', 'bill_report', 'anomaly_check')):
+            from interfaces.web.workspace_ui import summary
+            with st.chat_message(message['role']):
+                st.markdown(message['text'] if message['role'] == 'user' else summary(message))
+            continue
         if (message["role"] == "assistant" and turn.get("intent") == "card_query"
                 and turn.get("tool_calls") == ["list_bound_cards"]
                 and (turn.get("facts") or {}).get("items")
@@ -123,10 +127,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                 if message["role"] == "assistant":
                     key = f"{index}:{(turn or {}).get('trace_id', 'greeting')}"
                     #: 卡片会把这批数画成「走势图 + 逐笔明细表」→ 气泡里只留头句（不留重复的表格）。
-                    #: 2026-10-28 合入 main 时这里被改成印全量回执（main 侧删掉了 `_head_only`），
-                    #: 本分支的验收口径是「卡片接管表格，气泡不再铺一遍」，故恢复裁剪。
                     text = (_head_only(message["text"]) if _ledger_card_follows(
-                        turn or {}, is_last=index == len(messages) - 1) else message["text"])
+                        turn or {}, is_last=index == insight_index) else message["text"])
                     if not spending_pie.render_reply(text, turn or {}, key=key,
                             animate=index == len(messages) - 1, detail_loader=bill_details):
                         reply_animation.render(text, key, animate=index == len(messages) - 1)
@@ -142,7 +144,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                     risk_card(turn, f"risk-{index}")
                 if subscription_card is not None and index == recent_subs and message['role'] == 'assistant':
                     subscription_card(turn, f"subs-{index}")
-                if insight_card is not None and message["role"] == "assistant" and index == len(messages) - 1:
+                if insight_card is not None and message["role"] == "assistant" and index == insight_index:
                     insight_card(turn, f"insight-{index}")
 
 
@@ -232,8 +234,22 @@ def _evidence(confirmation: Any) -> None:
     premium_ui.evidence(confirmation)
 
 
-def confirm_card(confirmation: Any) -> str | None:
+def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
+    if compact:
+        st.markdown('**核对修改**')
+        for line in confirmation.card_text.splitlines():
+            if line.startswith(('【', '状态：', '意图：', '收款人：', '权限档：', '请回复')):
+                continue
+            if line.strip():
+                st.markdown(line)
+        st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后保存。')
+        left, right = st.columns(2)
+        if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
+            return 'confirm'
+        if right.button('✖ 取消', key='confirm-cancel', width='stretch'):
+            return 'cancel'
+        return None
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
     target = _CARD_TARGET.get(intent, "收款人")
@@ -267,17 +283,20 @@ def confirm_card(confirmation: Any) -> str | None:
     return None
 
 
-def otp_card(confirmation: Any) -> tuple[str, str] | None:
+def otp_card(confirmation: Any, *, compact: bool = False) -> tuple[str, str] | None:
     '等 OTP：只收集验证码，交编排层 → 工具层校验（界面不比对、不知晓正确值）。'
     target = _CARD_TARGET.get(str(confirmation.intent), "收款人")
-    with st.container(border=True):
+    with st.container(border=not compact):
         st.markdown("##### 🔐 请输入短信验证码")
-        st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）· "
-                   f"金额 {_esc(confirmation.amount_yuan)} 元 · 权限档 {_esc(confirmation.tier)}")
+        if compact:
+            st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）")
+        else:
+            st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）· "
+                       f"金额 {_esc(confirmation.amount_yuan)} 元 · 权限档 {_esc(confirmation.tier)}")
         with st.form("otp-form", clear_on_submit=True):
             code = st.text_input("短信验证码", type="password", key="otp-code",
                                  placeholder="请输入 6 位短信验证码", label_visibility="collapsed")
-            left, right, _rest = st.columns([1, 1, 3])
+            left, right = st.columns(2) if compact else st.columns([1, 1, 3])[:2]
             submitted = left.form_submit_button("提交验证码", type="primary", key="otp-submit",
                                                width="stretch")
             cancelled = right.form_submit_button("取消", key="otp-cancel", width="stretch")

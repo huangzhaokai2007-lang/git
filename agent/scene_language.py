@@ -11,6 +11,7 @@ import re
 from agent.classifier import SLOT_SCHEMA
 from agent.period import anchor_period, resolve_period
 from agent.scene_phrases import ALIASES, extra
+from agent.scene_context import read_scope
 
 _BILLS = {'txn_query', 'bill_analysis', 'bill_report', 'anomaly_check'}
 #: 规格 §3 / `classifier.SYSTEM_PROMPT` 的「账单总结」触发词：只有**明确要一份成品报告**的说法
@@ -187,6 +188,10 @@ def _amend(text: str, context: dict) -> dict | None:
 
 
 def _card(text: str, context: dict) -> dict | None:
+    if _domain(context) == 'card' and text in ('这张卡的详情', '这张卡详情', '卡片详情', '看看详情'):
+        card = _entity(text, context, 'card')
+        return _out('card_query', read_request={'kind': 'card_detail', 'card_id': card}) if card else _out(
+            'card_query', ask='请先选择具体银行卡。')
     reference = r'(?:这张(?:卡)?|尾号\d{4}(?:的卡)?|第[一二两三四五六七八九十\d]+张(?:卡)?)'
     writes = [(rf'(?:锁卡|锁住?{reference}|(?:把)?{reference}锁住?|冻结{reference})', 'card_lock'),
               (rf'(?:解锁(?:{reference})?|(?:把)?{reference}解锁|解冻{reference})', 'card_unlock'),
@@ -206,6 +211,12 @@ def _card(text: str, context: dict) -> dict | None:
 def _txn(text: str, context: dict) -> dict | None:
     if _domain(context) != 'txn':
         return None
+    if text in ('最大的一笔', '最大那笔', '最大一笔', '最大的一笔呢', '哪笔最大', '金额最大的一笔'):
+        return _out('txn_query', read_request={'kind': 'txn_largest', **read_scope(context)})
+    if text in ('用的是哪张卡', '这笔用的是哪张卡', '这笔是哪张卡', '关联哪张卡', '查看关联卡'):
+        txn = context.get('txn_id')
+        return _out('card_query', read_request={'kind': 'txn_cards', **read_scope(context), 'txn_id': txn}) if txn else _out(
+            'txn_query', ask='请先选择具体交易，再查看其关联账户的银行卡。')
     filters = {'食品餐饮': {'category': '食品餐饮'}, '餐饮占多少': {'category': '食品餐饮'},
                '只看收入': {'direction': 'income'}, '只看支出': {'direction': 'expense'},
                '大额': {'large_only': True}, '大额呢': {'large_only': True},

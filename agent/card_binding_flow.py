@@ -79,6 +79,8 @@ def reveal(card_id: str, password: str, session_id: str) -> dict:
 def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 0,
            session_id: str | None = None) -> "Turn":
     from agent import orchestrator
+    from agent import web_features
+    web_features.clear_removed_drafts(session_id or 'binding')
 
     if safe_chat_text(text) != text:
         trace_id = f"trace-{uuid.uuid4().hex[:12]}"
@@ -122,7 +124,8 @@ def _resolve_intent(text: str, history: list[str] | None) -> classifier.IntentOu
     #: 理财卡的「开始风险测评」同理：固定文案直接定意图（L0 只读，界面据 intent 弹问卷）。
     if str(text).split("\n", 1)[0].strip() in _ASSESS_TEXTS:
         return classifier.IntentOut(intent="risk_assess", confidence=1.0, slots={})
-    return classifier.classify(text, history)
+    from agent import web_features
+    return web_features.available(classifier.classify(text, history))
 
 
 def safe_chat_text(text: str) -> str:
