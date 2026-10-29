@@ -73,9 +73,11 @@ CARD_TEMPLATE = """【{title}】
 状态：{state}
 意图：{intent_cn}
 {rows}
-权限档：{tier}{otp_hint}
-风险提示：{risk_note}
+{policy}风险提示：{risk_note}
 请回复「确认」继续；回复其它内容，我们重新填写。"""
+
+#: 2026-10-28（用户要求）：群收款卡面**不显示**「权限档 / 短信验证码」这两行。
+POLICY_LINE = "权限档：{tier}{otp_hint}\n"
 
 PENDING_TEMPLATE = """【待人工复核】这笔{what}按规格 §5 属 L3：{reason}
 编号：{pending_id}
@@ -124,8 +126,12 @@ def render(card: CardInput) -> str:
     rows = "\n".join(f"{label}：{value}" for label, value in card.rows)
     state = STATE_WAIT_OTP if card.requires_otp else f"{STATE_DRAFT}（待你确认）"
     payload = card.model_dump(exclude={"rows"})
-    return CARD_TEMPLATE.format(otp_hint="（需输入短信验证码）" if card.requires_otp else "",
-                                state=state_line(state), rows=rows, **payload)
+    #: 2026-10-28（用户要求）：群收款的卡面去掉「权限档 / 短信验证码」两行 ——
+    #: 这两行对"谁该给我多少"没用，只是噪音。
+    otp_hint = "（需输入短信验证码）" if card.requires_otp else ""
+    policy = "" if card.intent_cn == "群收款" else POLICY_LINE.format(tier=card.tier,
+                                                                       otp_hint=otp_hint)
+    return CARD_TEMPLATE.format(otp_hint=otp_hint, policy=policy, state=state_line(state), rows=rows, **payload)
 
 
 def is_confirmation(text: str) -> bool:

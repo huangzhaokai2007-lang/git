@@ -152,6 +152,16 @@ import streamlit as st
 from agent import confirm_card, payee_resolve, payee_risk, write_flow
 
 
+def suppress_payee_card(reply: str) -> bool:
+    """**消费但不画**：认出这是收款人表格 → 返回 True，让 `transcript` 跳过原文。
+
+    2026-10-28：问收款人时改由下方「收款人管理」列表接管（可点开），聊天里那张静态卡不要了；
+    但如果直接传 `None`，回执里的 Markdown 表格会**照原样上屏**（实测），
+    所以保留一个"吃掉它"的渲染器。
+    """
+    return parse_payee_reply(reply) is not None
+
+
 def _detail_ui():
     """取同目录的 `payee_detail_ui`（人名选项 + 专属操作卡）。
 
@@ -210,7 +220,7 @@ def _dispatch_start(executor: ThreadPoolExecutor, session_id: str, intent: str,
 
 
 #: 2026-10-24（人类规格「查询卡支持全部/白名单/黑名单/已过期白名单筛选」）
-_FILTERS = ("全部", "白名单", "黑名单", "已过期白名单")
+_FILTERS = ("全部", "白名单", "黑名单", "普通收款人")
 
 
 def _is_expired(person: dict) -> bool:
@@ -246,14 +256,15 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     st.caption(f"共 {len(all_people)} 人 · 白名单 "
                f"{sum(1 for p in all_people if p['is_whitelist'])} 人 · 黑名单 "
                f"{sum(1 for p in all_people if p['blacklist'])} 人 · 已过期白名单 "
-               f"{sum(1 for p in all_people if _is_expired(p))} 人")
+               f"{sum(1 for p in all_people if _is_expired(p))} 人（已过期）")
     picked = st.radio("筛选", _FILTERS, horizontal=True, key="payee-filter",
                       label_visibility="collapsed")
     people = [p for p in all_people
               if picked == "全部"
               or (picked == "白名单" and p["is_whitelist"] and not _is_expired(p))
               or (picked == "黑名单" and p["blacklist"])
-              or (picked == "已过期白名单" and _is_expired(p))]
+              or (picked == "普通收款人"
+                  and not p["blacklist"] and (not p["is_whitelist"] or _is_expired(p)))]
     if not people:
         st.caption("这一筛选下没有收款人。")
         return

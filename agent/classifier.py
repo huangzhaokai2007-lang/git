@@ -94,7 +94,7 @@ SLOT_SCHEMA: dict[str, tuple[str, ...]] = {
     "gift_order_advance": ("order_id", "action"),                          # T49 发货/完成
     "aa_list": ("status",),                                                # T42 查 AA（可选状态）
     "aa_mark_paid": ("payee",),                                            # T43 登记某人已付
-    "aa_cancel": (),                                                       # T44 撤销 AA
+    "aa_cancel": (),                                                       # T44 撤销群收款
     "aa_remind": ("request_id", "payee"),                                  # T48 提醒未付
     "payee_whitelist_edit": ("payee", "quota", "expire"),                  # 修改白名单信息
     "payee_whitelist_remove": ("payee",),                                  # 移出白名单
@@ -205,10 +205,10 @@ SYSTEM_PROMPT = (
     "payee_whitelist_edit（修改白名单信息）：「把王五的额度改成 5000」「白名单有效期改到 2026-12-31」；"
     "`quota` 填元、`expire` 填日期原话。payee_whitelist_remove（移出白名单）：「把王五移出白名单」。\n"
     "payee_note（改备注）：「给王五加个备注」「把李四的备注改成老同学」。\n"
-    "aa_list（查 AA）的判定：「我的 AA」「AA 收款进行中」「谁还没付」都判它；`status` 说了才填。"
+    "aa_list（查 AA）的判定：「我的群收款」「群收款进行中」「谁还没付」都判它；`status` 说了才填。"
     "aa_remind（提醒未付）：「提醒赵六付款」「催一下没付的人」；`payee` 填那个人。\n"
     "aa_mark_paid（登记已付）：「赵六付了」「把张三标成已付」；`payee` 填那个人。"
-    "aa_cancel（撤销 AA）：「把那个 AA 撤了」；与 aa_collect（新建）划清。\n"
+    "aa_cancel（撤销群收款）：「把那个群收款 撤了」；与 aa_collect（新建）划清。\n"
     "gift_order_advance（发货/完成）：「这单礼物发了」「标记成已发货」→ action=发货；"
     "「这单完成了」→ action=完成。\n"
     "gift_order_cancel / gift_order_pay（订单状态流转）的判定：「取消那个礼物订单」→"
@@ -225,7 +225,7 @@ SYSTEM_PROMPT = (
     "scheduled_run（立即执行预约）的判定：「现在就把那笔预约转了」「立即执行我的预约」都判它；"
     "无槽位（哪一笔由流程挑）。scheduled_modify（改预约时间）的判定：「把那笔预约改到明天」"
     "「预约时间改成 2026-11-01 09:00」都判它；`schedule` 槽位填**新时间**。\n"
-    "aa_collect（AA 收款）的判定：「向张三和李四 AA 收款 100 元」「大家 AA 一下」都判它；"
+    "aa_collect（群收款）的判定：「向张三和李四 群收款 100 元」「大家 AA 一下」都判它；"
     "`payee_ids` 填名单，`amount` 填总额；若用户说「王五 100 元、赵六 200 元」这种**按人金额**，"
     "把整句原样放进 `amounts` 槽位，`amount` 可以不填（合计由系统算）。\n"
     "payee_delete（删除收款人）的判定：「把王小明删掉」「删除收款人张三」都判它；"

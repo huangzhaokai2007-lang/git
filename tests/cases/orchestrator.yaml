@@ -123,37 +123,37 @@
   expect: {intent: transfer_scheduled, tool_calls: [schedule_transfer], tier: L1, executed: true,
            must_contain: ["预约", "不会扣款"], must_not_contain: ["已向"]}
 
-# ---------------- AA 收款 5（F15） ----------------
+# ---------------- 群收款 5（F15） ----------------
 - id: aa-001
-  input: "向王五和赵六 AA 收款 300 元"
+  input: "向王五和赵六 群收款 300 元"
   slots: {payee_ids: [王五, 赵六], amount: "300.00"}
   # F15 验收第 2 条：**确认前不发起请求**。T9 没有 preview_*，PRECHECK 阶段一个工具都没调，
   # 故 tool_calls 必须为空 —— 若谎报 create_aa_request，就等于自称「已经发起过」。
   # 2026-10-24 口径：**含非白名单（赵六）→ 要验证码**；全是有效白名单才 L1 免码。
   expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false, requires_otp: false,
-           must_contain: ["AA 收款确认卡", "每人", "余数", "一键均摊"],
+           must_contain: ["群收款确认卡", "每人", "余数", "一键均摊"],
            must_not_contain: ["已发起"]}
 - id: aa-002
-  input: "向王五和赵六 AA 收款 300 元"
+  input: "向王五和赵六 群收款 300 元"
   slots: {payee_ids: [王五, 赵六], amount: "300.00"}
   turns: ["确认"]
   # 2026-10-25 口径：AA 是**收款**方向 → 一律免码；「确认」即真发起（T9 被调用、落库、给单号）。
   expect: {intent: aa_collect, tool_calls: [create_aa_request], tier: L1, executed: true,
-           must_contain: ["AA 单号"], must_not_contain: ["验证码"]}
+           must_contain: ["群收款单号"], must_not_contain: ["验证码"]}
 - id: aa-003
-  input: "三个人一起，向王五、赵六、张小美 AA 收款 100 元"
+  input: "三个人一起，向王五、赵六、张小美 群收款 100 元"
   slots: {payee_ids: [王五, 赵六, 张小美], amount: "100.00"}
   # 余数边界：10000 分 ÷ 3 = 3333 分/人，余 1 分（= 0.01 元）给发起人 —— 整数分均摊，禁浮点。
   expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
            must_contain: ["33.33", "0.01", "3 人"]}
 - id: aa-004
-  input: "向王五、王五、赵六 AA 收款 60 元"
+  input: "向王五、王五、赵六 群收款 60 元"
   slots: {payee_ids: [王五, 王五, 赵六], amount: "60.00"}
   # 去重：T9 对重复收款人直接 INVALID_ARGUMENT，故编排层先按 id 去重（F15 验收第 1 条）。
   expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
            must_contain: ["2 人"], must_not_contain: ["重复"]}
 - id: aa-005
-  input: "向查无此人 AA 收款 50 元"
+  input: "向查无此人 群收款 50 元"
   slots: {payee_ids: [查无此人], amount: "50.00"}
   # 零命中 → 缺槽追问，**绝不擅自选一个**（F15 验收第 1 条）。
   expect: {intent: aa_collect, tool_calls: [], tier: null, executed: false,

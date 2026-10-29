@@ -111,7 +111,7 @@ def test_orchestration_aa_lifecycle(wired, monkeypatch) -> None:
     assert "CONFIRM_CARD" in card.states
     # 2026-10-25 口径：AA 是收款方向，一律免码 → 「确认」即发起，没有验证码阶段
     done = orchestrator.handle("确认", session_id=SESSION)
-    assert done.executed is True and "AA 单号 aa_" in done.reply
+    assert done.executed is True and "群收款单号 aa_" in done.reply
 
     def chat_json2(system: str, user: object, schema):
         if getattr(schema, "__name__", "") == "IntentOut":
