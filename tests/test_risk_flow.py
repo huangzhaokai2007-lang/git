@@ -33,13 +33,13 @@ from tools.schemas import ErrorCode
 from tests.conftest import assert_covered
 
 SESSION = "sess-f10"
-#: 三档答卷：合计 10 / 26 / 43 分 → R1 / R3 / R5（与工具层单测同一批事实，便于交叉核对）
-CONSERVATIVE = {"age": 22, "experience": 0, "income": 1, "income_level": 0, "asset_ratio": 0,
-                "drawdown": 0, "horizon": 0, "goal": 0, "reaction": 0}
-BALANCED = {"age": 35, "experience": 2, "income": 2, "income_level": 2, "asset_ratio": 2,
-            "drawdown": 2, "horizon": 2, "goal": 2, "reaction": 2}
-AGGRESSIVE = {"age": 50, "experience": 4, "income": 4, "income_level": 4, "asset_ratio": 4,
-              "drawdown": 4, "horizon": 4, "goal": 4, "reaction": 4}
+#: 三档答卷：合计 15 / 44 / 73 分 → R1 / R3 / R5（与工具层单测同一批事实，便于交叉核对）
+_LOW = {"experience": 0, "income": 0, "income_level": 0, "asset_ratio": 0, "drawdown": 0,
+        "horizon": 0, "goal": 0, "reaction": 0, "knowledge": 0, "structure_exp": 0,
+        "liquidity": 0, "liability": 0, "concentration": 0, "volatility": 0}
+CONSERVATIVE = {"age": 22, **_LOW}
+BALANCED = {"age": 35, **{key: 2 for key in _LOW}}
+AGGRESSIVE = {"age": 50, **{key: 4 for key in _LOW}}
 
 
 def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict]) -> None:
@@ -58,14 +58,23 @@ def out(intent: str, *, slots: dict | None = None, confidence: float = 0.9) -> d
             "missing_slots": [], "unsafe_reason": None}
 
 
+#: 一句话里各题的称呼词（对齐 `QUESTION_WORDS` 的短称）。选项文案自带标点要先去掉 ——
+#: 否则会被当成段分隔符切开，后半段没有称呼词就认不出是哪一题（实测：波动题的「天天看，受不了」）。
+_SENTENCE_WORDS = (("experience", "经验"), ("knowledge", "知识"),
+                   ("structure_exp", "结构化"), ("income", "收入"),
+                   ("income_level", "年收入"), ("asset_ratio", "资金占比"),
+                   ("liability", "负债"), ("concentration", "集中度"),
+                   ("horizon", "期限"), ("goal", "目标"), ("liquidity", "流动性"),
+                   ("drawdown", "回撤"), ("reaction", "下跌时"),
+                   ("volatility", "波动"))
+
+
 def one_sentence(answers: dict) -> str:
-    """把一份答卷渲染成一句话（供解析器用例用）—— 9 题全覆盖。"""
+    """把一份答卷渲染成一句话（供解析器用例用）—— 15 题全覆盖。"""
     parts = [f"年龄{answers['age']}"]
-    for key, word in (("experience", "经验"), ("income", "收入"),
-                      ("income_level", "年收入"), ("asset_ratio", "资金占比"),
-                      ("drawdown", "回撤"), ("horizon", "期限"),
-                      ("goal", "目标"), ("reaction", "下跌时")):
-        parts.append(f"{word}{risk_flow.QUESTIONS[key][1][answers[key]]}")
+    for key, word in _SENTENCE_WORDS:
+        option = risk_flow.QUESTIONS[key][1][answers[key]].replace("，", "").replace("、", "")
+        parts.append(f"{word}{option}")
     return "，".join(parts)
 
 
@@ -89,14 +98,14 @@ def test_the_prompt_is_the_template_constant_not_a_second_copy() -> None:
 # ---------------- ② 一句话说全 5 题 → 直接算 ----------------
 
 @pytest.mark.parametrize(("answers", "level", "score"), [
-    (CONSERVATIVE, "R1", 10), (BALANCED, "R3", 26), (AGGRESSIVE, "R5", 43),
+    (CONSERVATIVE, "R1", 15), (BALANCED, "R3", 44), (AGGRESSIVE, "R5", 73),
 ])
 def test_a_complete_sentence_is_scored_in_one_shot(seeded: Path, monkeypatch: pytest.MonkeyPatch,
                                                    answers: dict, level: str, score: int) -> None:
-    """5 题一次说全 → 直接调工具算完，**不弹问卷**（实测缺陷：曾在 `answers` 已齐全时仍弹问卷）。"""
+    """15 题一次说全 → 直接调工具算完，**不弹问卷**（实测缺陷：曾在 `answers` 已齐全时仍弹问卷）。"""
     fake_llm(monkeypatch, [out("risk_assess", slots={"answers": one_sentence(answers)})])
     turn = orchestrator.handle("帮我做风险测评，" + one_sentence(answers))
-    assert turn.tool_calls == ["assess_risk"], "5 题齐全却没直接算"
+    assert turn.tool_calls == ["assess_risk"], "15 题齐全却没直接算"
     assert _wealth_risk.risk_label(level) in turn.reply and f"{score} 分" in turn.reply
 
 
@@ -108,7 +117,7 @@ def test_a_complete_sentence_is_scored_in_one_shot(seeded: Path, monkeypatch: py
 def test_parser_accepts_both_word_orders_and_spacing(sentence: str) -> None:
     """「年龄35」与「35岁」两种语序、有无空格，都要解析成同一份答卷。
 
-    句子只覆盖 5 题（老用例），故只比对这 5 题 —— 另外 4 题缺省不参与。
+    句子只覆盖 5 题（老用例），故只比对这 5 题 —— 另外 10 题缺省不参与。
     """
     got = risk_flow.parse_answers(sentence)
     assert (got["age"], got["experience"], got["income"], got["drawdown"], got["horizon"]) \
@@ -218,7 +227,7 @@ def test_parser_returns_empty_on_garbage_instead_of_guessing(garbage: str) -> No
 
 
 def test_missing_questions_helper_matches_the_tool_contract() -> None:
-    """`missing_questions` 与工具层 `_score()` 的五题契约对齐（多一题少一题都拒）。"""
+    """`missing_questions` 与工具层 `_score()` 的 15 题契约对齐（多一题少一题都拒）。"""
     assert risk_flow.missing_questions(BALANCED) == []
-    assert len(risk_flow.missing_questions({"age": 35})) == 8
+    assert len(risk_flow.missing_questions({"age": 35})) == 14
     assert risk_flow.count_covers_every_question({**BALANCED, "extra": 1}) is False

@@ -123,7 +123,7 @@ def test_generate_reset_overwrites_and_main_returns_two_on_conflict(tmp_path: Pa
 # ---------- 主数据规模 ----------
 
 @pytest.mark.parametrize("table,expected", [("user", 1), ("account", 2), ("txn", TXN_COUNT), ("card", 3),
-                                            ("subscription", 6), ("wealth_product", 14), ("holding", 2),
+                                            ("subscription", 6), ("wealth_product", 25), ("holding", 2),
                                             ("payee", 5), ("audit_log", 1), ("risk_event", 0)])
 def test_row_counts(conn: sqlite3.Connection, table: str, expected: int) -> None:
     assert len(rows(conn, table)) == expected
