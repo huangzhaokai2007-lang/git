@@ -117,3 +117,31 @@ def test_people_parsed_from_speech_are_prefilled(monkeypatch: pytest.MonkeyPatch
     captions = "\n".join(str(element.value) for element in app.caption)
     assert "王五、赵六" in captions, "已解析的参与人没有带进卡面"
     assert "3 人（含我）" in captions                    # 2 人 + 我
+
+
+def test_confirm_button_actually_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户实测：「点击确认后直接卡 bug」—— 确认按钮必须真的走完执行，且不抛异常。
+
+    根因：卡面里调了**不存在**的 `write_flow.confirm`（AttributeError）。
+    """
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"], "amount": "300"},
+                                          "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    assert not app.exception, app.exception
+
+    button = next(b for b in app.button if b.label == "✅ 确认")
+    button.click().run()
+    assert not app.exception, app.exception
+    captions = "\n".join(str(element.value) for element in app.caption)
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "已发起" in captions or "已发起" in marks or "待收" in marks

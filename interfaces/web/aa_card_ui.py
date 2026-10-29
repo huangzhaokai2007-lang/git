@@ -34,6 +34,17 @@ def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
     st.rerun()
 
 
+def _say(executor: ThreadPoolExecutor, session_id: str, text: str, summary: str) -> None:
+    """把一句话交给编排层（按钮 = 打字），然后 rerun。"""
+    from agent import orchestrator
+
+    turn = executor.submit(orchestrator.handle, text, session_id=session_id).result()
+    state = st.session_state
+    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": None})
+    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    st.rerun()
+
+
 def _toggle(key: str) -> None:
     st.session_state[key] = not st.session_state.get(key, False)
 
@@ -57,12 +68,13 @@ def _confirm_panel(executor: ThreadPoolExecutor, session_id: str, confirmation) 
         for label, value in rows:
             st.markdown(f"**{label}**　{value}")
         left, middle, right = st.columns(3, vertical_alignment="center")
+        #: 2026-10-29 修（用户实测「点击确认后直接卡 bug」）：这里原来调的是**不存在的**
+        #: `write_flow.confirm` / `write_flow.cancel` → AttributeError。
+        #: 正确做法是与聊天里说「确认 / 取消」完全同一条路径：交给编排层。
         if left.button("✅ 确认", key="aa-confirm-go", type="primary", width="stretch"):
-            _record(executor.submit(write_flow.confirm, session_id).result(), "（按钮）确认群收款")
-            st.rerun()
+            _say(executor, session_id, "确认", "（按钮）确认群收款")
         if middle.button("✖ 取消", key="aa-confirm-cancel", width="stretch"):
-            _record(executor.submit(write_flow.cancel, session_id).result(), "（按钮）取消群收款")
-            st.rerun()
+            _say(executor, session_id, "取消", "（按钮）取消群收款")
         amount_new = right.text_input("改金额（元）", key="aa-confirm-amount",
                                       label_visibility="collapsed", placeholder="改金额")
         if amount_new.strip() and right.button("按新金额重算", key="aa-confirm-edit",

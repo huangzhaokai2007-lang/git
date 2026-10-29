@@ -97,6 +97,9 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
                              'error_code': 'SERVICE_UNAVAILABLE'}, text)
         state['messages'].append({'role': 'assistant', 'turn': None, 'text': failure})
         return
+    #: 2026-10-29（用户要求）：群收款出确认卡时，原始文本卡不再刷进聊天 ——
+    #: 卡面（a_card_ui）已经把金额/参与人/分摊说清楚了，两份重复很难看。
+    keep_text = not (turn.intent == "aa_collect" and "CONFIRM_CARD" in turn.states)
     dump = turn.model_dump()
     workspace_ui.accept(dump, text)
     if turn.error_code:
@@ -118,7 +121,10 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
     import scene_ui
     scene_ui.accept(_agent_executor(), state["session_id"], turn)
     premium_ui.toast_for(turn)                    # 成功/失败微反馈（只读回合不打扰）
-    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
+    if keep_text:
+        state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
+    else:                                   # 群收款确认回合：只留轨迹，文本不刷屏
+        state["messages"].append({"role": "assistant", "text": "", "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
