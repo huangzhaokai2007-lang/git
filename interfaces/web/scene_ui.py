@@ -43,7 +43,7 @@ def render(executor, session: str, ask, *, show_scope: bool = True) -> None:
 
 
 def _selection(context: dict, ask) -> None:
-    domain = {'txn_query': 'txn', 'payee_list': 'payee', 'subscription_list': 'subscription',
+    domain = {'txn_query': 'txn', 'subscription_list': 'subscription',
               'wealth_holdings': 'product', 'wealth_all_products': 'product'}.get(context.get('intent'))
     rows = context.get('candidates', {}).get(domain, [])
     if not rows or (domain == 'txn' and context.get('txn_id')):

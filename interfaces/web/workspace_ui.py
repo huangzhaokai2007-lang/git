@@ -227,14 +227,26 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
         else:
             for renderer in (card_limit_ui.render, card_lock_ui.render, card_lost_ui.render):
                 renderer(executor, session, show_button=False)
+    inline_confirmation_rendered = False
+
+    def inline_confirmation(**kwargs):
+        nonlocal inline_confirmation_rendered
+        inline_confirmation_rendered = True
+        confirmation(**kwargs)
+
     renderers = (('payee_list', 'payee', payee_card_ui.render),
                  ('scheduled_list', 'schedule', schedule_card_ui.render),
                  ('aa_list', 'aa', aa_card_ui.render),
                  ('gift_order_list', 'gift', gift_card_ui.render))
     for name, flag, renderer in renderers:
         if (scene == name or (name == 'aa_list' and scene == 'aa_collect')) and st.session_state.get(f'bound-{flag}-query'):
-            renderer(executor, session)
+            if name == 'payee_list':
+                renderer(executor, session, confirmation=inline_confirmation)
+            else:
+                renderer(executor, session)
     if scene not in ('cards', 'records'):
         scene_ui.render(executor, session, ask, show_scope=False)
-    slot_form_ui.render(executor, session)
-    confirmation()
+    if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent')):
+        slot_form_ui.render(executor, session)
+    if not inline_confirmation_rendered:
+        confirmation()

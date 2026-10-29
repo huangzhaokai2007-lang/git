@@ -234,8 +234,22 @@ def _evidence(confirmation: Any) -> None:
     premium_ui.evidence(confirmation)
 
 
-def confirm_card(confirmation: Any) -> str | None:
+def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
+    if compact:
+        st.markdown('**核对修改**')
+        for line in confirmation.card_text.splitlines():
+            if line.startswith(('【', '状态：', '意图：', '收款人：', '权限档：', '请回复')):
+                continue
+            if line.strip():
+                st.markdown(line)
+        st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后保存。')
+        left, right = st.columns(2)
+        if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
+            return 'confirm'
+        if right.button('✖ 取消', key='confirm-cancel', width='stretch'):
+            return 'cancel'
+        return None
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
     target = _CARD_TARGET.get(intent, "收款人")
@@ -269,17 +283,20 @@ def confirm_card(confirmation: Any) -> str | None:
     return None
 
 
-def otp_card(confirmation: Any) -> tuple[str, str] | None:
+def otp_card(confirmation: Any, *, compact: bool = False) -> tuple[str, str] | None:
     '等 OTP：只收集验证码，交编排层 → 工具层校验（界面不比对、不知晓正确值）。'
     target = _CARD_TARGET.get(str(confirmation.intent), "收款人")
-    with st.container(border=True):
+    with st.container(border=not compact):
         st.markdown("##### 🔐 请输入短信验证码")
-        st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）· "
-                   f"金额 {_esc(confirmation.amount_yuan)} 元 · 权限档 {_esc(confirmation.tier)}")
+        if compact:
+            st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）")
+        else:
+            st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）· "
+                       f"金额 {_esc(confirmation.amount_yuan)} 元 · 权限档 {_esc(confirmation.tier)}")
         with st.form("otp-form", clear_on_submit=True):
             code = st.text_input("短信验证码", type="password", key="otp-code",
                                  placeholder="请输入 6 位短信验证码", label_visibility="collapsed")
-            left, right, _rest = st.columns([1, 1, 3])
+            left, right = st.columns(2) if compact else st.columns([1, 1, 3])[:2]
             submitted = left.form_submit_button("提交验证码", type="primary", key="otp-submit",
                                                width="stretch")
             cancelled = right.form_submit_button("取消", key="otp-cancel", width="stretch")

@@ -167,7 +167,28 @@ def _render_pending() -> None:
                 {"role": "assistant", "text": confirm_card.undone_text(pending_id), "turn": None})
         st.rerun()
 
-def _render_confirm() -> None:
+def _confirm_submit(text: str, *, inline: bool, display: str | None = None) -> None:
+    source = st.session_state.get('workspace-result')
+    _ask(text, display=display)
+    if inline:
+        st.session_state['workspace-result'] = source
+        st.session_state['bound-payee-query'] = True
+        last = st.session_state['messages'][-1]
+        turn = last.get('turn') or {}
+        if turn.get('error_code') or turn.get('executed') or not turn:
+            st.session_state['payee-edit-feedback'] = last.get('text', '')
+        else:
+            st.session_state.pop('payee-edit-feedback', None)
+        st.session_state.pop('workspace-error', None)
+
+
+def _cancel_inline_payee(confirmation) -> None:
+    confirm_card.clear(confirmation.session_id)
+    st.session_state['payee-edit-feedback'] = '已取消修改，资料未保存。'
+    st.session_state.pop('payee-inline-intent', None)
+
+
+def _render_confirm(*, inline: bool = False) -> None:
     """确认卡 / OTP 卡：状态取自 agent 层，动作回灌编排层。"""
     from agent import web_features
     _agent_executor().submit(web_features.clear_removed_drafts, st.session_state['session_id']).result()
@@ -175,20 +196,20 @@ def _render_confirm() -> None:
     if confirmation is None:
         return
     if confirmation.stage == "otp":
-        action = ui.otp_card(confirmation)
+        action = ui.otp_card(confirmation, compact=inline)
         if action is not None:
             if action[0] == "cancel":
-                _cancel(confirmation)
+                _cancel_inline_payee(confirmation) if inline else _cancel(confirmation)
             elif action[0] == "submit":
-                _ask(action[1], display="（短信验证码已提交，值不回显）")
+                _confirm_submit(action[1], inline=inline, display="（短信验证码已提交，值不回显）")
             st.rerun()
         return
-    action = ui.confirm_card(confirmation)
+    action = ui.confirm_card(confirmation, compact=inline)
     if action == "confirm":
-        _ask("确认")
+        _confirm_submit("确认", inline=inline)
         st.rerun()
     if action == "cancel":
-        _cancel(confirmation)
+        _cancel_inline_payee(confirmation) if inline else _cancel(confirmation)
         st.rerun()
 
 # ---------------- 表单桥（卡 20 收款人 / F10 风险测评） ----------------
