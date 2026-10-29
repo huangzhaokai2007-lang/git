@@ -60,17 +60,18 @@ RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
 #: 历年表现的口径：最近五个完整年度（演示数据锚在 2026-09，故 2021–2025）。
 HISTORY_YEARS = (2021, 2022, 2023, 2024, 2025)
 #: 月 K 的口径：最近 60 个月（5 年，末月 = `AS_OF` 所在月），净值基点 10000 = 1.0000。
-CANDLE_MONTHS = 60
+CANDLE_MONTHS = 201      # 2010-01 至今的月数（用户要求 K 线从 2010 开始）
 _NAV_BASE = 10_000
 #: 单月波动的分母：见 `_product_candles()` 里的注释（不随窗口长度变）。
 _STEP_DIVISOR = 24
 #: 日 K 默认窗口：近 120 个交易日（约半年）。
 DAILY_DAYS = 120
-#: K 线粒度 → 展示多少个交易日（从同一份全量序列里切片）。日 120≈半年、周 260≈1 年、月 750≈3 年。
-CANDLE_WINDOWS = {"daily": 120, "weekly": 260, "monthly": 1300}
+#: **K 线起点** 2010-01-01（用户要求「扩大到 2010 年开始」）。
+#: K 线粒度 → 展示多少个交易日（从同一份全量序列里切片）：日 120≈半年、周 260≈1 年、月=全部。
+CANDLE_WINDOWS = {"daily": 120, "weekly": 260, "monthly": 10_000}
 #: **底层序列一次生成这么长**，三个周期都从它切片/聚合 ——
 #: 否则各周期各走一遍随机游走，同一天的收盘价对不上（实测踩过：日线 111.06 vs 周线 122.49）。
-CANDLE_FULL_DAYS = 1300
+CANDLE_FULL_DAYS = 4356          # 2010-01-01 ~ AS_OF 的交易日数
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
@@ -405,14 +406,16 @@ def _daily_candles(product_id: str, max_gain: float, max_loss: float) -> list[li
     **为什么用数组不用对象**：日 K 一个产品就 120 行，用 dict 每行多背 5 个键，
     14 只产品会多出 150 KB。数组形式省 45%，界面解析一行代码的事。
 
-    日波动 = 月波动 / √21；动量系数 0.5（日频留一点趋势感，又不至于把 5 年波动放大到失控）。
+    日波动 = 月波动 / √21；动量系数 0.5。**净值不设上下限**，按年化收益自由漂移。
     """
     span = max(max_gain - max_loss, 1.0)
     step = span / _STEP_DIVISOR * 0.9 / (21 ** 0.5)
-    floor_nav = _NAV_BASE * (1 + max_loss / 100)
-    ceil_nav = _NAV_BASE * (1 + max_gain / 100)
+    #: **不再把净值夹在「参考区间」里**（2026-10-29，K 线拉到 2010 后改的）。
+    #: 那个区间是**年度**口径；16 年窗口下如果还夹着，预期年化 8% 的产品会被压成
+    #: 一条贴着天花板的噪声线 —— 和卡片上的收益率自相矛盾。
+    #: 现在按年化自由漂移：8%/年 × 16 年 ≈ 3.4 倍，长得像真的长期净值曲线。
     yield_pct = max_gain + max_loss
-    drift = min(yield_pct / 252, max_gain * 0.9 / CANDLE_FULL_DAYS) / 100
+    drift = yield_pct / 252 / 100
     nav = float(_NAV_BASE)
     dev = 0.0
     rows: list[list] = []
@@ -423,10 +426,7 @@ def _daily_candles(product_id: str, max_gain: float, max_loss: float) -> list[li
         u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
         dev = 0.5 * dev + (1 - 0.5 ** 2) ** 0.5 * (u1 * 2 - 1) * step / 100
         open_nav = nav
-        raw_nav = open_nav * (1 + drift + dev)
-        close_nav = max(floor_nav, min(ceil_nav, raw_nav))
-        if close_nav != raw_nav:
-            dev = -0.6 * dev
+        close_nav = open_nav * (1 + drift + dev)
         wick = abs(u2 - 0.5) * step / 100 * open_nav
         rows.append([period, round(open_nav),
                      round(max(open_nav, close_nav) + wick),

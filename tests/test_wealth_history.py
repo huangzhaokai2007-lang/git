@@ -65,17 +65,19 @@ def test_history_stays_within_the_range_shown_on_the_card(seeded: Path) -> None:
 
 
 def test_monthly_candles_are_deterministic_and_well_formed(seeded: Path) -> None:
-    """月 K：24 根、末月 = 数据锚点所在月、OHLC 关系成立、净值落在卡片区间内。"""
+    """月 K：从 2010-01 起共 201 根、末月 = 数据锚点所在月、OHLC 关系成立。
+
+    **净值不再断言落在「参考区间」内**：那个区间是年度口径，16 年窗口下
+    按年化自由漂移才是对的（夹紧会把高收益产品压成贴着天花板的噪声线）。
+    """
     for item in _items():
         candles = item["candles"]
-        assert len(candles) == 60
+        assert len(candles) == 201
+        assert candles[0]["period"] == "2010-01"            # K 线起点
         assert candles[-1]["period"] == "2026-09"           # 与 data.seed.AS_OF 同月
-        lo = float(item["max_loss_pct"].rstrip("%").lstrip("+")) / 100
-        hi = float(item["max_gain_pct"].rstrip("%").lstrip("+")) / 100
         for row in candles:
             assert row["low"] <= min(row["open"], row["close"])
             assert row["high"] >= max(row["open"], row["close"])
-            assert 10000 * (1 + lo) - 1 <= row["close"] <= 10000 * (1 + hi) + 1
     again = {item["product_id"]: item["candles"] for item in _items()}
     first = {item["product_id"]: item["candles"] for item in _items()}
     assert again == first
@@ -85,8 +87,7 @@ def test_candles_drift_up_for_positive_yield(seeded: Path) -> None:
     """净值要跟着预期年化往上走，不能画成"预期 9.8%、两年跌 16%"。
 
     踩过的坑：一开始只给噪声不给漂移，14 只产品全部收在起点以下 —— 卡片写「预期年化 9.8%」，
-    图却是条下滑线，自相矛盾。漂移还必须封顶（货基年化 2.1%、窗口 24 个月本可涨 4.2%，
-    但上沿只有 +2.1%，不封顶就会一半月份顶在天花板上画直线）。
+    图却是条下滑线，自相矛盾。K 线拉到 2010 之后不再夹区间（年度区间夹 16 年会把曲线压平）。
     """
     ratios = []
     for item in _items():
