@@ -5,6 +5,22 @@ from tests.test_card_binding_ui import CARD, NUMBER, app, bind, click
 from tests.conftest import raw
 
 
+def test_frozen_filter_is_hidden_and_old_selection_returns_to_all(monkeypatch, seeded):
+    at = app(monkeypatch, seeded)
+    click(at, '管卡')
+    status = next(item for item in at.selectbox if item.label == '卡片状态')
+    assert status.options == ['全部', '正常', '已锁定', '已挂失']
+    import card_binding_ui
+    filters = dict(card_binding_ui.FILTERS)
+    monkeypatch.setattr(card_binding_ui, 'FILTERS', {**filters, '已冻结': 'frozen'})
+    at.run()
+    next(item for item in at.selectbox if item.label == '卡片状态').set_value('已冻结').run()
+    monkeypatch.setattr(card_binding_ui, 'FILTERS', filters)
+    at.run()
+    assert not at.exception
+    assert next(item for item in at.selectbox if item.label == '卡片状态').value == '全部'
+
+
 def test_bank_card_face_opens_details_without_revealing_number(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     click(at, '管卡')

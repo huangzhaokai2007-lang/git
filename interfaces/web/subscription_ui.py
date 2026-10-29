@@ -58,12 +58,8 @@ def _row(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str
 
 
 def banner(summary: Mapping[str, Any], *, ask: Callable[[str], None]) -> None:
-    """常驻提醒条：只要还有到期/逾期订阅就一直在，点「查看订阅」进列表。
-
-    与回执里的「首次提醒」互补：那个只出现一次（去重），这条每帧都在 ——
-    所以用户在任何场景下都不会"错过"。
-    """
-    if not summary:
+    """提醒条可在当前会话关闭，普通刷新不会重新弹出。"""
+    if not summary or st.session_state.get('subs-banner-dismissed'):
         return
     parts: list[str] = []
     if summary.get("overdue"):
@@ -72,13 +68,17 @@ def banner(summary: Mapping[str, Any], *, ask: Callable[[str], None]) -> None:
     if summary.get("due"):
         parts.append(f"{summary['due']} 个订阅将在 {summary.get('within_days')} 天内扣费"
                      f"（合计 {summary.get('total_amount_yuan')} 元）")
-    with st.container(border=True):
-        info, action = st.columns([3.8, 1.0], vertical_alignment="center")
+    with st.container(border=True, key='subs-banner'):
+        info, action, dismiss = st.columns([3.8, 1.0, .25], vertical_alignment="center")
         with info:
             st.markdown("**订阅提醒** · " + "；".join(parts))
         with action:
             if st.button("查看订阅", key="subs-banner-open", width="stretch"):
                 ask("我有哪些订阅")
+        with dismiss:
+            if st.button('×', key='subs-banner-dismiss', type='tertiary'):
+                st.session_state['subs-banner-dismissed'] = True
+                st.rerun()
 
 
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],

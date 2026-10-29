@@ -62,10 +62,13 @@ def test_blacklist_can_be_promoted_back_to_whitelist(wired, monkeypatch) -> None
     _say(monkeypatch, "payee_blacklist", {"payee": WANGWU}, "确认")
     assert _state() == (False, True)
 
-    card = _say(monkeypatch, "payee_whitelist", {"payee": WANGWU}, "把王五加入白名单")
+    card = _say(monkeypatch, "payee_whitelist",
+                {"payee": WANGWU, "quota": "500", "expire": "2026-12-31"}, "把王五加入白名单")
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"      # 加白要码
-    _say(monkeypatch, "payee_whitelist", {"payee": WANGWU}, "确认")
-    done = _say(monkeypatch, "payee_whitelist", {"payee": WANGWU}, "123456")
+    _say(monkeypatch, "payee_whitelist",
+         {"payee": WANGWU, "quota": "500", "expire": "2026-12-31"}, "确认")
+    done = _say(monkeypatch, "payee_whitelist",
+                {"payee": WANGWU, "quota": "500", "expire": "2026-12-31"}, "123456")
     assert done.executed is True
     assert _state() == (True, False)                                # 黑名单被一并解除
 

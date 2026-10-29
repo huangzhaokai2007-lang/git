@@ -141,7 +141,7 @@ def toast_for(turn: Any) -> None:
         st.toast("这次没办成，看下面的说明", icon="⚠️")
 
 
-EXAMPLES = ("查一下余额", "给房东转 100 元", "向王五和赵六 AA 收款 300 元", "我的收款人有哪些")
+EXAMPLES = ("查一下余额", "给房东转 100 元", "向王五和赵六 群收款 300 元", "我的收款人有哪些")
 
 
 def examples() -> str | None:

@@ -19,8 +19,7 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import balance_flow, bill_detail_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
-from agent import subscription_notice, wealth_daily                                            # noqa: E402
+from agent import balance_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -28,23 +27,11 @@ import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
 import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
-import payee_card_ui as payee_ui                                 # noqa: E402  （T20：查看白名单的卡片渲染）
-import insight_card_ui                                        # noqa: E402  （main：洞察卡）
-import card_edit_ui                                             # noqa: E402  （S5：可编辑卡片）
-import payee_picker_ui                                          # noqa: E402  （解析卡：同名多命中）
-import schedule_card_ui                                         # noqa: E402  （预约卡面：执行/改时间/取消）
-import aa_card_ui                                               # noqa: E402  （AA 卡面：登记已付/撤销）
-import gift_card_ui                                             # noqa: E402  （送礼查询卡：支付/取消）
-import activity_ui
-import wealth_ui                                              # noqa: E402  （main：活动流）
-import subscription_ui                                          # noqa: E402  （F18：订阅行内取消）
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
-import risk_ui                                                  # noqa: E402  （风险程度卡）
-import slot_form_ui                                             # noqa: E402  （缺槽填表卡）
+import workspace_ui                                             # noqa: E402
 
 load_dotenv(ROOT / ".env")
 
-PULL_PERIODS = ("本月", "上个月", "上上个月")
 GREETING = "您好 请问我能为您提供什么帮助"
 
 HISTORY_TURNS = 4
@@ -89,24 +76,33 @@ def _agent_executor() -> ThreadPoolExecutor:
     return ThreadPoolExecutor(max_workers=1, thread_name_prefix="agent")
 
 # ---------------- 与编排层的唯一入口 ----------------
-def _ask(text: str, *, display: str | None = None) -> None:
+def _ask(text: str, *, display: str | None = None, extension: bool = False) -> None:
     '把一句话交给编排层，记录回执与轨迹（界面不解释业务、不派生数字）。'
     state = st.session_state
+    if not extension:
+        workspace_ui.navigation.clear()
+    workspace_ui.remember_view(_agent_executor(), state['session_id'])
     display = display or _agent_executor().submit(card_binding_flow.safe_chat_text, text).result()
     state["messages"].append({"role": "user", "text": display or text})
     try:
         workspace = state["messages"][state.get('workspace-start', 0):]
         history = [m["text"] for m in workspace[-(HISTORY_TURNS + 1):-1] if m.get("text")]
-        turn = _agent_executor().submit(card_binding_flow.handle, text, history=history or None,
-                                        clarify_round=state["clarify_round"],
-                                        session_id=state["session_id"]).result()
-    except Exception as exc:                    # noqa: BLE001 —— 不吞异常：如实展示并给处置建议
-        state["messages"].append({"role": "assistant", "turn": None,
-                                  "text": f"这次请求没能完成（{type(exc).__name__}: {exc}）。"
-                                          "如果这是库结构问题（例如旧库缺表），在仓库根目录跑 "
-                                          "`uv run python -m data.seed --reset` 重新生成合成数据后再试。"})
+        with st.spinner('正在处理，请稍候…'):
+            turn = _agent_executor().submit(card_binding_flow.handle, text, history=history or None,
+                                            clarify_round=state["clarify_round"],
+                                            session_id=state["session_id"]).result()
+    except Exception:                    # noqa: BLE001 —— Keep the last result and offer safe read retry.
+        failure = '这次请求暂时未能完成，请稍后重试。'
+        workspace_ui.accept({'intent': None, 'reply': failure,
+                             'error_code': 'SERVICE_UNAVAILABLE'}, text)
+        state['messages'].append({'role': 'assistant', 'turn': None, 'text': failure})
         return
     dump = turn.model_dump()
+    workspace_ui.accept(dump, text)
+    if turn.error_code:
+        state['messages'].append({'role': 'assistant', 'text': turn.reply, 'turn': dump})
+        state['turns'].append({'ts': time.strftime('%H:%M:%S'), 'text': display or text, 'turn': dump})
+        return
     if turn.intent == "card_query" and not state.get('cards-view', {}).get('form'):
         cards_ui.reset(turn)
     if turn.ask in ("card_lock", "card_missing", "card_unlock"): limits_ui.reset()
@@ -128,29 +124,35 @@ def _ask(text: str, *, display: str | None = None) -> None:
     state["pending_id"] = turn.pending_id
     state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
-    state["bound-aa-query"] = turn.intent == "aa_list" and turn.error_code is None
+    #: 2026-10-28：发起群收款（含缺槽追问）时也画卡面 —— 总额/选人/按人金额都在卡上填，
+    #: 比让用户一句句打字快（用户要求）。
+    state["bound-aa-query"] = (turn.intent in ("aa_list", "aa_collect")
+                                and turn.error_code is None)
     state["bound-gift-query"] = turn.intent == "gift_order_list" and turn.error_code is None
     state['bound-card-query'] = state.get('bound-card-query', False) or (
         (turn.intent == 'card_query' or turn.ask == 'card_lock') and turn.error_code is None)
     if turn.intent == "balance_query" and not turn.error_code and turn.reply:
         state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
 
-
-def _follow_up(prompt: str) -> None:
-    _ask(prompt)
-    st.rerun()
-
-
-def _insight_card(turn, key: str) -> bool:
-    return insight_card_ui.render(turn, key=key, on_ask=_follow_up)
-
+def _follow_up(prompt: str, *, display: str | None = None, rerun: bool = True) -> None:
+    if (prompt != '返回刚才的列表' and st.session_state.get('workspace-result', {}).get('prompt') == prompt
+            and not st.session_state.get('workspace-error')):
+        return
+    if rerun and not st.session_state.get('workspace-error'):
+        workspace_ui.navigation.push(_agent_executor(), st.session_state['session_id'])
+    _ask(prompt, display=display, extension=rerun)
+    if rerun:
+        st.rerun()
 
 def _cancel(confirmation) -> None:
     """取消这笔写操作：只清 agent 层的会话确认态 —— 不调工具、不执行（铁律 3）。"""
     confirm_card.clear(confirmation.session_id)
+    if st.session_state.get('workspace-nav-stack'):
+        workspace_ui.navigation.back(_agent_executor(), confirmation.session_id)
+    else:
+        workspace_ui.return_after_cancel(_agent_executor(), confirmation.session_id)
     st.session_state["messages"].append(
         {"role": "assistant", "text": "已取消这笔操作：未提交执行，没有产生任何资金变动。", "turn": None})
-
 
 def _render_pending() -> None:
     """L3 待复核：登记仍在 agent 层，撤销也走 agent 层（界面只显示与转发）。"""
@@ -165,29 +167,51 @@ def _render_pending() -> None:
                 {"role": "assistant", "text": confirm_card.undone_text(pending_id), "turn": None})
         st.rerun()
 
+def _confirm_submit(text: str, *, inline: bool, display: str | None = None) -> None:
+    source = st.session_state.get('workspace-result')
+    _ask(text, display=display)
+    if inline:
+        st.session_state['workspace-result'] = source
+        st.session_state['bound-payee-query'] = True
+        last = st.session_state['messages'][-1]
+        turn = last.get('turn') or {}
+        st.session_state['payee-inline-done'] = bool(turn.get('executed'))
+        if turn.get('error_code') or turn.get('executed') or not turn:
+            st.session_state['payee-edit-feedback'] = last.get('text', '')
+        else:
+            st.session_state.pop('payee-edit-feedback', None)
+        st.session_state.pop('workspace-error', None)
 
-def _render_confirm() -> None:
+
+def _cancel_inline_payee(confirmation) -> None:
+    confirm_card.clear(confirmation.session_id)
+    st.session_state['payee-edit-feedback'] = '已取消本次操作，未提交执行。'
+    st.session_state.pop('payee-inline-intent', None)
+
+
+def _render_confirm(*, inline: bool = False) -> None:
     """确认卡 / OTP 卡：状态取自 agent 层，动作回灌编排层。"""
+    from agent import web_features
+    _agent_executor().submit(web_features.clear_removed_drafts, st.session_state['session_id']).result()
     confirmation = confirm_card.current(st.session_state["session_id"])
     if confirmation is None:
         return
     if confirmation.stage == "otp":
-        action = ui.otp_card(confirmation)
+        action = ui.otp_card(confirmation, compact=inline)
         if action is not None:
             if action[0] == "cancel":
-                _cancel(confirmation)
+                _cancel_inline_payee(confirmation) if inline else _cancel(confirmation)
             elif action[0] == "submit":
-                _ask(action[1], display="（短信验证码已提交，值不回显）")
+                _confirm_submit(action[1], inline=inline, display="（短信验证码已提交，值不回显）")
             st.rerun()
         return
-    action = ui.confirm_card(confirmation)
+    action = ui.confirm_card(confirmation, compact=inline)
     if action == "confirm":
-        _ask("确认")
+        _confirm_submit("确认", inline=inline)
         st.rerun()
     if action == "cancel":
-        _cancel(confirmation)
+        _cancel_inline_payee(confirmation) if inline else _cancel(confirmation)
         st.rerun()
-
 
 # ---------------- 表单桥（卡 20 收款人 / F10 风险测评） ----------------
 # 两个表单的渲染与提交都拆到 `interfaces/web/forms.py`（F10 接通后本文件超红线 300）；
@@ -200,7 +224,6 @@ def _render_forms() -> None:
     if forms.render_all(st.session_state, _agent_executor()):
         st.rerun()
 
-
 # ---------------- 侧边栏 ----------------
 
 def _refresh_sidebar_balance():
@@ -208,7 +231,6 @@ def _refresh_sidebar_balance():
     if not turn.error_code:
         st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
     return turn
-
 
 def _sidebar() -> None:
     """侧边栏：账户余额、快捷场景与重置会话。"""
@@ -232,13 +254,23 @@ def _sidebar() -> None:
                 st.rerun()
         st.divider()
         st.markdown("#### 快捷场景")
-        if (prompt := ui.scenes()) is not None:
+        prompt = ui.scenes()
+        if prompt is not None and not workspace_ui.reuse_shortcut(prompt):
             import shortcut_ui
+            workspace_ui.remember_view(_agent_executor(), st.session_state['session_id'])
             shortcut_ui.start(_agent_executor(), st.session_state['session_id'])
+            if prompt != '调整额度' and st.session_state.get('limit-view'):
+                st.session_state['limit-view']['open'] = False
+            st.session_state['workspace-shortcut'] = prompt
+            st.session_state.pop('workspace-result', None)
+            st.session_state.pop('workspace-error', None)
             if prompt == '查看操作记录':
                 st.session_state['operation-records-open'] = True
             else:
                 _ask(prompt)
+        elif prompt == '调整额度' and st.session_state.get('limit-view', {}).get('result'):
+            limits_ui.open_request(_agent_executor(), st.session_state['session_id'], prompt)
+            st.session_state['bound-card-query'] = False
         st.divider()
         if st.button("重置会话", icon=":material/restart_alt:", key="reset-session", width="stretch"):
             from agent import scene_flow
@@ -248,7 +280,9 @@ def _sidebar() -> None:
             limits_ui.reset()
             locks_ui.reset()
             lost_ui.reset()
-            st.session_state["bound-card-query"] = False
+            workspace_ui.reset()
+            for domain in ('card', 'payee', 'schedule', 'aa', 'gift', 'lost'):
+                st.session_state[f'bound-{domain}-query'] = False
             st.session_state['operation-records-open'] = False
             st.session_state.pop("sidebar-balance-scope", None)
             for key, value in (("turns", []), ("balance", []), ("pending_id", None), ("clarify_round", 0), ('workspace-start', 0)):
@@ -256,87 +290,19 @@ def _sidebar() -> None:
             st.session_state["messages"] = [{"role": "assistant", "text": GREETING, "turn": None}]
             st.rerun()
 
-
 def _chat_page() -> None:
-    messages = st.session_state["messages"]
-    #: 常驻提醒条：每帧只读概览（不消耗「首次提醒」的去重集合），任何场景都能看到。
-    subscription_ui.banner(
-        _agent_executor().submit(subscription_notice.summary,
-                                 st.session_state["session_id"]).result(),
-        ask=_follow_up)
-    ui.transcript(messages, payee_card=payee_ui.render_payee_card, insight_card=_insight_card,
-                  bill_details=lambda source, category: _agent_executor().submit(
-                      bill_detail_flow.load, st.session_state['session_id'], source, category).result(),
-                  wealth_card=lambda turn, key: wealth_ui.render_turn(
-                      turn, ask=_follow_up, key_prefix=key,
-                      daily_loader=lambda pid: _agent_executor().submit(
-                          wealth_daily.load, st.session_state["session_id"], pid).result()),
-                  risk_card=lambda turn, key: risk_ui.render_turn(
-                      turn, ask=_follow_up, key_prefix=key),
-                  subscription_card=lambda turn, key: subscription_ui.render_turn(
-                      turn, ask=_follow_up, key_prefix=key),
-                  wealth_start=st.session_state.get('workspace-start', 0))
-    import scene_ui
-    scene_ui.render(_agent_executor(), st.session_state["session_id"], _ask)
-    _bill_charts()
-    activity_ui.render(st.session_state['turns'])
-    _render_pending()
-    payee_picker_ui.render(_agent_executor(), st.session_state["session_id"])  # 解析卡（同名多命中）
-    card_edit_ui.render(_agent_executor(), st.session_state["session_id"])   # S5：可编辑卡片面板
-    #: `_render_forms()` 内部即 `render_payee_form() or render_risk_form()`（`forms.render_all`），
-    #: 已覆盖 main 上的 `_render_payee_form()`，故不再单独调用（重复调用会让表单渲染两次）。
-    _render_forms()
-    if st.session_state.get("bound-card-query"):
-        cards_ui.render(_agent_executor(), st.session_state["session_id"], show_limit_button=False)
-    else:
-        limits_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
-        locks_ui.render(_agent_executor(), st.session_state["session_id"], show_button=False)
-        #: main（#46 挂失补卡）：**无条件**渲染，靠 `accept_turn` 决定是否出按钮。
-        lost_ui.render(_agent_executor(), st.session_state['session_id'], show_button=False)
-    if st.session_state.get("bound-payee-query"):                 # S6：收款人卡（人名选项 → 专属详情卡）
-        payee_ui.render(_agent_executor(), st.session_state["session_id"])
-    if st.session_state.get("bound-schedule-query"):              # F16：预约卡面 + 执行/改时间/取消
-        schedule_card_ui.render(_agent_executor(), st.session_state["session_id"])
-    if st.session_state.get("bound-aa-query"):                    # F22：AA 卡面 + 登记已付/撤销
-        aa_card_ui.render(_agent_executor(), st.session_state["session_id"])
-    if st.session_state.get("bound-gift-query"):                  # F20：送礼查询卡 + 支付/取消
-        gift_card_ui.render(_agent_executor(), st.session_state["session_id"])
-    #: 缺槽 → 直接弹「填表卡」（比打字快；文字补槽仍然可用）。
-    slot_form_ui.render(_agent_executor(), st.session_state["session_id"])
-    #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
-    #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
-    _render_confirm()
-    premium_ui.pipeline(st.session_state["turns"][-1]["turn"]
-                        if st.session_state.get("turns") else None)
-    if st.session_state.get("turns"):
-        premium_ui.trace_footer(st.session_state["turns"][-1]["turn"])
-    if (picked := premium_ui.examples()) is not None:      # 空会话示例胶囊
-        _ask(picked)
-        st.rerun()
+    workspace_ui.notifications(_agent_executor(), st.session_state['session_id'], _follow_up)
+    workspace_ui.transcript(st.session_state['messages'], _agent_executor(),
+                            st.session_state['session_id'], _follow_up)
+    if (workspace_ui.current() not in ('', 'bills') or
+            (not workspace_ui.current() and st.session_state.get('workspace-error'))):
+        with st.container(key='current-business'):
+            st.markdown('### 扩展查看' if st.session_state.get('workspace-nav-stack') else '### 当前业务')
+            workspace_ui.panels(_agent_executor(), st.session_state['session_id'], _follow_up,
+                                _render_pending, _render_forms, _render_confirm)
     if (text := st.chat_input("")) and text.strip():
         _ask(text)
         st.rerun()
-
-
-def _bill_charts() -> None:
-    latest = ui.latest_bill(st.session_state['messages'][st.session_state.get('workspace-start', 0):])
-    if not latest:
-        return
-    with st.expander('📊 这份账单的图表', expanded=True):
-        _bill_contents(latest)
-
-
-def _bill_contents(latest: dict) -> None:
-    st.caption('图表数据全部取自编排层回执的**事实包**（`Turn.facts`），与对话框里的数字同一份来源。')
-    st.button(f'⬇️ 拉取近 {len(PULL_PERIODS)} 期账单（逐期走编排层）',
-              type='primary', on_click=_pull_bills)
-    ui.bill_panel(ui.bill_series(st.session_state["messages"]), latest)
-
-
-def _pull_bills() -> None:
-    for period in PULL_PERIODS:
-        _ask(f'出一份{period}的账单报告')
-
 
 def main() -> None:
     st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
@@ -351,6 +317,5 @@ def main() -> None:
     cards_ui.prepare(_agent_executor(), st.session_state["session_id"])
     _sidebar()
     _chat_page()
-
 
 main()

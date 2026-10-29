@@ -10,7 +10,7 @@ import card_limit_ui as limits_ui
 import card_lock_ui as locks_ui
 import card_gallery_ui as gallery_ui
 
-FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost", "已冻结": "frozen"}
+FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost"}
 
 
 def reset(turn=None) -> None:
@@ -194,6 +194,8 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
         ok, message = state["notice"]
         (st.success if ok else st.error)(message)
     _form(executor, session_id, state)
+    if st.session_state.get('cards-filter', '全部') not in FILTERS:
+        st.session_state['cards-filter'] = '全部'
     selected_filter = st.selectbox("卡片状态", list(FILTERS), key="cards-filter", label_visibility="collapsed")
     if selected_filter != state["last_filter"]:
         state["visible"], state["full_number"] = {}, None

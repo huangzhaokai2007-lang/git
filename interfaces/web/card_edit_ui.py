@@ -5,7 +5,7 @@ agent 层）并把编辑后的值交回 `agent/write_flow.edit()` —— **不�
 事实包，设计 §4）。
 
 两种形态：
-- **AA 收款卡**：按人金额**表格**（每人一行、金额可改，一键均摊作为初值）——
+- **群收款卡**：按人金额**表格**（每人一行、金额可改，一键均摊作为初值）——
   人类需求：要像查询收款人那样列出每人多少，而不是一句话概括；
 - 其余可编辑意图（转账/定时/送礼）：逐字段输入。
 """
@@ -67,7 +67,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     draft = executor.submit(card_draft.draft_of, session_id).result()
     if draft is None or draft.status != "confirm":
         return
-    if draft.kind == "aa_collect":                      # AA：按人金额表格
+    #: 2026-10-28（用户要求）：这张「每人收款金额」卡**不再出现** ——
+    #: 群收款已由卡面的「按人设置金额」负责，页面上不要出现两块同样的表单。
+    if draft.kind == "aa_collect":                      # 群收款由卡面的「按人设置金额」负责
         _aa_amounts(executor, session_id)
         return
     if not draft.fields:

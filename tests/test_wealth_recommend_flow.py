@@ -421,3 +421,23 @@ def test_recommendation_cards_do_not_render_for_failed_or_empty_turns() -> None:
     at = AppTest.from_function(page, default_timeout=30).run()
     assert not at.exception
     assert not any(b.label in ('订购', '查看全部产品 →') for b in at.button)
+
+
+def test_holdings_detail_without_assessment_offers_the_form(seeded: Path,
+                                                            monkeypatch) -> None:
+    """看持仓详情要先测评；回执只有一句文字时用户找不到入口（实测反馈）→ 必须给按钮。
+
+    路径复现：侧边栏「我的理财」→ 选一只 → 「查看所选详情」→ 未测评 → INVALID_STATE。
+    """
+    from streamlit.testing.v1 import AppTest
+
+    monkeypatch.setenv("DB_PATH", str(seeded))
+    path = Path(__file__).resolve().parents[1] / "interfaces" / "web" / "app.py"
+    at = AppTest.from_file(str(path), default_timeout=120).run()
+    next(b for b in at.sidebar.button if b.label == "我的理财").click().run()
+    assert not at.exception
+    next(b for b in at.button if b.label == "查看所选详情").click().run()
+    assert not at.exception
+    assert at.session_state["messages"][-1]["turn"]["error_code"] == "INVALID_STATE"
+    assert any(b.label == "开始风险测评" for b in at.button)
+

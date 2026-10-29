@@ -77,6 +77,8 @@ def _ask_submit(state: Mapping[str, Any], text: str) -> None:
 def _record(state: Mapping[str, Any], turn: Any, display: str) -> None:
     """记下 agent 层返回的一次 `Turn`（回执 + 轨迹），与 `app._ask` 同口径。"""
     dump = turn.model_dump()
+    import workspace_ui
+    workspace_ui.accept(dump, display)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display, "turn": dump})
 
@@ -132,6 +134,8 @@ def render_risk_form(state: Mapping[str, Any], executor: Any) -> bool:
     turn = state["messages"][-1].get("turn") or {}
     if turn.get("intent") != "risk_assess" or turn.get("executed"):
         return False                  # 计分成功就把问卷收起来；失败则保留可重试
+    if (turn.get("facts") or {}).get("query"):
+        return False                  # 「查等级」只读，不该弹问卷（否则每次查询都被打断）
     answers = risk_form(risk_flow.QUESTIONS, risk_flow.QUESTION_GROUPS)
     if answers is None:
         return False

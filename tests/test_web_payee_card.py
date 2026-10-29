@@ -101,16 +101,21 @@ def _markdown(at: AppTest) -> str:
     return "\n".join(str(element.value) for element in at.markdown)
 
 
-def test_whitelist_reply_is_drawn_as_a_card(monkeypatch: pytest.MonkeyPatch) -> None:
-    """用户实测的那条路径：问白名单 → 卡片；姓名、脱敏号、徽章都在，裸表格不上屏。"""
+def test_whitelist_reply_is_drawn_as_an_interactive_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2026-10-28 起：问收款人**不再画那张静态卡**，改由下方可交互列表（▸ 展开）接管。
+
+    历史：这条原本断言「回执要画成 `payee-card`」。用户看到同一份数据出现两遍
+    （聊天里一张静态卡 + 下方一张可点列表），要求只保留可交互的那张。
+    """
     at = _app(monkeypatch, {"intent": "payee_list", "confidence": 0.95,
                             "slots": {}, "missing_slots": []})
     at.chat_input[0].set_value("我的白名单有哪些").run()
     assert not at.exception, at.exception
     page = _markdown(at)
-    assert 'class="payee-card"' in page                        # 卡片本体（CSS 里只有 `.payee-card{`）
-    assert "李四" in page and "139****1001" in page            # 干净库种子里白名单第一位
-    assert 'class="payee-badge on"' in page                     # 白名单徽章
-    assert 'class="payee-badge off"' in page                    # 非白名单徽章
-    assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page     # 裸 Markdown 表格没有跟着上屏
-    assert "trace_id" in "\n".join(str(e.value) for e in at.caption)   # 回执元信息照旧
+    assert at.session_state['workspace-result']['scene'] == 'payee_list'
+    assert 'class="payee-card"' not in page
+    assert "| 收款人 | 手机号 | 银行 | 白名单 |" not in page
+    row_buttons = [button for button in at.button if "****" in button.label]
+    assert len(row_buttons) == 5
+    assert "139****1001" in "\n".join(button.label for button in row_buttons)
+    assert "trace_id" not in "\n".join(str(e.value) for e in at.caption)

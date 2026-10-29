@@ -34,7 +34,7 @@ import demo                                                       # noqa: E402
 
 
 def _markdown(at: AppTest) -> str:
-    return "\n".join(str(element.value) for element in at.markdown)
+    return "\n".join(str(element.value) for element in (*at.markdown, *at.caption))
 
 
 def test_clarify_followup_carries_history_so_a_bare_number_resolves_the_payee(

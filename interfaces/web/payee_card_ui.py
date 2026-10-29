@@ -152,6 +152,16 @@ import streamlit as st
 from agent import confirm_card, payee_resolve, payee_risk, write_flow
 
 
+def suppress_payee_card(reply: str) -> bool:
+    """**消费但不画**：认出这是收款人表格 → 返回 True，让 `transcript` 跳过原文。
+
+    2026-10-28：问收款人时改由下方「收款人管理」列表接管（可点开），聊天里那张静态卡不要了；
+    但如果直接传 `None`，回执里的 Markdown 表格会**照原样上屏**（实测），
+    所以保留一个"吃掉它"的渲染器。
+    """
+    return parse_payee_reply(reply) is not None
+
+
 def _detail_ui():
     """取同目录的 `payee_detail_ui`（人名选项 + 专属操作卡）。
 
@@ -210,7 +220,7 @@ def _dispatch_start(executor: ThreadPoolExecutor, session_id: str, intent: str,
 
 
 #: 2026-10-24（人类规格「查询卡支持全部/白名单/黑名单/已过期白名单筛选」）
-_FILTERS = ("全部", "白名单", "黑名单", "已过期白名单")
+_FILTERS = ("全部", "白名单", "黑名单", "普通收款人")
 
 
 def _is_expired(person: dict) -> bool:
@@ -234,7 +244,7 @@ def _recent_note(person: dict) -> str:
     return f" · 最近转账 {ts[:10]}" if ts else " · 从未转账"
 
 
-def render(executor: ThreadPoolExecutor, session_id: str) -> None:
+def render(executor: ThreadPoolExecutor, session_id: str, confirmation=None) -> None:
     """渲染收款人查询卡：筛选 + 统计 + 每行备注 + 「转账/加白/移出白名单/拉黑/解除/删除」+ 改备注表单。
 
     列表来自 `agent.payee_resolve.list_people()`（只读当前 user；黑白名单、标签、备注、有效期一并带回）。
@@ -242,19 +252,21 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     all_people = executor.submit(payee_resolve.list_people).result()
     if not all_people:
         return
-    st.markdown("##### 👥 收款人")
-    st.caption(f"共 {len(all_people)} 人 · 白名单 "
-               f"{sum(1 for p in all_people if p['is_whitelist'])} 人 · 黑名单 "
-               f"{sum(1 for p in all_people if p['blacklist'])} 人 · 已过期白名单 "
-               f"{sum(1 for p in all_people if _is_expired(p))} 人")
-    picked = st.radio("筛选", _FILTERS, horizontal=True, key="payee-filter",
-                      label_visibility="collapsed")
-    people = [p for p in all_people
-              if picked == "全部"
-              or (picked == "白名单" and p["is_whitelist"] and not _is_expired(p))
-              or (picked == "黑名单" and p["blacklist"])
-              or (picked == "已过期白名单" and _is_expired(p))]
-    if not people:
-        st.caption("这一筛选下没有收款人。")
-        return
-    _detail_ui().render(executor, session_id, people)   # 人名选项 → 专属操作卡
+    with st.container(border=True, key="payee-section"):
+        st.markdown("##### 👥 收款人")
+        st.caption(f"共 {len(all_people)} 人 · 白名单 "
+                   f"{sum(1 for p in all_people if p['is_whitelist'])} 人 · 黑名单 "
+                   f"{sum(1 for p in all_people if p['blacklist'])} 人 · 已过期白名单 "
+                   f"{sum(1 for p in all_people if _is_expired(p))} 人（已过期）")
+        picked = st.radio("筛选", _FILTERS, horizontal=True, key="payee-filter",
+                          label_visibility="collapsed")
+        people = [p for p in all_people
+                  if picked == "全部"
+                  or (picked == "白名单" and p["is_whitelist"] and not _is_expired(p))
+                  or (picked == "黑名单" and p["blacklist"])
+                  or (picked == "普通收款人"
+                      and not p["blacklist"] and (not p["is_whitelist"] or _is_expired(p)))]
+        if not people:
+            st.caption("这一筛选下没有收款人。")
+            return
+        _detail_ui().render(executor, session_id, people, confirmation)   # 人名选项 → 专属操作卡

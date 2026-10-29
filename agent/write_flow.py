@@ -98,7 +98,7 @@ def _execute(session_id: str, confirmation: "confirm_card.Confirmation", otp: st
     spec = write_intents.spec_of(confirmation.intent)
     step = Step(states=["EXECUTE"], tool=spec.execute_tool, tier=confirmation.tier,
                 intent=confirmation.intent)
-    # `confirm_ref` 族且**本档需要 OTP** 时才在编排层设闸门；L1 意图（如 AA 收款，T9 无 OTP）不走闸门。
+    # `confirm_ref` 族且**本档需要 OTP** 时才在编排层设闸门；L1 意图（如 群收款，T9 无 OTP）不走闸门。
     if not spec.otp_in_tool and confirmation.requires_otp and not write_intents.otp_ok(otp):
         step.result = "error"
         return _otp_rejected(session_id, step, spec, str(confirmation.masked_phone or ""))
@@ -333,7 +333,7 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
     branch = (_to_pending(context, verdict) if verdict.delayed                       # L3：延迟 + 撤销
               else _to_confirmation_card(context, verdict, filled, prepared))        # L1/L2：确认卡
     branch.states = ["SLOT_FILL", "PRECHECK", *branch.states]
-    #: AA 收款（T9 无 `preview_*`）在 PRECHECK 阶段**不调任何工具** → `spec.tools` 为空，
+    #: 群收款（T9 无 `preview_*`）在 PRECHECK 阶段**不调任何工具** → `spec.tools` 为空，
     #: 工具名必须留空，否则 `/api/chat` 的 `tool_calls` 会谎报“已调用”，与 F15 验收点
     #: 「确认前不发起请求」直接冲突。
     branch.tools = list(spec.tools)

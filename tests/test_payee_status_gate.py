@@ -26,8 +26,9 @@ def _pid(path, name: str) -> str:
 
 def test_whitelist_shape_resolves_by_tag(wired) -> None:
     """「把房东加入白名单」→ 标签命中王五（原先 T6 会解析失败）。"""
+    #: 2026-10-28：加白必填额度与有效期 → 这两个槽位必须在 missing 里
     got = _shape_whitelist({"payee": "房东"})
-    assert got.error_code is None and got.missing == []
+    assert got.error_code is None and set(got.missing) == {"quota", "expire"}
     assert got.filled["payee_id"] == _pid(wired, WANGWU)
     assert got.filled["masked_phone"] == "137****2003"
 
@@ -40,7 +41,7 @@ def test_whitelist_shape_accepts_blacklisted_person(wired) -> None:
     person_id = _pid(wired, ZHANG)
     payee.set_payee_blacklist(person_id, "诈骗")
     got = _shape_whitelist({"payee": ZHANG})
-    assert got.error_code is None and got.missing == []
+    assert got.error_code is None and set(got.missing) == {"quota", "expire"}
     assert got.filled["payee_id"] == person_id
 
 
@@ -63,5 +64,6 @@ def test_unblacklist_shape_resolves_blacklisted_person(wired) -> None:
 def test_blacklist_shape_still_rejects_unknown(wired) -> None:
     """零命中照旧追问，不擅自选人。"""
     got = _shape_whitelist({"payee": "查无此人"})
-    assert got.error_code is None and got.missing == ["payee"]
+    #: 2026-10-28：加白必填额度与有效期 → 零命中时它们也会出现在 missing 里
+    assert got.error_code is None and set(got.missing) >= {"payee"}
     assert "没有找到匹配的收款人" in got.clarify
