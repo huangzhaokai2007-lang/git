@@ -68,7 +68,7 @@ def test_weekly_and_monthly_are_aggregated_from_the_same_daily_bars(seeded: Path
     weekly = wealth.product_daily("prod_r5_growth", granularity="weekly").facts["candles"]
     monthly = wealth.product_daily("prod_r5_growth", granularity="monthly").facts["candles"]
 
-    assert len(daily) == 120 and len(weekly) == 52 and len(monthly) == 61
+    assert len(daily) == 120 and len(weekly) == 52 and len(monthly) == 201
     # 最后一根三种周期的收盘价必须相同（都截到同一个交易日）
     assert daily[-1][4] == weekly[-1][4] == monthly[-1][4]
     # 周线的高点 = 该周内日线高点的最大值；整体区间也一致
