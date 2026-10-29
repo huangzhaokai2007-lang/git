@@ -253,11 +253,27 @@ def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> N
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """一张卡（发起或在途确认）+ 每笔付款状态卡。"""
+    """一张卡（发起或在途确认）+ 每笔付款状态卡。
+
+    2026-10-29（用户要求）：查看群收款时**不再直接铺开**发起表单 ——
+    先给一个「＋ 新增群收款」按钮，点了才拉开；已经在补槽（例如刚说"向王五群收款"缺金额）时自动展开。
+    """
     confirmation = executor.submit(confirm_card.current, session_id).result()
     if confirmation is not None and getattr(confirmation, "intent", "") == "aa_collect":
+        st.session_state["aa-create-open"] = False       # 进了确认态就收起发起表单
         _confirm_panel(executor, session_id, confirmation)
     else:
-        _create_panel(executor, session_id)
+        from agent import pending_slots
+
+        item = executor.submit(pending_slots.peek, session_id).result() or {}
+        if item.get("intent") == "aa_collect":
+            st.session_state["aa-create-open"] = True     # 正在补槽 → 直接展开
+        if st.button("＋ 新增群收款" if not st.session_state.get("aa-create-open")
+                     else "收起新增群收款",
+                     key="aa-create-toggle", type="primary" if not st.session_state.get("aa-create-open")
+                     else "secondary", width="stretch"):
+            _toggle("aa-create-open")
+        if st.session_state.get("aa-create-open"):
+            _create_panel(executor, session_id)
     for item in executor.submit(aa_flow.active).result():
         _status_card(executor, session_id, item)

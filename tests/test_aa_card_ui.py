@@ -223,3 +223,28 @@ def test_remove_participant(monkeypatch: pytest.MonkeyPatch) -> None:
     assert not app.exception, app.exception
     captions = "\n".join(str(element.value) for element in app.caption)
     assert "还没有参与人" in captions, "删除后应回到空状态"
+
+
+def test_create_form_is_collapsed_behind_a_button(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户 2026-10-29：查看群收款时别直接铺开表单 —— 先给「＋ 新增群收款」按钮，点了再展开。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_list", "confidence": 0.95,
+                                          "slots": {}, "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("查看我的群收款").run()
+    assert not app.exception, app.exception
+
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "群收款总金额" not in marks, "查看列表时不该直接铺开发起表单"
+    assert any(button.label == "＋ 新增群收款" for button in app.button)
+
+    next(button for button in app.button if button.label == "＋ 新增群收款").click().run()
+    assert not app.exception, app.exception
+    assert any(box.label == "群收款总金额（元）" for box in app.number_input), "点了按钮才展开表单"
