@@ -96,8 +96,11 @@ def _fake(monkeypatch, seen: list[str]) -> None:
     def chat_json(system: str, user: object, schema):
         if getattr(schema, "__name__", "") == "IntentOut":
             seen.append(str(user))
+            #: 2026-10-28：加白必须带额度与有效期（用户要求）→ 桩里也给全
             return schema.model_validate({"intent": "payee_whitelist", "confidence": 0.95,
-                                          "slots": {"payee": ZHANG}, "missing_slots": []})
+                                          "slots": {"payee": ZHANG, "quota": "500",
+                                                    "expire": "2026-12-31"},
+                                          "missing_slots": []})
         return schema(reply=json.loads(user)["reply"])
 
     monkeypatch.setattr(llm, "chat_json", chat_json)
@@ -111,7 +114,9 @@ def test_orchestration_needs_otp_before_writing(wired, monkeypatch) -> None:
     """
     seen: list[str] = []
     _fake(monkeypatch, seen)
-    card = orchestrator.handle(f"把{ZHANG}加入白名单", session_id=SESSION)
+    #: 2026-10-28（用户要求）：加白必须带**额度与有效期** → 用例补上这两项
+    card = orchestrator.handle(f"把{ZHANG}加入白名单，额度 500 元，有效期到 2026-12-31",
+                               session_id=SESSION)
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"
     # 影响必须事先说清（v2 SPEC-CHANGE 口径）：专属额度内免验证码（含深夜）、超额度要码。
     #: 2026-10-24：额度口径改成「每月」，卡面文案随之更新（人类要求明确写出每月）。

@@ -60,7 +60,8 @@ def fake_llm(monkeypatch: pytest.MonkeyPatch, script: list[dict],
     ("查一下这个月的流水", "txn_query", "list_txn",
      {"date_from": "2026-09-01", "date_to": "2026-09-12"}),
     ("上个月花了多少？", "bill_analysis", "analyze_spending", {"period": "上个月"}),
-    ("帮我看看有没有异常交易", "anomaly_check", "detect_anomalies", {}),
+    #: 异常分析必须带时间段（2026-10-27：没说时间 → 编排层先追问，不执行工具，故这里给「上个月」）
+    ("帮我看看上个月有没有异常交易", "anomaly_check", "detect_anomalies", {"period": "上个月"}),
     ("给我出一份本月账单报告", "bill_report", "generate_bill_report", {}),
     ("我有哪些订阅？", "subscription_list", "list_subscriptions", {}),
     ("推荐点理财产品", "wealth_recommend", "recommend_wealth", {"risk_level": "R3"}),
@@ -73,6 +74,22 @@ def test_typical_inputs_reach_the_expected_tool(seeded: Path, monkeypatch: pytes
     assert result.intent == intent and result.tool_calls == [expected_tool]
     assert result.states == HAPPY_STATES, "状态机主线不可跳步"
     assert "{" not in result.reply and result.reply.strip()
+
+
+def test_anomaly_check_without_a_period_asks_before_scanning(seeded: Path,
+                                                            monkeypatch: pytest.MonkeyPatch) -> None:
+    """异常分析**没说时间段**：先追问，不执行工具、不默认本月（2026-10-27 验收口径）。
+
+    以前缺省填锚点当月 → 用户问「有没有异常」拿到的其实是"本月那几笔"，
+    却以为是全部历史。时间范围是异常结论的一部分，必须问清再答。
+    """
+    fake_llm(monkeypatch, [out("anomaly_check", slots={})])
+    turn = orchestrator.handle("帮我看看有没有异常交易")
+
+    assert turn.intent == "anomaly_check" and turn.tool_calls == []
+    assert "CLARIFY" in turn.states and turn.ask
+    assert "哪段时间" in turn.reply, "追问必须点名「时间段」，不能只丢一个槽位名"
+    assert "已扫描" not in turn.reply, "没给时间段就不许先扫一遍再说"
 
 
 def test_unrouted_intents_never_call_a_tool_and_never_write(seeded: Path,

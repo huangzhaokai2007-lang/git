@@ -1,4 +1,4 @@
-"""AA 收款族写描述符（T9）：**无凭证族**，L1，不落资金。
+"""群收款族写描述符（T9）：**无凭证族**，L1，不落资金。
 
 F15 卡新增（`agent/_write_common.py` 是核心契约类型，`agent/write_intents.py` 是注册表）。
 
@@ -9,7 +9,7 @@ F15 卡新增（`agent/_write_common.py` 是核心契约类型，`agent/write_in
 | 联系人去重且归属当前用户 | `_shape_aa` 逐个走 T6 `resolve_payee`（**owner 圈定**）→ 按 id 去重 |
 | **确认前不发起请求** | `prepare` **不调** `create_aa_request`（那会写审计 + 生成 `request_id`），只用 `tools._aa_split` 纯算 |
 | 分摊和余数规则可解释 | 与执行回执共用 `tools._aa_split` 的**同一份实现**，不自己再算 |
-| 只说「发起请求」不说「对方已付款」 | `_card_aa` / `_plain_aa` 的措辞都写「发起 AA 收款」 |
+| 只说「发起请求」不说「对方已付款」 | `_card_aa` / `_plain_aa` 的措辞都写「发起 群收款」 |
 | 用户可见数字来自工具事实包 | 卡面数字全部取自 `facts`，`write_flow` 的 `card_numbers_outside_facts` 守门 |
 
 **两种缺口如实登记**：
@@ -28,9 +28,9 @@ from agent._write_common import Prepared, ShapeResult, normalize_query, yuan_to_
 from tools import _aa_split, transfer
 from tools.schemas import ToolResult
 
-AA_CN = "AA 收款"
+AA_CN = "群收款"
 
-#: AA 收款要不要因为「含非白名单收款人」而要验证码？
+#: 群收款要不要因为「含非白名单收款人」而要验证码？
 #: - **False（当前口径，2026-10-25）**：AA 是**收款**方向，一律免码；黑名单照旧直接拒。
 #: - True：恢复到 2026-10-24 的旧规则（含非白名单 / 白名单已过期 → L2 要码）。
 AA_REQUIRE_OTP_FOR_NON_WHITELIST = False
@@ -71,7 +71,7 @@ def _parse_per_person(raw: object, picked: dict[str, str],
         name = match.group(1).strip()
         payee_id = by_name.get(name) or (aliases or {}).get(name)
         if payee_id is None or payee_id not in picked:
-            return None, f"「{name}」不在这次 AA 的名单里"
+            return None, f"「{name}」不在这次群收款的名单里"
         cents = yuan_to_cents(match.group(2))
         if cents is None:
             return None, f"「{seg}」的金额看不懂"
@@ -129,7 +129,7 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
         if cents is None and not filled.get("amounts"):      # 按人金额在手时不算「缺金额」
             missing.append("amount")
             # 同名与缺金额**同时发生**时两件事都要说（否则用户以为只差选人）
-            amount_hint = "请说明这次 AA 的总金额（例如「AA 收款 300 元」）。"
+            amount_hint = "请说明这次群收款的总金额（例如「群收款 300 元」）。"
             clarify = f"{clarify}\n{amount_hint}" if clarify else amount_hint
         else:
             filled["amount_cents"] = cents
@@ -158,19 +158,19 @@ def _prepare_aa(filled: dict) -> Prepared:
     facts = _aa_split.aa_facts(payees, int(filled["amount_cents"]),
                                per_person=filled.get("per_person_cents"))
     facts["target_name"] = filled["aa_target"]
-    #: 2026-10-24（人类规格「AA 总额同样受限额约束」）：超单笔上限 / 超今日剩余 → 直接拒。
+    #: 2026-10-24（人类规格「群收款总额同样受限额约束」）：超单笔上限 / 超今日剩余 → 直接拒。
     single_max = facts.get("limits_single_max")
     daily_left = facts.get("limits_daily_remaining")
     total_cents = int(facts.get("amount_cents") or filled.get("amount_cents") or 0)
     if single_max is not None and total_cents > int(single_max):
         return Prepared(ok=False, error_code="OVER_LIMIT",
-                        message=f"AA 总额 {total_cents / 100:.2f} 元超过单笔上限 "
+                        message=f"群收款总额 {total_cents / 100:.2f} 元超过单笔上限 "
                                 f"{int(single_max) / 100:.2f} 元")
     if daily_left is not None and total_cents > int(daily_left):
         return Prepared(ok=False, error_code="OVER_LIMIT",
-                        message=f"AA 总额 {total_cents / 100:.2f} 元超过今日剩余额度 "
+                        message=f"群收款总额 {total_cents / 100:.2f} 元超过今日剩余额度 "
                                 f"{int(daily_left) / 100:.2f} 元")
-    #: 2026-10-25 口径（人类最新原话）：「AA 收款**不要**验证码」—— 收款方向，钱是进来的。
+    #: 2026-10-25 口径（人类最新原话）：「群收款**不要**验证码」—— 收款方向，钱是进来的。
     #: 因此恒 L1；黑名单仍然在 `_shape_aa` 直接拒（那一条不受影响）。
     #: 想恢复 10-24 的旧规则（含非白名单收款人要码）：把下面这个常量改回 True 即可。
     non_exempt = [name for pid, name in zip(ids, names) if not _exempt(pid)]
@@ -204,7 +204,7 @@ def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
     if facts.get("aa_otp_reason"):                      # 为什么要验证码，卡面说清楚
         rows.append(("验证码原因", str(facts["aa_otp_reason"])))
     return confirm_card.CardInput(
-        title="AA 收款确认卡", intent_cn=AA_CN, rows=rows,
+        title="群收款确认卡", intent_cn=AA_CN, rows=rows,
         tier=tier, requires_otp=requires_otp,
         risk_note=confirm_card.risk_note([], AA_CN))
 
@@ -215,8 +215,8 @@ def _plain_aa(filled: dict, facts: Mapping, tier: str) -> str:
         detail = "，".join(f"{line['name']} {line['amount_yuan']} 元"
                            for line in facts["per_person_lines"])
         return (f"请确认：向 {facts.get('target_name')}（{facts.get('payee_count')} 人）"
-                f"发起 AA 收款 {facts.get('amount_yuan')} 元（{detail}），权限档 {tier}。")
-    return (f"请确认：向 {facts.get('target_name')}（{facts.get('payee_count')} 人）发起 AA 收款 "
+                f"发起 群收款 {facts.get('amount_yuan')} 元（{detail}），权限档 {tier}。")
+    return (f"请确认：向 {facts.get('target_name')}（{facts.get('payee_count')} 人）发起 群收款 "
             f"{facts.get('amount_yuan')} 元，每人 {facts.get('per_person_amount_yuan')} 元（一键均摊），"
             f"权限档 {tier}。")
 
@@ -241,8 +241,8 @@ def _execute_aa(confirmation: confirm_card.Confirmation, otp: str | None) -> Too
         from tools import _aa_request
         opened = _aa_request.open_aa_request(payee_ids, amount_cents, int(sum(amount_cents)),
                                              "custom" if per_person else "equal",
-                                             str(filled.get("title") or "AA 收款"))
+                                             str(filled.get("title") or "群收款"))
         if opened.ok:
             result = result.model_copy(update={
-                "message": f"{result.message}（AA 单号 {opened.data['request_id']}，24 小时内有效）"})
+                "message": f"{result.message}（群收款单号 {opened.data['request_id']}，24 小时内有效）"})
     return result

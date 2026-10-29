@@ -5,7 +5,7 @@
 | 意图 | 工具 | 档位 | 说明 |
 |---|---|---|---|
 | `aa_mark_paid`（登记某人已付） | T43 `mark_aa_share_paid` | **L1** | 全部付清 → 请求自动转 `done`；重复登记 → `INVALID_STATE` |
-| `aa_cancel`（撤销 AA） | T44 `cancel_aa_request` | **L1** | 已登记的付款记录保留（不回滚） |
+| `aa_cancel`（撤销群收款） | T44 `cancel_aa_request` | **L1** | 已登记的付款记录保留（不回滚） |
 """
 
 from __future__ import annotations
@@ -17,12 +17,12 @@ from agent._write_common import Prepared, ShapeResult, _code_of
 from tools.schemas import ToolResult
 
 MARK_TIER, CANCEL_TIER = "L1", "L1"
-PICK_AMBIGUOUS = "您有多笔进行中的 AA，请说明是哪一笔（可以说出事由或合计金额）。"
+PICK_AMBIGUOUS = "您有多笔进行中的群收款，请说明是哪一笔（可以说出事由或合计金额）。"
 WHO_CLARIFY = "请说明是谁付了（例如「赵六付了」）。"
 
 
 def _active() -> tuple[list[dict], str | None]:
-    """只读 T42 取「进行中」的 AA 请求。"""
+    """只读 T42 取「进行中」的 群收款请求。"""
     from tools import _aa_request
     listed = _aa_request.list_aa_requests("active")
     if not listed.ok:
@@ -37,9 +37,9 @@ def _shape_mark_paid(slots: Mapping) -> ShapeResult:
     clarify = ""
     items, code = _active()
     if code is not None:
-        return ShapeResult(filled=filled, error_code=code, message="取不到您的 AA 请求")
+        return ShapeResult(filled=filled, error_code=code, message="取不到您的 群收款请求")
     if not items:
-        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 AA 收款")
+        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 群收款")
     if filled.get("request_id"):
         target = [it for it in items if it["request_id"] == filled["request_id"]]
         if not target:
@@ -82,13 +82,13 @@ def _shape_cancel(slots: Mapping) -> ShapeResult:
     filled = dict(slots)
     items, code = _active()
     if code is not None:
-        return ShapeResult(filled=filled, error_code=code, message="取不到您的 AA 请求")
+        return ShapeResult(filled=filled, error_code=code, message="取不到您的 群收款请求")
     if filled.get("request_id"):
         chosen = next((it for it in items if it["request_id"] == filled["request_id"]), None)
         if chosen is None:
             return ShapeResult(filled=filled, error_code="NOT_FOUND", message="这笔 AA 已不在进行中")
     elif not items:
-        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 AA 收款")
+        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 群收款")
     elif len(items) > 1:
         return ShapeResult(filled=filled, missing=["request_id"], clarify=PICK_AMBIGUOUS)
     else:
@@ -101,7 +101,7 @@ def _prepare(filled: dict, tier: str) -> Prepared:
     """只读那一笔（不调工具）：给卡面提供事由/合计/已付人数。"""
     items, code = _active()
     if code is not None:
-        return Prepared(ok=False, error_code=code, message="取不到您的 AA 请求")
+        return Prepared(ok=False, error_code=code, message="取不到您的 群收款请求")
     row = next((it for it in items if it["request_id"] == filled.get("request_id")), None)
     if row is None:
         return Prepared(ok=False, error_code="NOT_FOUND", message="这笔 AA 已不在进行中")
@@ -118,7 +118,7 @@ def _prepare_cancel(filled: dict) -> Prepared:
 
 def _card(intent: str, filled: dict, facts: Mapping, tier: str,
           requires_otp: bool) -> confirm_card.CardInput:
-    """登记已付 / 撤销 AA 的确认卡。"""
+    """登记已付 / 撤销群收款 的确认卡。"""
     marking = intent == "aa_mark_paid"
     rows = [("事由", str(facts["title"])),
             ("合计", f"{facts['total_yuan']} 元"),
@@ -128,10 +128,10 @@ def _card(intent: str, filled: dict, facts: Mapping, tier: str,
     else:
         rows.append(("说明", "已登记的付款记录保留，不回滚"))
     return confirm_card.CardInput(
-        title="登记已付确认卡" if marking else "撤销 AA 确认卡",
-        intent_cn="登记已付" if marking else "撤销 AA",
+        title="登记已付确认卡" if marking else "撤销群收款 确认卡",
+        intent_cn="登记已付" if marking else "撤销群收款",
         rows=rows, tier=tier, requires_otp=requires_otp,
-        risk_note=confirm_card.risk_note([], "登记已付" if marking else "撤销 AA"))
+        risk_note=confirm_card.risk_note([], "登记已付" if marking else "撤销群收款"))
 
 
 def _plain(intent: str, filled: dict, facts: Mapping, tier: str) -> str:
@@ -168,9 +168,9 @@ def _shape_remind(slots: Mapping) -> ShapeResult:
     filled = dict(slots)
     items, code = _active()
     if code is not None:
-        return ShapeResult(filled=filled, error_code=code, message="取不到您的 AA 请求")
+        return ShapeResult(filled=filled, error_code=code, message="取不到您的 群收款请求")
     if not items:
-        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 AA 收款")
+        return ShapeResult(filled=filled, error_code="NOT_FOUND", message="您没有进行中的 群收款")
     if filled.get("request_id"):
         chosen = next((it for it in items if it["request_id"] == filled["request_id"]), None)
         if chosen is None:

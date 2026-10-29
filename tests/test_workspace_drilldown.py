@@ -41,7 +41,7 @@ def test_two_levels_return_one_at_a_time_and_shortcut_starts_new_root(monkeypatc
     offline(monkeypatch)
     at = app(monkeypatch, seeded)
     at.chat_input[0].set_value('八月异常交易').run()
-    click(at, '📄 看流水明细')
+    click(at, '📄 看这段时间的流水')
     ledger = at.session_state['workspace-result']['turn']['trace_id']
     click(at, '🔍 查异常交易')
     assert any(b.label == '返回流水明细' for b in at.button)

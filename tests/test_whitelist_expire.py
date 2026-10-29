@@ -34,6 +34,9 @@ def wired(seeded, monkeypatch, clock):
 
 
 def _fake(monkeypatch, slots: dict) -> None:
+    #: 2026-10-28：加白必填额度与有效期 —— 缺省补上，避免所有用例都先被追问
+    slots = {"quota": "500", **slots}
+
     def chat_json(system: str, user: object, schema):
         if getattr(schema, "__name__", "") == "IntentOut":
             return schema.model_validate({"intent": "payee_whitelist", "confidence": 0.95,
@@ -65,7 +68,9 @@ def test_set_expire_rejects_non_whitelist_and_bad_date(wired) -> None:
 def test_whitelist_with_expire_lands_on_row(wired, monkeypatch) -> None:
     """「把张小美加入白名单，有效期到 2027-01-31」→ 卡面有「有效期」→ 确认后 T25 + T36 都落。"""
     _fake(monkeypatch, {"payee": ZHANG, "expire": "2027-01-31"})
-    card = orchestrator.handle(f"把{ZHANG}加入白名单，有效期到 2027-01-31", session_id=SESSION)
+    #: 2026-10-28：加白必须带额度 → 这条聚焦"有效期"，额度给个默认值
+    card = orchestrator.handle(f"把{ZHANG}加入白名单，额度 500 元，有效期到 2027-01-31",
+                               session_id=SESSION)
     assert "CONFIRM_CARD" in card.states and card.tier == "L2"
     assert "有效期至" in card.reply and "2027-01-31" in card.reply
     # 2026-10-24 口径变更：有效期不再是「仅展示」，到期会降级为普通收款人

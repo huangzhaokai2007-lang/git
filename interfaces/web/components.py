@@ -25,14 +25,27 @@ BALANCE_PROMPT = "查一下余额"
 #: 回执里的表格**由卡片接管**的意图（2026-10-26 验收口径：曲线图放最前面、表格要有高级感）。
 #: 这些意图的回执在气泡里只留**头句**（区间 / 笔数 / 合计），走势图与逐笔明细交给紧跟其后的
 #: 洞察卡 —— 同一批数在气泡里印一遍、卡片里再画一遍，用户看到的不是"全"，是冗长。
-LEDGER_CARD_INTENTS = ("txn_query",)
+#: 2026-10-27 追加 `anomaly_check`：异常分析同理 —— 气泡只留「已扫描 N 笔，检测到 M 笔」，
+#: 逐笔清单（时间/对手方/金额/依据）全交给洞察卡的表格；两处各印一遍，用户对着屏幕对账。
+LEDGER_CARD_INTENTS = ("txn_query", "anomaly_check")
 
 
 def _head_only(text: str) -> str:
-    """回执的**头句**（第一段）：遇到表格行就停 —— 表格由卡片呈现，气泡里不再铺一遍。"""
+    """回执的**头句**（第一段）：遇到表格行、空行、列表项或加粗小标题就停。
+
+    三种截断条件各有来历（都是实机看出来的，不是预防性设计）：
+    1. **表格行**（`|`）：明细表由卡片呈现，气泡里不再铺一遍；
+    2. **列表项**（`- `）：异常清单是「头句 + 每条一行」，不挡列表项会整份留在气泡里，
+       与卡片表格一左一右对印；
+    3. **加粗小标题**（`**…**` 独占一行）：卡片底部的追问按钮组有自己的标题，
+       只截到「**接着问：**」会变成一句孤零零的残句挂在气泡末尾 —— 那行标题归卡片，
+       不该出现在气泡里。
+    """
     kept: list[str] = []
     for line in str(text).splitlines():
-        if line.startswith("|"):
+        stripped = line.lstrip()
+        if (not stripped or stripped.startswith("|") or stripped.startswith("- ")
+                or (stripped.startswith("**") and stripped.endswith("**") and len(stripped) > 4)):
             break
         kept.append(line)
     return "\n".join(kept).strip()
@@ -73,6 +86,7 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                compact: bool = False,
                legacy_bills: bool = False,
                wealth_card: Callable[[Mapping[str, Any], str], None] | None = None,
+               risk_card: Callable[[Mapping[str, Any], str], None] | None = None,
                subscription_card: Callable[[Mapping[str, Any], str], None] | None = None,
                wealth_start: int = 0) -> None:
     '聊天记录：用户原话照原样，助手只回显编排层回执 + trace_id。'
@@ -81,6 +95,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                          if messages[i].get('role') == 'assistant' and messages[i].get('turn')), -1)
     recent_intent = (messages[recent_reply]['turn'].get('intent') if recent_reply >= 0 else None)
     recent_wealth = recent_reply if recent_intent == 'wealth_recommend' else -1
+    #: 风险卡（"还没测评"的入口）同样只挂最后一条：后续操作后还留着按钮会让人以为要重测。
+    recent_risk = recent_reply if recent_intent == 'risk_assess' else -1
     if recent_wealth < 0 and recent_intent == 'wealth_all_products':
         recent_wealth = next((i for i in range(recent_reply - 1, wealth_start - 1, -1)
             if (messages[i].get('turn') or {}).get('intent') == 'wealth_recommend'), -1)
@@ -124,6 +140,8 @@ def transcript(messages: Sequence[Mapping[str, Any]],
                                f"档位 `{turn.get('tier') or '—'}` · 状态 {' → '.join(turn['states'])}")
                 if wealth_card is not None and index == recent_wealth and message['role'] == 'assistant':
                     wealth_card(turn, f"wealth-{index}")
+                if risk_card is not None and index == recent_risk and message['role'] == 'assistant':
+                    risk_card(turn, f"risk-{index}")
                 if subscription_card is not None and index == recent_subs and message['role'] == 'assistant':
                     subscription_card(turn, f"subs-{index}")
                 if insight_card is not None and message["role"] == "assistant" and index == insight_index:
@@ -164,7 +182,7 @@ def balance_box(replies: Sequence[Mapping[str, Any]]) -> bool:
 
 #: card-24 把 `Confirmation` 泛化后，卡面主对象字段是通用的 `target_name`（转账=收款人、订阅取消=商户）。
 #: 这两张表给出每个写意图的卡面措辞；**表外意图按转账处理**（该模型最初就是为转账做的，行为不变）。
-_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA 收款确认卡",
+_CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "群收款确认卡",
                "gift_plan": "送礼计划确认卡", "payee_whitelist": "白名单确认卡",
                "payee_blacklist": "黑名单确认卡", "payee_unblacklist": "解除黑名单确认卡",
                "payee_delete": "删除收款人确认卡",
@@ -174,7 +192,7 @@ _CARD_TITLE = {"subscription_cancel": "订阅取消确认卡", "aa_collect": "AA
                "scheduled_modify": "修改预约确认卡",
                "gift_order_cancel": "取消订单确认卡", "gift_order_pay": "支付订单确认卡",
                "gift_order_advance": "订单状态确认卡",
-               "aa_mark_paid": "登记已付确认卡", "aa_cancel": "撤销 AA 确认卡",
+               "aa_mark_paid": "登记已付确认卡", "aa_cancel": "撤销群收款 确认卡",
                "aa_remind": "提醒付款确认卡",
                "payee_whitelist_edit": "修改白名单信息确认卡",
                "payee_whitelist_remove": "移出白名单确认卡",
@@ -188,7 +206,7 @@ _MONEY_INTENTS = frozenset({"transfer_single", "transfer_scheduled", "subscripti
 
 
 def _aa_table(confirmation: Any) -> None:
-    """AA 收款：主卡面就列**每人应收金额**的表格（一键均摊时每人相同、标注均摊）。
+    """群收款：主卡面就列**每人应收金额**的表格（一键均摊时每人相同、标注均摊）。
 
     数据全部来自确认卡快照（`filled`）—— 界面只渲染，不重算、不补数（铁律 2）。
     """

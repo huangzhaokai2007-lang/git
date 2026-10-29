@@ -95,6 +95,9 @@ T_RISK_PROMPT = (f"好的，风险测评一共 {len(_RISK_QUESTIONS)} 题，请�
 
 #: 反问（缺槽/低置信度）：只列缺失项的中文名，不含任何业务数字
 T_CLARIFY_SLOT = "我需要再确认一下：请补充{slots_cn}。"
+#: 异常分析缺时间段：**必须问清范围再答**（2026-10-27 验收口径：不许默认本月就说"检测到 N 笔"）
+T_CLARIFY_ANOMALY_PERIOD = ("请告诉我您想查哪段时间的异常 —— 不同时间段结论不同，"
+                            "我不会替您默认某个月。可以说「四月份」「上个月」「2026 年」或具体区间。")
 T_CLARIFY_LOW_CONFIDENCE = "没太理解您的意思，能再说得具体一点吗？（例如「查一下余额」「上个月花了多少」）"
 T_CLARIFY_TOO_MANY = "连续两次没能确认您的需求，我先转人工客服帮您处理。"
 
@@ -120,7 +123,7 @@ INTENT_CN: dict[str, str] = {
     "balance_query": "余额查询", "txn_query": "交易流水查询", "bill_analysis": "账单分析",
     "anomaly_check": "异常交易检测", "bill_report": "账单报告", "subscription_list": "订阅查询",
     "card_query": "卡片查询", "wealth_recommend": "理财推荐", "transfer_single": "转账",
-    "transfer_scheduled": "预约转账", "aa_collect": "AA 收款", "subscription_cancel": "取消订阅",
+    "transfer_scheduled": "预约转账", "aa_collect": "群收款", "subscription_cancel": "取消订阅",
     "subscription_remind": "订阅提醒", "card_apply": "申请新卡", "card_limit_adjust": "调整限额",
     "card_lock": "锁卡", "card_unlock": "解锁", "card_report_lost": "挂失", "risk_assess": "风险测评",
     "wealth_buy": "理财申购", "wealth_redeem": "理财赎回", "gift_plan": "送礼计划",
@@ -180,7 +183,7 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         return render_schedules(facts)
     if intent == "gift_order_list":                          # F20 追加：送礼订单（号码/收货人/金额/状态）
         return render_gift_orders(facts)
-    if intent == "aa_list":                                  # F22 追加：AA 收款（已付人数/状态/截止）
+    if intent == "aa_list":                                  # F22 追加：群收款（已付人数/状态/截止）
         return render_aa_requests(facts)
     if intent == "risk_assess":                              # F10：总分/满分/等级/有效期（不走单行 format）
         try:
@@ -196,8 +199,15 @@ def render(intent: str, facts: Mapping[str, object]) -> str:
         raise TemplateError(f"{intent!r} 模板缺少 facts 键：{exc}") from exc
 
 
-def clarify_missing(missing: list[str]) -> str:
-    """缺槽反问：把缺失的槽位名换成人话（无业务数字）。"""
+def clarify_missing(missing: list[str], intent: str = "") -> str:
+    """缺槽反问：把缺失的槽位名换成人话（无业务数字）。
+
+    `anomaly_check` 只说「请补充时间范围（如 2026-09 或 2026）」时用户很难照着答 ——
+    异常分析的结论**随范围变**（这个问题本身就是这么暴露出来的），所以给一句能照着答的
+    示例（「四月份」「上个月」「2026 年」），并把"为什么必须说"讲明白。
+    """
+    if intent == "anomaly_check" and missing == ["period"]:
+        return T_CLARIFY_ANOMALY_PERIOD
     names = "、".join(SLOT_CN.get(slot, slot) for slot in missing)
     return T_CLARIFY_SLOT.format(slots_cn=names)
 

@@ -6,7 +6,7 @@ import streamlit as st
 
 from agent import scene_flow, bill_detail_flow, subscription_notice, wealth_daily
 import agent.view_navigation as view_navigation
-from interfaces.web import wealth_ui
+from interfaces.web import wealth_ui, risk_ui
 import interfaces.web.subscription_ui as subscription_ui
 import card_binding_ui, card_limit_ui, card_lock_ui, card_lost_ui
 import payee_card_ui, schedule_card_ui, aa_card_ui, gift_card_ui
@@ -15,7 +15,7 @@ import workspace_navigation as navigation
 
 READS = {'balance_query', 'txn_query', 'bill_analysis', 'bill_report', 'anomaly_check',
          'card_query', 'payee_list', 'subscription_list', 'subscription_remind',
-         'wealth_holdings', 'wealth_all_products', 'wealth_recommend'}
+         'wealth_holdings', 'wealth_all_products', 'wealth_recommend', 'risk_assess'}
 VIEW_KEYS = ('workspace-result', 'workspace-shortcut', 'cards-view', 'operation-records-open',
              'workspace-wealth-source', 'active-scene',
              *(f'bound-{domain}-query' for domain in ('card', 'payee', 'schedule', 'aa', 'gift', 'lost')))
@@ -164,6 +164,9 @@ def result(executor, session: str, ask, detail_loader) -> None:
                 daily_loader=lambda pid: executor.submit(wealth_daily.load, session, pid).result())
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
+    elif scene == 'risk_assess':
+        st.markdown(turn.get('reply') or '当前没有查询结果。')
+        risk_ui.render_turn(turn, ask=ask, key_prefix='workspace-risk-' + str(turn.get('trace_id')))
     elif scene == 'wealth_all_products':
         st.markdown(turn.get('reply') or '当前没有查询结果。')
         if source := st.session_state.get('workspace-wealth-source'):
@@ -229,7 +232,7 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
                  ('aa_list', 'aa', aa_card_ui.render),
                  ('gift_order_list', 'gift', gift_card_ui.render))
     for name, flag, renderer in renderers:
-        if scene == name and st.session_state.get(f'bound-{flag}-query'):
+        if (scene == name or (name == 'aa_list' and scene == 'aa_collect')) and st.session_state.get(f'bound-{flag}-query'):
             renderer(executor, session)
     if scene not in ('cards', 'records'):
         scene_ui.render(executor, session, ask, show_scope=False)

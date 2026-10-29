@@ -48,9 +48,7 @@ def _resolve_shape(slots: Mapping, *, allow_blacklisted: bool = False) -> ShapeR
 def _shape_whitelist(slots: Mapping) -> ShapeResult:
     """加白：统一解析关卡。**黑名单里的人也能直接加白**（置白时工具层会解除黑名单）。
 
-    2026-10-24（人类原文「要为白名单人员设置有效时间与额度」）：可选 `quota`（元）/`expire`
-    （日期或「月底」这类相对说法）两个槽位 —— 在本步归一化；缺了不报错
-    （额度未设 = 一律要验证码；有效期空 = 长期有效）。
+    2026-10-28（用户要求）：`quota`（元/月）与 `expire` **改成必填** —— 缺任何一个都要追问。
     """
     #: 2026-10-26（人类要求）：三种身份可自由切换 —— 黑名单 → 白名单一步到位。
     shaped = _resolve_shape(slots, allow_blacklisted=True)
@@ -67,7 +65,16 @@ def _shape_whitelist(slots: Mapping) -> ShapeResult:
             return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
                                message="有效期看不懂，请用 2026-12-31 这样的日期（或说「月底」）")
         filled["expire"] = expire
-    return ShapeResult(filled=filled, missing=shaped.missing, clarify=shaped.clarify,
+    missing = list(shaped.missing)
+    if filled.get("quota_cents") is None:
+        missing.append("quota")
+    if not filled.get("expire"):
+        missing.append("expire")
+    clarify = shaped.clarify
+    #: 只有**人已经认出来了**才问额度/有效期；没认出来时保留「找不到/同名」的原始追问
+    if filled.get("payee_id") and ("quota" in missing or "expire" in missing):
+        clarify = "请补充：专属额度（元/月）、有效期（如 2026-12-31 或 月底）。"
+    return ShapeResult(filled=filled, missing=missing, clarify=clarify,
                        candidates=shaped.candidates)
 
 

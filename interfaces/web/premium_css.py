@@ -122,7 +122,48 @@ REDUCED_MOTION_CSS = """
 }
 """
 
-CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{REDUCED_MOTION_CSS}</style>"
+
+#: 收款人列表（图一风格）+ 展开详情（图二风格）
+PAYEE_CSS = """
+@keyframes dsh-expand { from { opacity: 0; transform: translateY(-4px) scaleY(.985); }
+                        to   { opacity: 1; transform: none; } }
+.dsh-payee-row { display: flex; align-items: center; gap: 14px; padding: 8px 4px; }
+.dsh-payee-avatar { width: 30px; height: 30px; flex: 0 0 30px; border-radius: 50%;
+  background: #2b2940; color: #b7b1ff; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 650; }
+.dsh-payee-name { min-width: 64px; font-weight: 650; font-size: 15px; color: #E6E8EE; }
+.dsh-payee-phone { font-family: ui-monospace, Consolas, monospace; letter-spacing: .3px;
+  color: #d1d4dc; font-size: 14px; }
+.dsh-payee-bank { color: #9aa0ac; font-size: 13.5px; }
+/* 行 hover：整行轻染（配合 ▸ 有可点暗示） */
+div[class*="st-key-payee-row-"]:hover { background: rgba(102,103,201,.10); border-radius: 10px; }
+/* 展开的详情：拉开动画 */
+.st-key-payee-detail { animation: dsh-expand .18s ease-out both; }
+/* 「编辑资料」在名字下方、字大一点 */
+.st-key-payee-detail [data-testid="stExpander"] summary p { font-size: 1.02rem; font-weight: 600; }
+"""
+
+
+#: 收款人「整行按钮」——把 Streamlit 的方块按钮改造成列表行（悬停才浮现提示）
+PAYEE_ROW_CSS = """
+div[class*="st-key-payee-row-"] button {
+  background: transparent !important; border: none !important; box-shadow: none !important;
+  justify-content: flex-start !important; text-align: left !important;
+  padding: .5rem .7rem !important; border-radius: 10px !important;
+  font-weight: 400 !important; color: #d1d4dc !important;
+  transition: background .12s ease, transform .12s ease;
+}
+div[class*="st-key-payee-row-"] button p { font-size: .95rem !important; line-height: 1.5; }
+div[class*="st-key-payee-row-"] button:hover {
+  background: rgba(102,103,201,.14) !important; transform: translateX(2px);
+}
+div[class*="st-key-payee-row-"] button:focus:not(:active) {
+  border: none !important; box-shadow: none !important;
+}
+div[class*="st-key-payee-row-"] { border-bottom: 1px solid rgba(44,45,51,.7); }
+"""
+
+CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{PAYEE_CSS}{PAYEE_ROW_CSS}{REDUCED_MOTION_CSS}</style>"
 
 
 def num_html(text: str, *, flash: bool = False) -> str:

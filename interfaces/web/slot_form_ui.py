@@ -77,6 +77,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     if not item or item.get('intent') == 'gift_plan':
         return
     missing = [slot for slot in (item.get("missing") or []) if slot]
+    #: 2026-10-28（用户要求）：群收款由卡面自己收集（总额/选人/按人金额），
+    #: 不再弹通用表单 —— 否则一张页面出现「每人金额卡 + 还差几项」两块，很散。
+    if item.get("intent") == "aa_collect":
+        return
     if not missing:
         return
     with st.container(border=True):

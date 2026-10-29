@@ -58,6 +58,21 @@ OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
     #: 按顺序先匹配的那条赢；测评是更具体的意图（它有自己的问卷流程），理财推荐是泛的。
     (("测评", "风险评估"), "risk_assess", {}),
     (("理财", "推荐"), "wealth_recommend", {}),
+    #: F20：离线演示里「我的收款人有哪些」判成 out_of_scope（答「没太理解您的意思」），
+    #: 用户当场以为收款人功能没做 —— 与「花哪」「钱都花」同类缺陷。必须排在「转」前面。
+    (("收款人", "白名单"), "payee_list", {}),
+    #: T9/T16：AA 收款与送礼计划同样是"关键词表缺词 → 兜底没太理解"的缺陷。
+    #: 离线替身不会抽这两个写流程的槽位（只会抽日期），追问必卡死 → 按仓库先例
+    #: （transfer_single 预填张小美/100）预填演示槽位，让编排层直接出确认卡。
+    #: 口径实测：aa_collect 只认 payee_ids/amount/amounts（amounts 必须是"王五 100、赵六 200"
+    #: 这类文本，给 list 会被 str 化逐字解析报"「[」不在名单里"）；gift_plan 六槽全必填
+    #: （GIFT_REQUIRED 含 platform/address/order_no），date 要 ISO 且不早于基准日。
+    (("AA", "aa"), "aa_collect",
+     {"payee_ids": ["王五", "赵六"], "amounts": "王五 100、赵六 200"}),
+    (("送礼", "礼物"), "gift_plan",
+     {"contact": "张小美", "date": "2026-11-01", "budget": 500,
+      "platform": "京东", "address": "上海市浦东新区张江路 100 号",
+      "order_no": "GO-DEMO-20261026"}),
     (("转",), "transfer_single", {"payee": "张小美", "amount": 100}),
 )
 #: 相对时间词（替身"抽槽位"用；归一化仍由 `agent/period.py` 做，替身不重复判断）
@@ -184,6 +199,23 @@ def _span_months(match: re.Match) -> int:
     return _cn_number(raw)                                   # 「最近十二个月」→ 12（此前 `_CN_NUM` 查表为 0）
 
 
+def period_is_stated(text: str) -> bool:
+    """用户**有没有说时间**（`True` = 说了）。与 `period_from_text` 同一套刀，只差默认值。
+
+    为什么要单独一个：`period_from_text` 抽不到时会回落「本月」—— 那是个**替身替用户做的假设**，
+    对"查余额"这类无所谓，但对「有没有异常」这类分析意图，等于**静默把范围缩成了本月**，
+    用户以为自己问的是全部。所以分析类意图先用本函数问一句"说了没"，没说就让编排层追问。
+
+    口径与 `period_from_text` 保持同步：任一显式/相对时间说法命中即为「说了」。
+    **只认相对词表里的字面说法**（「本月」「这个月」…）—— 不能反过来拿"抽到的结果等于本月"
+    去猜，否则任何兜底成「本月」的说法都会被当成用户说了本月。
+    """
+    text = _strip_date_context(text)
+    if any(word in text for word in PERIOD_WORDS):
+        return True
+    return period_from_text(text) != "本月"
+
+
 def period_from_text(text: str) -> str:
     """从话里抽账期：**显式月份优先**，其次相对词（`PERIOD_WORDS`），都没有 → 锚点当月。
 
@@ -228,6 +260,8 @@ def period_from_text(text: str) -> str:
         year = today.year - 1 if (today.year, month) > (today.year, today.month) else today.year
         return f"{year:04d}-{month:02d}"
     by_length = sorted(PERIOD_WORDS, key=len, reverse=True)
+    #: 兜底 `"本月"` 的含义是"用户什么都没说"（没有任何时间词能换算出账期）—— 见
+    #: `period_is_stated` 的说明：分析类意图拿它当"没说"的证据，从而追问而不是静默缩范围。
     return next((word for word in by_length if word in text), "本月")
 
 
@@ -329,7 +363,13 @@ def offline_verdict(text: str) -> tuple[str, dict]:
         if any(word in text for word in keywords):
             filled = dict(slots)
             if intent in ("bill_analysis", "anomaly_check", "bill_report"):
+                #: 2026-10-27 验收口径：问「异常分析」却**没说哪个月**时，不许静默按锚点当月算
+                #: （「有没有异常」→ 悄悄答了本月，用户以为查的是全部）。只对 anomaly_check 生效：
+                #: 没给 period 槽位 → 编排层 REQUIRED_SLOTS 追问时间段；说了就照填。
+                #: 账单分析/总结维持原口径（没给时间词 → 本月），那是用户能接受的惯例。
                 filled["period"] = period_from_text(text)
+                if intent == "anomaly_check" and not period_is_stated(text):
+                    filled.pop("period", None)
             if intent == "txn_query":                    # F02 要的日期槽位（替身抽，非业务实现）
                 filled.update(dates_from_text(text))
             return intent, filled

@@ -119,6 +119,8 @@ def render_risk_form(state: Mapping[str, Any], executor: Any) -> bool:
     turn = state["messages"][-1].get("turn") or {}
     if turn.get("intent") != "risk_assess" or turn.get("executed"):
         return False                  # 计分成功就把问卷收起来；失败则保留可重试
+    if (turn.get("facts") or {}).get("query"):
+        return False                  # 「查等级」只读，不该弹问卷（否则每次查询都被打断）
     answers = risk_form(risk_flow.QUESTIONS)
     if answers is None:
         return False

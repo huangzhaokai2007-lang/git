@@ -144,7 +144,7 @@ def test_aa_same_name_offers_the_picker(wired, monkeypatch) -> None:
     assert slots["payee_ids"][0] == chosen["phone"]          # 名单里那一个换成唯一手机号
     assert slots["payee_ids"][1] == "王五"                    # 另一个不受影响
     step = write_flow.start(intent, slots, "aa-pick")
-    assert "CONFIRM_CARD" in step.states and "AA 收款确认卡" in step.reply
+    assert "CONFIRM_CARD" in step.states and "群收款确认卡" in step.reply
 
 
 def test_monthly_on_a_specific_day_lands_on_that_day(wired) -> None:

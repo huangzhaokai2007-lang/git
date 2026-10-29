@@ -1,4 +1,4 @@
-"""AA 收款的**请求生命周期**（T41 落 / T42 查 / T43 每人已付 / T44 撤销）—— F22 追加。
+"""群收款的**请求生命周期**（T41 落 / T42 查 / T43 每人已付 / T44 撤销）—— F22 追加。
 
 人类需求（v3 清单）：AA「进行中 / 每人已付 / 24h 失效 / 撤销」。
 T9 / T31 只写一条审计（无表），本模块把 AA 变成**可跟踪的请求**：
@@ -49,7 +49,7 @@ class OpenAaRequestReq(BaseModel):
     amounts: list[int] = Field(min_length=1)
     total: int = Field(ge=0)
     mode: str = "equal"
-    title: str = "AA 收款"
+    title: str = "群收款"
 
 
 def _now() -> datetime.datetime:
@@ -75,7 +75,7 @@ def _shares(request_id: str) -> list[dict]:
 
 def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: str,
                     title: str) -> ToolResult:
-    """T41 落一条 AA 请求 + 每人份额（`active`，24h 后惰性失效）。`data` = `{request_id, expire_at}`。"""
+    """T41 落一条 群收款请求 + 每人份额（`active`，24h 后惰性失效）。`data` = `{request_id, expire_at}`。"""
     if (bad := _invalid(OpenAaRequestReq, payee_ids=payee_ids, amounts=amounts,
                         total=total, mode=mode, title=title)) is not None:
         return bad
@@ -100,7 +100,7 @@ def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: 
         conn.execute(
             "INSERT INTO aa_request (id, user_id, title, total, split_mode, status, created_at,"
             " expire_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
-            (request_id, user_id, title or "AA 收款", int(total), mode or "equal",
+            (request_id, user_id, title or "群收款", int(total), mode or "equal",
              now.isoformat(timespec="seconds"), expire_at))
         for payee_id, name, cents in zip(payee_ids, names, amounts):
             conn.execute(
@@ -115,16 +115,16 @@ def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: 
     return _ok({"request_id": request_id, "expire_at": expire_at},
                {"request_id": request_id, "expire_at": expire_at,
                 "expire_label": expire_at.replace("T", " ")},
-               f"AA 请求 {request_id} 已发起，24 小时内有效（{expire_at.replace('T', ' ')} 截止）")
+               f"群收款请求 {request_id} 已发起，24 小时内有效（{expire_at.replace('T', ' ')} 截止）")
 
 
 def list_aa_requests(status: str | None = None) -> ToolResult:
-    """T42 列出当前用户的 AA 请求（L0 只读）：含每人已付状态与**真实状态**（过期惰性判）。"""
+    """T42 列出当前用户的 群收款请求（L0 只读）：含每人已付状态与**真实状态**（过期惰性判）。"""
     if status is not None and status not in STATUSES:
         return _fail(ErrorCode.INVALID_ARGUMENT, "AA 状态取值不合法")
     user_id = current_user_id()
     try:
-        require_owned("该用户的 AA 请求", DEMO_USER_ID, user_id, tool=LIST_TOOL, intent="aa_list")
+        require_owned("该用户的 群收款请求", DEMO_USER_ID, user_id, tool=LIST_TOOL, intent="aa_list")
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     rows = [dict(row) for row in dao.connection().execute(
@@ -147,19 +147,19 @@ def list_aa_requests(status: str | None = None) -> ToolResult:
                                   "status_cn": "已付" if s["status"] == "paid" else "待付"}
                                  for s in shares]})
     return _ok({"items": items, "total_count": len(items)},
-               {"total_count": len(items), "items": items}, f"共 {len(items)} 笔 AA 收款。")
+               {"total_count": len(items), "items": items}, f"共 {len(items)} 笔 群收款。")
 
 
 def _owned_request(request_id: str, *, tool: str) -> dict:
     """取本人请求（越权 fail-closed）；找不到 → NOT_FOUND。"""
     user_id = current_user_id()
     try:
-        require_owned("该 AA 请求", DEMO_USER_ID, user_id, tool=tool, intent="aa_list")
+        require_owned("该 群收款请求", DEMO_USER_ID, user_id, tool=tool, intent="aa_list")
     except ToolError:
         raise
     row = dao.connection().execute("SELECT * FROM aa_request WHERE id = ?", (request_id,)).fetchone()
     if row is None or row["user_id"] != user_id:
-        raise ToolError(ErrorCode.NOT_FOUND, "找不到这笔 AA 请求")
+        raise ToolError(ErrorCode.NOT_FOUND, "找不到这笔 群收款请求")
     return dict(row)
 
 
@@ -203,7 +203,7 @@ def mark_aa_share_paid(request_id: str, payee_id: str) -> ToolResult:
 
 
 def cancel_aa_request(request_id: str) -> ToolResult:
-    """T44 撤销 AA 请求（`active → cancelled`；已登记的付款记录保留，不回滚）。"""
+    """T44 撤销 群收款请求（`active → cancelled`；已登记的付款记录保留，不回滚）。"""
     try:
         row = _owned_request(request_id, tool=CANCEL_TOOL)
         real = _effective(row)
@@ -228,7 +228,7 @@ def cancel_aa_request(request_id: str) -> ToolResult:
     return _ok({"request_id": request_id, "status": "cancelled"},
                {"request_id": request_id, "paid_count": len(paid),
                 **_money_facts(row["total"], "total")},
-               f"AA 请求 {request_id} 已撤销（已登记的 {len(paid)} 人付款记录保留）")
+               f"群收款请求 {request_id} 已撤销（已登记的 {len(paid)} 人付款记录保留）")
 
 
 # ---------------- T48 提醒未付（2026-10-24 人类规格「支持提醒未付人员」） ----------------
