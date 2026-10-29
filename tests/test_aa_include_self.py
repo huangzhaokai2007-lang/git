@@ -65,9 +65,11 @@ def test_confirm_then_request_stores_group_total_and_my_share(wired, monkeypatch
     listed = _aa_request.list_aa_requests("active")
     assert listed.ok is True
     item = (listed.facts or {}).get("items", [])[0]
-    assert item["total"] == 15000                     # 落库 = 待收（分）
-    assert item["collect_cents"] == 15000             # 待收
-    assert item["my_share_cents"] == 0                # 我承担只体现在卡面
+    #: 2026-10-29（用户要求「把你没写的写了」）：库里 total = **含我总额** 300，
+    #: 份额 = 每人应缴 150，「待收 150 / 我承担 150」由差额派生。
+    assert item["total"] == 30000                     # 含我总额（分）
+    assert item["collect_cents"] == 15000             # 待收 = Σ份额
+    assert item["my_share_cents"] == 15000            # 我承担 = total − 待收
     assert item["share_count"] == 1 and item["paid_count"] == 0
 
 
@@ -84,4 +86,4 @@ def test_custom_split_keeps_zero_my_share(wired) -> None:
                                      "custom", "按人")
     assert ok.ok is True
     item = (_aa_request.list_aa_requests("active").facts or {}).get("items", [])[0]
-    assert item["collect_cents"] == 30000 and item["my_share_cents"] == 0
+    assert item["collect_cents"] == 30000 and item["my_share_cents"] == 0   # 按人金额＝不含我

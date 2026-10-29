@@ -248,3 +248,26 @@ def test_create_form_is_collapsed_behind_a_button(monkeypatch: pytest.MonkeyPatc
     next(button for button in app.button if button.label == "＋ 新增群收款").click().run()
     assert not app.exception, app.exception
     assert any(box.label == "群收款总金额（元）" for box in app.number_input), "点了按钮才展开表单"
+
+
+def test_form_is_cleared_after_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """群收款办完后，「新增群收款」表单不该还留着上一轮的内容（用户实测）。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"], "amount": "300"},
+                                          "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    next(button for button in app.button if button.label == "✅ 确认").click().run()
+    assert not app.exception, app.exception
+    # 办完后再看页面：不该再展开表单
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "群收款总金额" not in marks, "办完后表单应已收起"
+    assert any(button.label == "＋ 新增群收款" for button in app.button)

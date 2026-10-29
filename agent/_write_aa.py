@@ -248,13 +248,15 @@ def _execute_aa(confirmation: confirm_card.Confirmation, otp: str | None) -> Too
     per_person = list(evidence.get("per_person_cents")
                       or filled.get("per_person_cents") or [])
     mode = "custom" if per_person else "equal"
-    #: 落库口径 = **待收**（Σ每人应缴）：T41/T9 的既有语义就是"向这些人收多少"，
-    #: 含我总额只体现在卡面（总金额（含我）/ 我承担），不动冻结接口。
-    group_total = int(confirmation.amount_cents)
+    #: 2026-10-29（用户要求「把你没写的写了」）：落库口径改成**含我总额** ——
+    #: `aa_request.total` = 卡面上的 300，`aa_share` = 每人应缴 150；
+    #: 「待收 / 我承担」由 T42 按差额算（total − Σ份额），不改表结构。
+    group_total = int(confirmation.amount_cents or evidence.get("amount") or 0)
     if per_person:
         result = _aa_split.create_aa_request_with_amounts(payee_ids, per_person)
         amount_cents = per_person
-        group_total = int(evidence.get("amount_cents") or sum(per_person))
+        #: 含我总额以**确认卡上的金额**为准（evidence 里叫 amount，不叫 amount_cents）
+        group_total = max(int(confirmation.amount_cents or 0), sum(per_person))
     else:
         #: T9 的口径是「向这些人收多少」→ 传**待收**（含我总额 − 我那份）。
         collect = int(evidence.get("collect_cents") or 0) or group_total
@@ -263,7 +265,7 @@ def _execute_aa(confirmation: confirm_card.Confirmation, otp: str | None) -> Too
         amount_cents = [per] * len(payee_ids)
         if amount_cents:                       # 余数记到第一份（与 T9 的分摊口径一致）
             amount_cents[0] += collect - per * len(payee_ids)
-        group_total = max(group_total, sum(amount_cents))
+        group_total = max(group_total, sum(amount_cents))     # 含我总额恒 ≥ 待收
     if result.ok:                              # T41：把 AA 变成可跟踪的请求（24h 有效）
         from tools import _aa_request
         opened = _aa_request.open_aa_request(payee_ids, amount_cents, group_total, mode,

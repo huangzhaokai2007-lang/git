@@ -42,6 +42,9 @@ def _say(executor: ThreadPoolExecutor, session_id: str, text: str, summary: str)
     state = st.session_state
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": None})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    if getattr(turn, "executed", False):
+        #: 办完了 → 下一轮开头把「新增群收款」表单整个清掉（不留上次的残余）
+        state["aa-reset-pending"] = True
     st.rerun()
 
 
@@ -194,9 +197,14 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             st.caption("还没有确认参与人 —— 选好后点「确认参与人」。")
             return
         plan = executor.submit(aa_flow.group_plan, people, float(total or 0)).result()
+        #: 2026-10-29：金额用 `num_html(flash=True)` —— 数字一变就有一道渐变脉冲，
+        #: 让「改金额/换人数」有即时反馈（这个 helper 之前写好了却没人用）。
+        import premium_css
+
+        amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
         st.markdown(f"<div style='text-align:center;margin:.4rem 0 .2rem'>"
                     f"<span style='color:#9aa0ac;font-size:.85rem'>均摊金额（含我）</span><br>"
-                    f"<span style='font-size:2.1rem;font-weight:650'>¥ {plan['per_yuan']}</span>"
+                    f"<span style='font-size:2.1rem;font-weight:650'>{amount_html}</span>"
                     f"</div>", unsafe_allow_html=True)
         st.caption(f"{plan['count']} 人（含我）· 我承担 {plan['mine_yuan']} 元 · "
                    f"待收 {plan['collect_yuan']} 元 · 参与人：{'、'.join(people)}")
@@ -252,15 +260,34 @@ def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> N
                    f"（按钮）撤销群收款 {item['title']}")
 
 
+#: 群收款办完后要清掉的表单状态（含 widget key，只能下一轮开头清）
+_FORM_KEYS = ("aa-create-open", "aa-people", "aa-people-touched", "aa-picked",
+              "aa-total", "aa-title", "aa-pick-open", "aa-split-open")
+
+
+def _apply_pending_reset() -> None:
+    """延后清理：上一轮结束时挂了 `aa-reset-pending` → 这一轮开头把表单清干净。
+
+    Streamlit 不允许在同一轮里改**已实例化** widget 的 session_state，
+    所以「办完就收起」必须放到下一轮的最前面做。
+    """
+    if not st.session_state.pop("aa-reset-pending", False):
+        return
+    for key in _FORM_KEYS:
+        st.session_state.pop(key, None)
+
+
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """一张卡（发起或在途确认）+ 每笔付款状态卡。
 
     2026-10-29（用户要求）：查看群收款时**不再直接铺开**发起表单 ——
     先给一个「＋ 新增群收款」按钮，点了才拉开；已经在补槽（例如刚说"向王五群收款"缺金额）时自动展开。
     """
+    _apply_pending_reset()
     confirmation = executor.submit(confirm_card.current, session_id).result()
     if confirmation is not None and getattr(confirmation, "intent", "") == "aa_collect":
         st.session_state["aa-create-open"] = False       # 进了确认态就收起发起表单
+        st.session_state["aa-reset-pending"] = True      # 并且把上一轮填的内容清掉
         _confirm_panel(executor, session_id, confirmation)
     else:
         from agent import pending_slots

@@ -186,8 +186,9 @@ def _prepare_transfer(filled: dict) -> Prepared:
     事实包补一个 `payee_phone`（脱敏手机号）—— 它来自工具层 `resolve_payee` 的候选，不是编排层编的；
     确认卡上要显示它，`verify_numbers` 必须能在事实包里找到（铁律 2）。
 
-    ⚠️ **F16 未实现**：本函数**不传** `schedule`，故 `transfer_scheduled` 实际走的是即时转账语义 ——
-    「明天转」会被当即时转账出卡并立刻扣款。F16 的验收第 1 条正是禁止这一点，待 F16 卡修复。
+    **只管即时转账**（`transfer_single`）：`transfer_scheduled` 走另一条准备函数
+    `_prepare_scheduled`（F16 已实现：落 `scheduled_transfer` 待执行行、到点才扣款），
+    两条路径分开，本函数不传 `schedule` 是**设计如此**，不是缺口。
     """
     preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"])
     if not preview.ok:

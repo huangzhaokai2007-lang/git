@@ -89,6 +89,12 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     #: 不再弹通用表单 —— 否则一张页面出现「每人金额卡 + 还差几项」两块，很散。
     if item.get("intent") == "aa_collect":
         return
+    #: 2026-10-29（用户实测）：同名候选还在「解析卡」里等用户点选时，
+    #: 这里再弹表单问"收款人是？"等于让人重填 —— 先等解析卡选完。
+    from agent import payee_picker
+
+    if executor.submit(payee_picker.pending, session_id).result():
+        return
     if not missing:
         return
     with st.container(border=True):

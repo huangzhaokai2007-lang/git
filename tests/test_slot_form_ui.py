@@ -76,3 +76,24 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     next(button for button in app.button if button.key == 'confirm-cancel').click().run()
     assert app.session_state['workspace-result']['turn']['trace_id'] == original
     assert any(button.label == '📊 按分类分析支出' for button in app.button)
+
+
+def test_form_waits_for_the_payee_picker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同名候选还在解析卡里等点选时，**不要**同时弹「还差这几项」表单（用户实测）。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            #: 同名（两个李四）+ 缺金额 → 解析卡与表单抢戏的场景
+            return schema.model_validate({"intent": "transfer_single", "confidence": 0.95,
+                                          "slots": {"payee": "李四"}, "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("给李四转").run()
+    assert not app.exception, app.exception
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "同名收款人，请选择" in marks, "应当先出解析卡"
+    assert "还差这几项" not in marks, "解析卡未选完时不该同时弹表单"
