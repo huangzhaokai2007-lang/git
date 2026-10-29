@@ -59,10 +59,13 @@ def test_confirm_button_disabled_until_people_picked(monkeypatch: pytest.MonkeyP
     assert not app.exception, app.exception
     labels = [box.label for box in app.number_input]
     assert any("群收款总金额" in label for label in labels)
-    assert any(button.label.startswith("参与人数") for button in app.button)
-    next(button for button in app.button if button.label.startswith("参与人数")).click().run()
-    confirm = next(button for button in app.button if button.label == "确认参与人")
-    assert confirm.disabled is True, "没选人时「确认参与人」必须不可按"
+    assert any(button.label.startswith("修改参与人") for button in app.button)
+    next(button for button in app.button if button.label.startswith("修改参与人")).click().run()
+    #: 2026-10-29：「选择参与人」→「修改参与人」；没挑人时「添加所选」不可按
+    add = next(button for button in app.button if button.label == "添加所选")
+    assert add.disabled is True, "没挑人时「添加所选」必须不可按"
+    captions = "\n".join(str(element.value) for element in app.caption)
+    assert "还没有参与人" in captions
 
 
 def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,9 +73,9 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     app = _app(monkeypatch)
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
-    next(button for button in app.button if button.label.startswith("参与人数")).click().run()
-    app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，确认按钮才会解禁
-    next(button for button in app.button if button.label == "确认参与人").click().run()
+    next(button for button in app.button if button.label.startswith("修改参与人")).click().run()
+    app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，添加按钮才会解禁
+    next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
     captions = "\n".join(str(element.value) for element in app.caption)
     assert "含我" in captions and "我承担" in captions and "待收" in captions
@@ -188,9 +191,35 @@ def test_new_person_adder_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
     app.run()
     app.chat_input[0].set_value("向王五群收款").run()
     assert not app.exception, app.exception
-    next(b for b in app.button if b.label.startswith("参与人数")).click().run()
+    next(b for b in app.button if b.label.startswith("修改参与人")).click().run()
     assert not app.exception, app.exception
     expanders = [str(element.label) for element in app.expander]
     assert any("新增收款人" in label for label in expanders)
     labels = [box.label for box in app.text_input]
     assert "姓名" in labels and "手机号" in labels
+
+
+def test_remove_participant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「修改参与人」里可以对已选的人点「删除」，删掉后回到空状态。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            # 缺金额 -> 停在发起态（参与人编辑器在这一屏）
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"]},
+                                          "missing_slots": ["amount"]})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("我和王五群收款").run()
+    assert not app.exception, app.exception
+    next(b for b in app.button if b.label.startswith("修改参与人")).click().run()
+    assert not app.exception, app.exception
+    delete = next(b for b in app.button if b.label == "删除")
+    delete.click().run()
+    assert not app.exception, app.exception
+    captions = "\n".join(str(element.value) for element in app.caption)
+    assert "还没有参与人" in captions, "删除后应回到空状态"

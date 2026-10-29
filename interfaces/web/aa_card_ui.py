@@ -51,7 +51,29 @@ def _toggle(key: str) -> None:
 
 def _remember_people(picked: list[str]) -> None:
     st.session_state["aa-people"] = list(picked)
+    st.session_state["aa-people-touched"] = True      # 用户动过名单 → 不再自动预填
     st.session_state["aa-pick-open"] = False
+
+
+def _add_selected(picked: list[str]) -> None:
+    """「添加所选」：把多选里挑出来的人并进参与人（去重）。"""
+    current = list(st.session_state.get("aa-people") or [])
+    st.session_state["aa-people"] = current + [n for n in picked if n not in current]
+    st.session_state["aa-people-touched"] = True
+    st.session_state["aa-picked"] = []                      # 回调里清，下次渲染前生效
+
+
+def _remove_person(name: str) -> None:
+    """「删除」某位参与人。"""
+    st.session_state["aa-people"] = [p for p in (st.session_state.get("aa-people") or [])
+                                     if p != name]
+    st.session_state["aa-people-touched"] = True
+
+
+def _select_all() -> None:
+    """「全选」：把候选里还没加的人一次加进来。"""
+    current = list(st.session_state.get("aa-people") or [])
+    st.session_state["aa-people"] = current
 
 
 def _confirm_panel(executor: ThreadPoolExecutor, session_id: str, confirmation) -> None:
@@ -109,7 +131,8 @@ def _preset(executor: ThreadPoolExecutor, session_id: str) -> dict:
 def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     """发起表单：金额 / 参与人 / 备注 / 均摊 / 按人金额 / 发起。"""
     preset = _preset(executor, session_id)
-    if preset["names"] and not st.session_state.get("aa-people"):
+    if (preset["names"] and not st.session_state.get("aa-people")
+            and not st.session_state.get("aa-people-touched")):
         st.session_state["aa-people"] = list(preset["names"])     # 直接带上已解析的人
         st.session_state["aa-picked"] = list(preset["names"])
     if preset["total"] and not st.session_state.get("aa-total"):
@@ -127,18 +150,31 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                                 format="%.2f")
         title = st.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
 
-        if st.button("参与人数" + ("  ▾" if st.session_state.get("aa-pick-open") else "  ▸"),
+        if st.button("修改参与人" + ("  ▾" if st.session_state.get("aa-pick-open") else "  ▸"),
                      key="aa-pick-toggle", width="stretch"):
             _toggle("aa-pick-open")
         if st.session_state.get("aa-pick-open"):
+            people_now = list(st.session_state.get("aa-people") or [])
+            if people_now:
+                st.caption("已选参与人（点「删除」移出）：")
+                for index, name in enumerate(people_now):
+                    row_left, row_right = st.columns([5, 1], vertical_alignment="center")
+                    row_left.markdown(f"**{name}**")
+                    if row_right.button("删除", key=f"aa-rm-{index}-{name}", width="stretch"):
+                        _remove_person(name)
+                        st.rerun()
+            else:
+                st.caption("还没有参与人 —— 从下面挑，或新增一个不在名单里的人。")
+
             names = executor.submit(aa_flow.candidates).result()
-            picked = st.multiselect("选择参与人（可搜索、可全选）", names, key="aa-picked",
-                                    placeholder="还没有选择任何人")
-            if st.button("全选", key="aa-pick-all", width="stretch"):
-                _remember_people(list(names))
-                st.rerun()
-            st.button("确认参与人", key="aa-pick-confirm", type="primary",
-                      disabled=not picked, on_click=_remember_people, args=(picked,))
+            options = [n for n in names if n not in people_now]
+            picked = st.multiselect("添加参与人（可搜索、可多选）", options, key="aa-picked",
+                                    placeholder="选择要添加的人")
+            col_add, col_all = st.columns(2)
+            col_add.button("添加所选", key="aa-add-sel", width="stretch",
+                           disabled=not picked, on_click=_add_selected, args=(picked,))
+            col_all.button("全选（把候选都加进来）", key="aa-pick-all", width="stretch",
+                           on_click=_remember_people, args=(list(names),))
             with st.expander("＋ 新增收款人（不在列表里的人）", expanded=False):
                 new_name = st.text_input("姓名", key="aa-new-name")
                 new_phone = st.text_input("手机号", key="aa-new-phone", placeholder="138****0001")
@@ -148,9 +184,9 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                                            new_phone.strip(), session_id=session_id).result()
                     if getattr(turn, "executed", False) or "已添加" in (turn.reply or ""):
                         people = list(st.session_state.get("aa-people") or [])
-                        people.append(new_name.strip())
+                        if new_name.strip() not in people:
+                            people.append(new_name.strip())
                         st.session_state["aa-people"] = people
-                        st.session_state["aa-picked"] = people
                     st.rerun()
 
         people = list(st.session_state.get("aa-people") or [])
