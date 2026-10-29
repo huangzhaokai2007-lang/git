@@ -132,3 +132,26 @@ def test_editor_and_verification_stay_beside_selected_payee(monkeypatch):
     assert app.session_state['workspace-result']['scene'] == 'payee_list'
     assert confirm_card.current(app.session_state['session_id']) is None
     assert any(b.proto.id.endswith('-payee-verification') for b in app.get('flex_container'))
+
+
+def test_transfer_amount_opens_beside_payee_without_generic_slot_card(monkeypatch):
+    from agent import confirm_card, pending_slots
+    app = _app(monkeypatch)
+    app.chat_input[0].set_value("我的收款人有哪些").run()
+    next(b for b in app.button if "139****1001" in b.label).click().run()
+    next(b for b in app.button if b.label == "转账").click().run()
+    assert not app.exception
+    panel = next(b for b in app.get('flex_container') if b.proto.id.endswith('-payee-verification'))
+    assert any(t.label == '转账金额（元）' for t in panel.text_input)
+    assert not any(f.key == 'slot-form' for f in app.get('form'))
+    assert pending_slots.peek(app.session_state['session_id']) is None
+    next(t for t in app.text_input if t.label == '转账金额（元）').set_value('100')
+    next(b for b in app.button if b.label == '核对转账').click().run()
+    assert not app.exception
+    panel = next(b for b in app.get('flex_container') if b.proto.id.endswith('-payee-verification'))
+    assert len([b for b in panel.button if b.key == 'confirm-ok']) == 1
+    assert app.session_state['workspace-result']['scene'] == 'payee_list'
+    next(b for b in app.button if b.key == 'confirm-cancel').click().run()
+    assert not app.exception
+    assert confirm_card.current(app.session_state['session_id']) is None
+    assert app.session_state['workspace-result']['scene'] == 'payee_list'

@@ -219,7 +219,8 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
     activity_ui.render(st.session_state['turns'])
     pending()
     payee_picker_ui.render(executor, session)
-    card_edit_ui.render(executor, session)
+    if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent') == 'transfer_single'):
+        card_edit_ui.render(executor, session)
     forms()
     if scene == 'cards':
         if st.session_state.get('bound-card-query'):

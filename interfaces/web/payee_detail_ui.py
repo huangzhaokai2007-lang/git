@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import confirm_card, payee_risk, write_flow
+from agent import confirm_card, payee_risk, pending_slots, write_flow
 
 import premium_ui
 
@@ -37,7 +37,7 @@ def _dispatch(executor: ThreadPoolExecutor, session_id: str, intent: str,
               slots: dict, text: str) -> None:
     """按钮直达：清在途卡 → `write_flow.start` → 回执记进会话（与 `app._ask` 同口径）。"""
     confirm_card.clear(session_id)
-    if intent in ('payee_whitelist_edit', 'payee_note', 'payee_tags'):
+    if intent in ('payee_whitelist_edit', 'payee_note', 'payee_tags', 'transfer_single'):
         st.session_state['payee-inline-intent'] = intent
         st.session_state.pop('payee-edit-feedback', None)
     step = executor.submit(write_flow.start, intent, slots, session_id).result()
@@ -106,7 +106,12 @@ def _actions(executor: ThreadPoolExecutor, session_id: str, person: dict, who: d
     col_a, col_b, col_c, col_d = st.columns(4, vertical_alignment="center")
 
     if col_a.button("转账", key=f"d-tr-{person['payee_id']}", type="primary", width="stretch"):
-        _dispatch(executor, session_id, "transfer_single", who, f"（按钮）给{name}转账")
+        executor.submit(confirm_card.clear, session_id).result()
+        executor.submit(pending_slots.clear, session_id).result()
+        st.session_state['payee-inline-intent'] = 'transfer_single'
+        st.session_state.pop('payee-edit-feedback', None)
+        st.session_state.pop('payee-inline-done', None)
+        st.rerun()
 
     if kind == "whitelist":
         if col_b.button("移出白名单", key=f"d-wlrm-{person['payee_id']}", width="stretch"):
@@ -153,7 +158,8 @@ def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict, confirm
             _actions(executor, session_id, person, who)
         if side is not None:
             with side, st.container(border=True, key="payee-verification"):
-                st.markdown('##### 保存修改')
+                transferring = st.session_state.get('payee-inline-intent') == 'transfer_single'
+                st.markdown('##### 转账' if transferring else '##### 保存修改')
                 st.caption(f"{person['name']} · {person['masked_phone']}")
                 draft = executor.submit(confirm_card.current, session_id).result()
                 if draft and draft.intent == st.session_state.get('payee-inline-intent'):
@@ -163,11 +169,29 @@ def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict, confirm
                 else:
                     if feedback := st.session_state.get('payee-edit-feedback'):
                         st.info(feedback)
-                    if st.button('收起', key='payee-verification-close'):
+                    if transferring and not st.session_state.get('payee-inline-done'):
+                        _transfer_amount(executor, session_id, person, who)
+                    if st.button('取消转账' if transferring else '收起', key='payee-verification-close'):
                         st.session_state.pop('payee-inline-intent', None)
                         st.session_state.pop('payee-edit-feedback', None)
+                        st.session_state.pop('payee-inline-done', None)
+                        executor.submit(pending_slots.clear, session_id).result()
                         st.rerun()
 
+
+
+def _transfer_amount(executor, session_id: str, person: dict, who: dict) -> None:
+    """Collect the amount beside its recipient; preview and execution stay in the write flow."""
+    with st.form('payee-transfer-' + str(person['payee_id'])):
+        amount = st.text_input('转账金额（元）', key='payee-transfer-amount-' + str(person['payee_id']),
+                               placeholder='请输入转账金额')
+        submitted = st.form_submit_button('核对转账', type='primary', width='stretch')
+    if submitted:
+        if not amount.strip():
+            st.warning('请输入转账金额。')
+            return
+        _dispatch(executor, session_id, 'transfer_single', {**who, 'amount': amount.strip()},
+                  f"（按钮）给{person['name']}转账")
 
 
 def _row_label(person: dict, kind: str) -> str:
@@ -191,7 +215,7 @@ def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict], co
                          width="stretch", help=f"点这一行{'收起' if opened == payee_id else '展开'}详情"):
                 if st.session_state.get('payee-inline-intent'):
                     executor.submit(confirm_card.clear, session_id).result()
-                for key in ('payee-inline-intent', 'payee-edit-feedback'):
+                for key in ('payee-inline-intent', 'payee-edit-feedback', 'payee-inline-done'):
                     st.session_state.pop(key, None)
                 st.session_state["payee-open"] = None if opened == payee_id else payee_id
                 st.rerun()
