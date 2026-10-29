@@ -313,7 +313,10 @@ def _chat_page() -> None:
     slot_form_ui.render(_agent_executor(), st.session_state["session_id"])
     #: 2026-10-24 修：确认卡放在**所有卡片之后**（聊天框最下方）——
     #: 之前在收款人卡上方，用户点「改备注」后卡出现在上面，像是"上一条消息的回执"。
-    _render_confirm()
+    #: 2026-10-29（用户要求「三张卡合并」）：群收款的在途确认由卡面内绘制，
+    #: 这里不再重复画一张确认卡（其它意图照旧）。
+    if not st.session_state.get("bound-aa-query"):
+        _render_confirm()
     premium_ui.pipeline(st.session_state["turns"][-1]["turn"]
                         if st.session_state.get("turns") else None)
     if st.session_state.get("turns"):

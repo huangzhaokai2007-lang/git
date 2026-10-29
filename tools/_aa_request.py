@@ -81,6 +81,10 @@ def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: 
         return bad
     if len(payee_ids) != len(amounts):
         return _fail(ErrorCode.INVALID_ARGUMENT, "每人金额的个数必须与收款人一致")
+    #: 2026-10-28（用户要求「群收款要包含我」）：`total` 是**含发起人自己**的总额，
+    #: 我那份 = total − Σ每人金额（不落库，读的时候按差额算），所以只校验不大于总额。
+    if sum(int(cents) for cents in amounts) > int(total):
+        return _fail(ErrorCode.INVALID_ARGUMENT, "每人金额之和不能超过群收款总额")
     user_id = current_user_id()
     try:
         require_owned("这些收款人", DEMO_USER_ID, user_id, tool=OPEN_TOOL, intent="aa_collect")
@@ -136,8 +140,16 @@ def list_aa_requests(status: str | None = None) -> ToolResult:
             continue
         shares = _shares(row["id"])
         paid = [s for s in shares if s["status"] == "paid"]
+        #: 2026-10-28（用户要求「群收款要包含我」）：`total` 是含我总额，
+        #: **待收 = Σ每人应缴**，**我承担 = total − 待收**（读时按差额算，不落库）。
+        collect_cents = sum(int(share["amount"]) for share in shares)
+        my_cents = max(0, int(row["total"]) - collect_cents)
         items.append({"request_id": row["id"], "title": row["title"], "total": row["total"],
                       "total_yuan": f"{row['total'] / 100:.2f}", "split_mode": row["split_mode"],
+                      "collect_cents": collect_cents,
+                      "collect_yuan": f"{collect_cents / 100:.2f}",
+                      "my_share_cents": my_cents,
+                      "my_share_yuan": f"{my_cents / 100:.2f}",
                       "status": real, "status_cn": STATUS_CN[real],
                       "expire_at": row["expire_at"].replace("T", " "),
                       "paid_count": len(paid), "share_count": len(shares),
