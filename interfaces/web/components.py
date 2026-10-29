@@ -12,6 +12,7 @@ from interfaces.web.scenes import SCENES, SCENE_ICONS    # 场景文案拆出（
 from interfaces.web.theme import CSS, load_css
 from interfaces.web import reply_animation
 from interfaces.web import chart_ui, spending_pie
+from interfaces.web import time_inputs
 
 #: 顶部合规标注（卡 16 第 5 条）
 SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银行，无真实用户 / 账户 / 资金 / 卡号。"
@@ -228,7 +229,7 @@ def _aa_table(confirmation: Any) -> None:
 def _evidence(confirmation: Any) -> None:
     """确认卡的「依据」面板（实现在 `premium_ui`；单测按路径加载本模块时优雅跳过）。"""
     try:
-        import premium_ui
+        import premium_ui                                  # noqa: F401
     except ModuleNotFoundError:
         return
     premium_ui.evidence(confirmation)
@@ -342,8 +343,9 @@ def payee_form(defaults: dict | None = None) -> dict | None:
                 col_a, col_b = st.columns(2)
                 quota = col_a.text_input("专属额度（元/月）", key="payee-quota",
                                          placeholder="例如 5000（不填 = 一律要验证码）")
-                expire = col_b.text_input("有效期至", key="payee-expire",
-                                          placeholder="例如 2026-12-31 或 月底（不填 = 长期）")
+                #: 2026-10-29（用户要求）：有效期用日历选，不再手敲
+                expire = time_inputs.date_field("有效期至", "payee-expire") \
+                    if col_b.checkbox("设置有效期", key="payee-expire-on") else ""
             submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
         if submitted:
             return {"name": name, "phone": phone, "whitelist": bool(whitelist),

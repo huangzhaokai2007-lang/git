@@ -321,8 +321,15 @@ def _reset_agent_globals():
     （表现为 `payee_list` 被判成 `out_of_scope`）。本隔离**没有**修好它 ——
     根因未定位，已排除的假设见 PR 描述。
     """
-    from agent import session_memory
+    from agent import confirm_card, pending_slots, session_memory
 
+    #: 2026-10-29：**顺带清掉确认卡与缺槽续接** —— 它们同样是模块级全局。
+    #: 群收款卡面的用例会留下在途确认，泄漏到后面的用例时会表现成
+    #: 「转账追问续接」用例突然变红（实测：单跑绿、全量红）。
+    pending_slots.clear()
+    confirm_card.reset_state()
     session_memory.reset()
     yield
+    pending_slots.clear()
+    confirm_card.reset_state()
     session_memory.reset()

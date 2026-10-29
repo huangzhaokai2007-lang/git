@@ -45,8 +45,11 @@ def test_missing_slots_open_a_form_card(monkeypatch: pytest.MonkeyPatch) -> None
     app.chat_input[0].set_value("预约转账").run()
     assert not app.exception, app.exception
     labels = [box.label for box in app.text_input]
-    for expect in ('收款人', '总金额', '预约时间'):
+    #: 2026-10-29：日期改成**日历**（`st.date_input` + `st.time_input`），不再走文本框
+    for expect in ('收款人', '总金额'):
         assert expect in labels, f"填表卡缺字段：{expect}；实际 {labels}"
+    assert [box.label for box in app.date_input] == ["预约时间"], "预约时间应该是日历控件"
+    assert [box.label for box in app.time_input], "预约时间还要能选时刻"
     assert any(button.label == "继续" for button in app.button)
 
 
@@ -59,6 +62,9 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     for box in app.text_input:
         if box.label in FILLS:
             box.set_value(FILLS[box.label])
+    import datetime
+    #: 2026-10-29：预约时间用**日历选**（日期 + 时刻），不再手敲字符串
+    app.date_input[0].set_value(datetime.date(2030, 11, 20)).run()
     next(button for button in app.button if button.label == "继续").click().run()
 
     assert not app.exception, app.exception

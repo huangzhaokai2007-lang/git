@@ -22,6 +22,7 @@ import streamlit as st
 from agent import pending_slots, write_flow
 
 import premium_ui
+import time_inputs
 
 #: 平台候选（不是业务数据，只是输入便利）
 PLATFORM_CHOICES = ("京东", "天猫", "淘宝", "得物", "其它")
@@ -59,6 +60,13 @@ def _field(slot: str) -> str:
     if slot == "platform":
         choice = st.selectbox(label, ("", *PLATFORM_CHOICES), key=key)
         return str(choice or "")
+    #: 2026-10-29（用户要求）：**所有**时间类槽位都用日历，不再手敲字符串。
+    if slot == "schedule":                       # 预约时间 = 日期 + 时刻
+        value, too_early = time_inputs.datetime_field(label, key)
+        st.session_state[f"{key}-too-early"] = too_early
+        return "" if too_early else value         # 过去的时刻当作"没填"
+    if slot in ("date", "expire"):               # 送礼日期 / 白名单有效期 = 只选日期
+        return time_inputs.date_field(label, key)
     return str(st.text_input(label, key=key,
                              placeholder=PLACEHOLDERS.get(slot, "")) or "").strip()
 
