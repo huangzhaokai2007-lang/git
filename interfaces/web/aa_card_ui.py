@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import aa_flow, confirm_card, write_flow
+from agent import aa_flow, confirm_card, payee_flow, payee_picker, write_flow
 
 import premium_ui
 
@@ -116,6 +116,10 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         st.session_state["aa-total"] = preset["total"]
     if preset["title"] and not st.session_state.get("aa-title"):
         st.session_state["aa-title"] = preset["title"]
+    #: 2026-10-29（用户实测「这又是什么」）：同名多命中时上方已经出了**解析卡**，
+    #: 这里再画一张"还没有确认参与人"的群收款卡，两张叠着很怪 —— 等用户点完解析卡再说。
+    if executor.submit(payee_picker.pending, session_id).result():
+        return
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款（含你自己）",
                              "填金额 → 选参与人 → 发起；每人均摊，你承担自己那一份", tone="")
@@ -135,6 +139,19 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                 st.rerun()
             st.button("确认参与人", key="aa-pick-confirm", type="primary",
                       disabled=not picked, on_click=_remember_people, args=(picked,))
+            with st.expander("＋ 新增收款人（不在列表里的人）", expanded=False):
+                new_name = st.text_input("姓名", key="aa-new-name")
+                new_phone = st.text_input("手机号", key="aa-new-phone", placeholder="138****0001")
+                if st.button("添加并计入参与人", key="aa-add-person",
+                             disabled=not (new_name.strip() and new_phone.strip())):
+                    turn = executor.submit(payee_flow.submit_payee, new_name.strip(),
+                                           new_phone.strip(), session_id=session_id).result()
+                    if getattr(turn, "executed", False) or "已添加" in (turn.reply or ""):
+                        people = list(st.session_state.get("aa-people") or [])
+                        people.append(new_name.strip())
+                        st.session_state["aa-people"] = people
+                        st.session_state["aa-picked"] = people
+                    st.rerun()
 
         people = list(st.session_state.get("aa-people") or [])
         if not people:
