@@ -114,7 +114,9 @@ def error(ask) -> None:
     if not failed:
         return
     st.error(failed['turn'].get('reply') or '这次请求未能完成。')
-    if failed['turn'].get('intent') == 'wealth_recommend':
+    #: `wealth_holdings` 也算：看持仓详情同样要求先测评（T21/T26），
+    #: 只认 `wealth_recommend` 的话这条路径只有一行报错、没有按钮（用户实测反馈）。
+    if failed['turn'].get('intent') in ('wealth_recommend', 'wealth_holdings'):
         wealth_ui.render_turn(failed['turn'], ask=ask, key_prefix='workspace-wealth-error')
     if failed['turn'].get('intent') in READS and not failed['turn'].get('executed'):
         st.button('重试查询', key='workspace-retry', on_click=ask, args=(failed['prompt'],))

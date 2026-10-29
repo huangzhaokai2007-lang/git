@@ -196,7 +196,9 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
                 key_prefix: str = "wealth",
                 daily_loader: Callable[[str], Mapping[str, Any]] | None = None, readonly: bool = False) -> None:
     """紧贴成功的推荐回执，渲染四象限入口及每款产品的订购按钮。"""
-    if turn.get('intent') != 'wealth_recommend':
+    #: `wealth_holdings` 也要接：看持仓详情同样要求先测评（T21/T26 都要），
+    #: 只在报错时给入口；正常的持仓列表不该画推荐卡。
+    if turn.get('intent') not in ('wealth_recommend', 'wealth_holdings'):
         return
     if turn.get('error_code') == 'INVALID_STATE':
         #: 未测评 → 不要只留一句报错，直接给入口（点一下就进问卷）。
@@ -206,7 +208,7 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
         if st.button('开始风险测评', key=f'{key_prefix}-assess', type='primary', width='stretch', disabled=readonly):
             ask('做风险测评')
         return
-    if turn.get('error_code'):
+    if turn.get('intent') != 'wealth_recommend' or turn.get('error_code'):
         return
     items = (turn.get('facts') or {}).get('items') or []
     if not items:
