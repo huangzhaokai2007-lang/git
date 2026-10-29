@@ -163,7 +163,8 @@ def result(executor, session: str, ask, detail_loader) -> None:
     elif scene == 'wealth_recommend':
         if (turn.get('facts') or {}).get('items'):
             wealth_ui.render_turn(turn, ask=ask, key_prefix='workspace-wealth-' + str(turn.get('trace_id')),
-                daily_loader=lambda pid: executor.submit(wealth_daily.load, session, pid).result())
+                daily_loader=lambda pid, gran='daily': executor.submit(
+                    wealth_daily.load, session, pid, gran).result())
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
     elif scene == 'risk_assess':
@@ -173,7 +174,8 @@ def result(executor, session: str, ask, detail_loader) -> None:
         st.markdown(turn.get('reply') or '当前没有查询结果。')
         if source := st.session_state.get('workspace-wealth-source'):
             wealth_ui.render_turn(source, ask=ask, key_prefix='workspace-wealth-' + str(source.get('trace_id')),
-                daily_loader=lambda pid: executor.submit(wealth_daily.load, session, pid).result())
+                daily_loader=lambda pid, gran='daily': executor.submit(
+                    wealth_daily.load, session, pid, gran).result())
     elif (scene in ('subscription_list', 'subscription_remind')
           and (turn.get('facts') or {}).get('status', 'active') == 'active'
           and ((turn.get('facts') or {}).get('items') or (turn.get('facts') or {}).get('overdue_items'))):

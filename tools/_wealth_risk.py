@@ -23,6 +23,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import date, timedelta
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -65,6 +66,11 @@ _NAV_BASE = 10_000
 _STEP_DIVISOR = 24
 #: 日 K 默认窗口：近 120 个交易日（约半年）。
 DAILY_DAYS = 120
+#: K 线粒度 → 展示多少个交易日（从同一份全量序列里切片）。日 120≈半年、周 260≈1 年、月 750≈3 年。
+CANDLE_WINDOWS = {"daily": 120, "weekly": 260, "monthly": 1300}
+#: **底层序列一次生成这么长**，三个周期都从它切片/聚合 ——
+#: 否则各周期各走一遍随机游走，同一天的收盘价对不上（实测踩过：日线 111.06 vs 周线 122.49）。
+CANDLE_FULL_DAYS = 1300
 
 RISK_VALID_DAYS = 365      # 来源：卡 07 第 1 条要求返回 valid_until；有效期长度规格未定 → demo 取 365 天
 ADULT_AGE = 18             # 来源：卡 07「未成年人边界」= 未满 18 岁不得测评/买理财
@@ -241,50 +247,15 @@ def _candle_period(offset: int) -> str:
 
 
 def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[dict]:
-    """最近 `CANDLE_MONTHS` 个月的模拟月 K（净值，整数基点；`10000` = 1.0000）。
+    """最近 `CANDLE_MONTHS` 个月的月 K（净值，整数基点；`10000` = 1.0000）。
 
-    同样按 `product_id + 月份` 取 sha256 种子 → 同一产品永远同一根 K 线。
-    净值被夹在 `[1+max_loss%, 1+max_gain%]` 之间，和卡片上那条区间保持一致；
-    单月波动按档位放大（R5 抖得比 R1 厉害），看起来才像真的净值曲线。
+    **从同一条日线序列聚合而来**（`_daily_candles` → `_aggregate`），
+    不再是"月线单独走一遍随机游走" —— 否则卡片上的月 K 和点开的日 K 会各说各话
+    （实测：同一只产品日线收 111.06、周线收 122.49，用户切换周期就露馅）。
     """
-    span = max(max_gain - max_loss, 1.0)
-    #: 单月波动按**年化区间**定，不随窗口长度稀释：`span/24` 是「两年摊平」的直觉刻度。
-    #: 若按 `span/CANDLE_MONTHS` 摊到 60 个月，实体只有 1.8px，图上几乎看不见。
-    step = span / _STEP_DIVISOR * 0.9
-    floor_nav = _NAV_BASE * (1 + max_loss / 100)
-    ceil_nav = _NAV_BASE * (1 + max_gain / 100)
-    #: 月漂移 = 年化收益 / 12（`yield = max_gain + max_loss`）。
-    #: **必须压在区间内**：货基年化 2.1%、窗口 24 个月本可涨 4.2%，但上沿只有 +2.1%，
-    #: 不封顶就会顶在天花板上一半的月份，画出来是条直线。取区间 60% 作上限。
-    yield_pct = max_gain + max_loss
-    drift = min(yield_pct / 12, max_gain * 0.6 / CANDLE_MONTHS) / 100
-    nav = float(_NAV_BASE)
-    dev = 0.0                                    # 上个月的「偏离趋势」部分，给动量用
-    rows: list[dict] = []
-    for offset in range(CANDLE_MONTHS):
-        period = _candle_period(offset)
-        digest = hashlib.sha256(f"{product_id}:k:{period}".encode()).digest()
-        u1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
-        u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
-        #: **动量**：`dev = 0.4 * 上月偏离 + 0.8 * 本月冲击`。
-        #: 纯独立随机会画成锯齿（相邻 K 线一半时间反向），看着不像行情；带自相关后
-        #: 连续几个月朝一个方向走，才像一段趋势。实测转向率从 50% 降到 ~35%。
-        #: 系数 0.55 会更顺，但净值更容易撞到区间边界贴着走，0.4 是折中。
-        dev = 0.4 * dev + 0.8 * (u1 * 2 - 1) * step / 100
-        open_nav = nav
-        raw_nav = open_nav * (1 + drift + dev)
-        close_nav = max(floor_nav, min(ceil_nav, raw_nav))
-        if close_nav != raw_nav:
-            #: 撞到区间边界就**反弹**：不处理的话，动量会让净值贴着上沿走十几个月的直线。
-            dev = -0.6 * dev
-        wick = abs(u2 - 0.5) * step / 100 * open_nav
-        rows.append({"period": period,
-                     "open": round(open_nav),
-                     "high": round(max(open_nav, close_nav) + wick),
-                     "low": round(min(open_nav, close_nav) - wick),
-                     "close": round(close_nav)})
-        nav = close_nav
-    return rows
+    months = _aggregate(_daily_candles(product_id, max_gain, max_loss), "monthly")
+    return [{"period": row[0][:7], "open": row[1], "high": row[2],
+             "low": row[3], "close": row[4]} for row in months[-CANDLE_MONTHS:]]
 
 
 def _range_text(pct: float) -> str:
@@ -428,30 +399,29 @@ def _trading_days(count: int) -> list[date]:
     return list(reversed(days))
 
 
-def _daily_candles(product_id: str, max_gain: float, max_loss: float,
-                   days: int) -> list[list]:
-    """近 `days` 个交易日的模拟日 K，紧凑数组 `[日期, 开, 高, 低, 收]`（整数基点）。
+def _daily_candles(product_id: str, max_gain: float, max_loss: float) -> list[list]:
+    """最近 `CANDLE_FULL_DAYS` 个交易日的模拟日 K，紧凑数组 `[日期, 开, 高, 低, 收]`（整数基点）。
 
     **为什么用数组不用对象**：日 K 一个产品就 120 行，用 dict 每行多背 5 个键，
     14 只产品会多出 150 KB。数组形式省 45%，界面解析一行代码的事。
 
-    日波动 = 月波动 / √21；动量系数取 0.85（日频要比月频更"粘"，否则仍是锯齿）。
+    日波动 = 月波动 / √21；动量系数 0.5（日频留一点趋势感，又不至于把 5 年波动放大到失控）。
     """
     span = max(max_gain - max_loss, 1.0)
     step = span / _STEP_DIVISOR * 0.9 / (21 ** 0.5)
     floor_nav = _NAV_BASE * (1 + max_loss / 100)
     ceil_nav = _NAV_BASE * (1 + max_gain / 100)
     yield_pct = max_gain + max_loss
-    drift = min(yield_pct / 252, max_gain * 0.6 / days) / 100
+    drift = min(yield_pct / 252, max_gain * 0.9 / CANDLE_FULL_DAYS) / 100
     nav = float(_NAV_BASE)
     dev = 0.0
     rows: list[list] = []
-    for day in _trading_days(days):
+    for day in _trading_days(CANDLE_FULL_DAYS):
         period = day.isoformat()
         digest = hashlib.sha256(f"{product_id}:d:{period}".encode()).digest()
         u1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
         u2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
-        dev = 0.85 * dev + (1 - 0.85 ** 2) ** 0.5 * (u1 * 2 - 1) * step / 100
+        dev = 0.5 * dev + (1 - 0.5 ** 2) ** 0.5 * (u1 * 2 - 1) * step / 100
         open_nav = nav
         raw_nav = open_nav * (1 + drift + dev)
         close_nav = max(floor_nav, min(ceil_nav, raw_nav))
@@ -466,19 +436,54 @@ def _daily_candles(product_id: str, max_gain: float, max_loss: float,
     return rows
 
 
-class DailyArgs(BaseModel):
-    """T14b 入参：`days` 限定在 20–250 个交易日（约 1–12 个月）。"""
-    model_config = ConfigDict(extra="forbid", strict=True)
-    days: int = Field(default=DAILY_DAYS, ge=20, le=250)
+def _aggregate(daily: list[list], granularity: str) -> list[list]:
+    """把日线按周 / 月聚合：开=首开、高=最高、低=最低、收=末收。
 
-
-def product_daily(product_id: str, days: int = DAILY_DAYS) -> ToolResult:
-    """T14b：单只产品的日 K（近 `days` 个交易日）。**L0 只读**、公共目录、无归属断言。
-
-    为什么单独一个工具：日 K 一个产品就 120 行，14 只全塞进推荐 facts 会多出 150 KB。
-    改成「点开哪只看哪只」，一次只取约 5 KB。
+    **周期用桶内最后一个交易日的日期**（不是 "2026-W18" 这种周号）——
+    界面按真实日期画横轴、算均线、做 tooltip，周号/月号会让它们全部失效。
     """
-    bad = _invalid(DailyArgs, days=days)
+    if granularity == "daily":
+        return daily
+    buckets: dict[str, list[list]] = {}
+    for row in daily:
+        day = date.fromisoformat(row[0])
+        if granularity == "weekly":
+            iso = day.isocalendar()
+            key = f"{iso[0]}-W{iso[1]:02d}"
+        else:
+            key = f"{day.year}-{day.month:02d}"
+        bucket = buckets.get(key)
+        if bucket is None:
+            buckets[key] = [row[0], row[1], row[2], row[3], row[4]]
+        else:
+            bucket[0] = row[0]                      # 桶内最后一个交易日 = 横轴日期
+            bucket[2] = max(bucket[2], row[2])      # 最高
+            bucket[3] = min(bucket[3], row[3])      # 最低
+            bucket[4] = row[4]                      # 末收
+    return list(buckets.values())
+
+
+class DailyArgs(BaseModel):
+    """T14b 入参：粒度 + 生成窗口（交易日数）。
+
+    `days` 是**生成窗口**，不是最终根数：周线/月线会再聚合（750 个交易日 ≈ 36 根月 K）。
+    """
+    model_config = ConfigDict(extra="forbid", strict=True)
+    days: int | None = Field(default=None, ge=20, le=750)
+    granularity: Literal["daily", "weekly", "monthly"] = "daily"
+
+
+def product_daily(product_id: str, days: int | None = None,
+                  granularity: str = "daily") -> ToolResult:
+    """T14b：单只产品的 K 线（日 / 周 / 月）。**L0 只读**、公共目录、无归属断言。
+
+    为什么单独一个工具：K 线一个产品就上百行，25 只全塞进推荐 facts 会多出几百 KB。
+    改成「点开哪只看哪只」，一次只取几 KB。
+
+    **周/月是日线聚合出来的**（同一份日线数据，`_aggregate`），不是另算一套 ——
+    否则同一天的收盘价在两个周期里对不上。
+    """
+    bad = _invalid(DailyArgs, days=days, granularity=granularity)
     if bad is not None:
         return bad
     try:
@@ -491,14 +496,22 @@ def product_daily(product_id: str, days: int = DAILY_DAYS) -> ToolResult:
     level = row["risk_level"]
     swing = RISK_SWING.get(level, 0.0)
     gain, loss = row["expected_yield"] + swing, -swing
-    candles = _daily_candles(product_id, gain, loss, days)
+    full = _daily_candles(product_id, gain, loss)
+    window = days or CANDLE_WINDOWS[granularity]
+    if granularity == "daily":
+        candles = full[-window:]
+    elif granularity == "weekly":
+        candles = _aggregate(full[-window:], "weekly")
+    else:
+        candles = _aggregate(full[-window:], "monthly")
     facts = {"product_id": product_id, "name": row["name"], "risk_level": level,
              "risk_label": risk_label(level), "day_count": len(candles),
-             "candles": candles}
+             "granularity": granularity, "candles": candles}
     data = {"product_id": product_id, "name": row["name"],
             "candles": [{"period": c[0], "open": c[1], "high": c[2],
                          "low": c[3], "close": c[4]} for c in candles]}
-    return _ok(data, facts, f"{row['name']} 近 {len(candles)} 个交易日的日 K。")
+    unit = {"daily": "个交易日", "weekly": "周", "monthly": "个月"}[granularity]
+    return _ok(data, facts, f"{row['name']} 近 {len(candles)} {unit}的 K 线。")
 
 
 # ---------------- T14 recommend_wealth ----------------
