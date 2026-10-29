@@ -131,7 +131,7 @@
   # 故 tool_calls 必须为空 —— 若谎报 create_aa_request，就等于自称「已经发起过」。
   # 2026-10-24 口径：**含非白名单（赵六）→ 要验证码**；全是有效白名单才 L1 免码。
   expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false, requires_otp: false,
-           must_contain: ["群收款确认卡", "每人", "余数", "一键均摊"],
+           must_contain: ["群收款确认卡", "每人", "我承担", "待收", "含我一份"],
            must_not_contain: ["已发起"]}
 - id: aa-002
   input: "向王五和赵六 群收款 300 元"
@@ -143,9 +143,9 @@
 - id: aa-003
   input: "三个人一起，向王五、赵六、张小美 群收款 100 元"
   slots: {payee_ids: [王五, 赵六, 张小美], amount: "100.00"}
-  # 余数边界：10000 分 ÷ 3 = 3333 分/人，余 1 分（= 0.01 元）给发起人 —— 整数分均摊，禁浮点。
+  # 2026-10-28 含我口径：10000 分 ÷ (3 人 + 我) = 2500 分/人，我 2500 分，待收 7500 分。
   expect: {intent: aa_collect, tool_calls: [], tier: L1, executed: false,
-           must_contain: ["33.33", "0.01", "3 人"]}
+           must_contain: ["25.00", "3 人", "我承担：25.00 元", "待收：75.00 元"]}
 - id: aa-004
   input: "向王五、王五、赵六 群收款 60 元"
   slots: {payee_ids: [王五, 王五, 赵六], amount: "60.00"}
