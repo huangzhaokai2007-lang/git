@@ -93,3 +93,27 @@ def test_aa_card_has_no_policy_lines(seeded, monkeypatch: pytest.MonkeyPatch) ->
     text = confirm_card.render(card)
     assert "权限档" not in text and "短信验证码" not in text
     assert "总金额" in text and "风险提示" in text
+
+
+def test_people_parsed_from_speech_are_prefilled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户实测：说「向李四、张小美、王五群收款」→ 追问总金额，卡面却显示"还没有参与人"。
+
+    人已经从话里解析出来了，就该直接带进卡面（不必再点一遍）。
+    """
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五", "赵六"]},
+                                          "missing_slots": ["amount"]})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("向王五和赵六群收款").run()
+    assert not app.exception, app.exception
+    captions = "\n".join(str(element.value) for element in app.caption)
+    assert "王五、赵六" in captions, "已解析的参与人没有带进卡面"
+    assert "3 人（含我）" in captions                    # 2 人 + 我

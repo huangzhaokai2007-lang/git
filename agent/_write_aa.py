@@ -129,7 +129,9 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
         if cents is None and not filled.get("amounts"):      # 按人金额在手时不算「缺金额」
             missing.append("amount")
             # 同名与缺金额**同时发生**时两件事都要说（否则用户以为只差选人）
-            amount_hint = "请说明这次群收款的总金额（例如「群收款 300 元」）。"
+            #: 文案里带上 write_flow 的槽位标签原文（「金额」），否则它会再追加
+            #: 「请补充：金额（元）」—— 用户看到同一件事被问两遍（实测）。
+            amount_hint = "请补充金额（元），例如「群收款 300 元」。"
             clarify = f"{clarify}\n{amount_hint}" if clarify else amount_hint
         else:
             filled["amount_cents"] = cents

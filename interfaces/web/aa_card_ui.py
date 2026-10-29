@@ -73,8 +73,37 @@ def _confirm_panel(executor: ThreadPoolExecutor, session_id: str, confirmation) 
             st.rerun()
 
 
+def _preset(executor: ThreadPoolExecutor, session_id: str) -> dict:
+    """把用户**上一句已经说过的**人/金额/事由带进卡面（避免"还没选参与人"）。
+
+    2026-10-29（用户实测）：「向李四、张小美、王五群收款」→ 系统追问总金额，
+    但卡面参与人却是空的，得重新点选一遍。人明明已经解析出来了，就该直接带出来。
+    """
+    from agent import pending_slots
+
+    item = executor.submit(pending_slots.peek, session_id).result() or {}
+    slots = dict(item.get("slots") or {})
+    names = [str(name) for name in (slots.get("aa_names") or []) if str(name).strip()]
+    if not names and slots.get("payee_ids"):
+        names = [str(pid) for pid in slots["payee_ids"]]
+    amount = slots.get("amount")
+    try:
+        total = float(str(amount)) if amount not in (None, "") else 0.0
+    except ValueError:
+        total = 0.0
+    return {"names": names, "total": total, "title": str(slots.get("title") or "")}
+
+
 def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     """发起表单：金额 / 参与人 / 备注 / 均摊 / 按人金额 / 发起。"""
+    preset = _preset(executor, session_id)
+    if preset["names"] and not st.session_state.get("aa-people"):
+        st.session_state["aa-people"] = list(preset["names"])     # 直接带上已解析的人
+        st.session_state["aa-picked"] = list(preset["names"])
+    if preset["total"] and not st.session_state.get("aa-total"):
+        st.session_state["aa-total"] = preset["total"]
+    if preset["title"] and not st.session_state.get("aa-title"):
+        st.session_state["aa-title"] = preset["title"]
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款（含你自己）",
                              "填金额 → 选参与人 → 发起；每人均摊，你承担自己那一份", tone="")
