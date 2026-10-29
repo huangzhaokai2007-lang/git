@@ -157,6 +157,20 @@ def _prepare_aa(filled: dict) -> Prepared:
     payees = [{"id": pid, "name": name} for pid, name in zip(ids, names)]
     facts = _aa_split.aa_facts(payees, int(filled["amount_cents"]),
                                per_person=filled.get("per_person_cents"))
+    #: 2026-10-28（用户要求「群收款要包含我」）：一键均摊时，用户说的总额是**含我**的，
+    #: 份数 = 人数 + 1（我占一份）→ 每人应缴、我承担、待收 三个数都来自工具层。
+    if facts.get("split_mode") == "equal":
+        plan = _aa_split.split_with_self(int(filled["amount_cents"]), len(payees))
+        facts.update({
+            "per_person_amount": plan["per_cents"],
+            "per_person_amount_yuan": f"{plan['per_cents'] / 100:.2f}",
+            "initiator_share": plan["mine_cents"],
+            "initiator_share_yuan": f"{plan['mine_cents'] / 100:.2f}",
+            "my_share_cents": plan["mine_cents"],
+            "collect_cents": plan["collect_cents"],
+            "collect_yuan": f"{plan['collect_cents'] / 100:.2f}",
+            "per_person_cents": [plan["per_cents"]] * len(payees),
+        })
     facts["target_name"] = filled["aa_target"]
     #: 2026-10-24（人类规格「群收款总额同样受限额约束」）：超单笔上限 / 超今日剩余 → 直接拒。
     single_max = facts.get("limits_single_max")
@@ -198,9 +212,10 @@ def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
         rows.append(("分摊方式", "按人金额"))
     else:
         rows = [("收款人", f"{facts['target_name']}（{facts['payee_count']} 人）"),
-                ("总金额", f"{facts['amount_yuan']} 元"),
-                ("每人", f"{facts['per_person_amount_yuan']} 元（一键均摊）"),
-                ("余数（由你承担）", f"{facts['initiator_share_yuan']} 元")]
+                ("总金额（含我）", f"{facts['amount_yuan']} 元"),
+                ("每人", f"{facts['per_person_amount_yuan']} 元（含我一份）"),
+                ("我承担", f"{facts['initiator_share_yuan']} 元"),
+                ("待收", f"{facts.get('collect_yuan', facts['amount_yuan'])} 元")]
     if facts.get("aa_otp_reason"):                      # 为什么要验证码，卡面说清楚
         rows.append(("验证码原因", str(facts["aa_otp_reason"])))
     return confirm_card.CardInput(
@@ -225,22 +240,31 @@ def _execute_aa(confirmation: confirm_card.Confirmation, otp: str | None) -> Too
     """真发起：按人金额 → **T31**；一键均摊 → **T9**（签名冻结，按人金额走新工具）。"""
     del otp
     filled = confirmation.filled
+    #: 含我口径的三个数在**事实包**里（`evidence`）：每人应缴 / 我承担 / 待收。
+    evidence = dict(confirmation.evidence or {})
     payee_ids = list(filled.get("payee_ids") or [])
-    per_person = list(filled.get("per_person_cents") or [])
+    per_person = list(evidence.get("per_person_cents")
+                      or filled.get("per_person_cents") or [])
+    mode = "custom" if per_person else "equal"
+    #: 落库口径 = **待收**（Σ每人应缴）：T41/T9 的既有语义就是"向这些人收多少"，
+    #: 含我总额只体现在卡面（总金额（含我）/ 我承担），不动冻结接口。
+    group_total = int(confirmation.amount_cents)
     if per_person:
         result = _aa_split.create_aa_request_with_amounts(payee_ids, per_person)
         amount_cents = per_person
+        group_total = int(evidence.get("amount_cents") or sum(per_person))
     else:
-        result = transfer.create_aa_request(payee_ids, int(confirmation.amount_cents))
-        total = int(confirmation.amount_cents)
-        base, rest = divmod(total, max(len(payee_ids), 1))
-        amount_cents = [base] * len(payee_ids)
+        #: T9 的口径是「向这些人收多少」→ 传**待收**（含我总额 − 我那份）。
+        collect = int(evidence.get("collect_cents") or 0) or group_total
+        result = transfer.create_aa_request(payee_ids, collect)
+        per = collect // max(len(payee_ids), 1)
+        amount_cents = [per] * len(payee_ids)
         if amount_cents:                       # 余数记到第一份（与 T9 的分摊口径一致）
-            amount_cents[0] += rest
+            amount_cents[0] += collect - per * len(payee_ids)
+        group_total = max(group_total, sum(amount_cents))
     if result.ok:                              # T41：把 AA 变成可跟踪的请求（24h 有效）
         from tools import _aa_request
-        opened = _aa_request.open_aa_request(payee_ids, amount_cents, int(sum(amount_cents)),
-                                             "custom" if per_person else "equal",
+        opened = _aa_request.open_aa_request(payee_ids, amount_cents, group_total, mode,
                                              str(filled.get("title") or "群收款"))
         if opened.ok:
             result = result.model_copy(update={

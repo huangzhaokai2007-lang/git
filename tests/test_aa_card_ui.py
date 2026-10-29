@@ -59,10 +59,10 @@ def test_confirm_button_disabled_until_people_picked(monkeypatch: pytest.MonkeyP
     assert not app.exception, app.exception
     labels = [box.label for box in app.number_input]
     assert any("群收款总金额" in label for label in labels)
-    assert any(button.label.startswith("选择收款人") for button in app.button)
-    next(button for button in app.button if button.label.startswith("选择收款人")).click().run()
-    confirm = next(button for button in app.button if button.label == "确认")
-    assert confirm.disabled is True, "没选人时「确认」必须不可按"
+    assert any(button.label.startswith("参与人数") for button in app.button)
+    next(button for button in app.button if button.label.startswith("参与人数")).click().run()
+    confirm = next(button for button in app.button if button.label == "确认参与人")
+    assert confirm.disabled is True, "没选人时「确认参与人」必须不可按"
 
 
 def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,12 +70,14 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     app = _app(monkeypatch)
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
-    next(button for button in app.button if button.label.startswith("选择收款人")).click().run()
+    next(button for button in app.button if button.label.startswith("参与人数")).click().run()
     app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，确认按钮才会解禁
-    next(button for button in app.button if button.label == "确认").click().run()
+    next(button for button in app.button if button.label == "确认参与人").click().run()
     assert not app.exception, app.exception
     captions = "\n".join(str(element.value) for element in app.caption)
     assert "含我" in captions and "我承担" in captions and "待收" in captions
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "均摊金额" in marks and "¥ 150.00" in marks      # 大字均摊金额（300 / 2 份）
     labels = [button.label for button in app.button]
     assert any(label.startswith("按人设置金额") for label in labels)
     assert "发起群收款" in labels

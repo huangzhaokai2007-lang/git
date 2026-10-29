@@ -33,8 +33,12 @@ def test_active_panel_is_the_only_query_panel_and_precedes_confirmation(monkeypa
     workspace_ui.panels(None, 'order-test', None,
                         lambda: calls.append('pending'), lambda: calls.append('forms'),
                         lambda: calls.append('confirm'))
-    assert calls[-1] == 'confirm'
-    assert calls.index('picker') < calls.index('forms') < calls.index(expected) < calls.index('confirm')
+    assert calls.index('picker') < calls.index('forms') < calls.index(expected)
+    if scene == 'aa_list':
+        assert 'confirm' not in calls  # main renders confirmation inside the group collection card.
+    else:
+        assert calls[-1] == 'confirm'
+        assert calls.index(expected) < calls.index('confirm')
     assert [name for name in calls if name in ('cards', 'payee', 'schedule', 'aa', 'gift')] == [expected]
 
 

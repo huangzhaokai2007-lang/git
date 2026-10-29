@@ -180,7 +180,8 @@ def test_edit_aa_amounts_recomputes_total(wired, monkeypatch) -> None:
     """AA 卡：把每人金额改成 王五 200 / 赵六 100 → 逐人明细更新、总额跟着变成 300（原 300 不变）。"""
     _fake_aa(monkeypatch)
     card = orchestrator.handle("向王五和张小美 AA 收款 300 元", session_id=SESSION)
-    assert card.tier == "L1" and "一键均摊" in card.reply     # 含非白名单（张小美）→ 要码
+    #: 2026-10-28 含我口径：卡面写「含我一份」（份数 = 人数 + 1）
+    assert card.tier == "L1" and "含我一份" in card.reply
     edited = write_flow.edit(SESSION, {"amounts": "王五 200 元、张小美 100 元"})
     assert "200.00" in edited.reply and "100.00" in edited.reply
     assert "按人金额" in edited.reply

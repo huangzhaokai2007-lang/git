@@ -98,9 +98,10 @@ def test_confirm_card_issues_no_request_before_confirmation(wired, monkeypatch) 
     assert card.executed is False and card.tier == "L1"       # 含非白名单（赵六）→ 要验证码
     # 2026-10-25 口径：AA 是收款方向 → 一律免码，卡面不再出现「验证码原因」
     assert "验证码原因" not in card.reply and "等待验证码" not in card.reply
-    assert "一键均摊" in card.reply
+    #: 2026-10-28：卡面按「含我」口径 —— 总金额（含我）/ 每人 / 我承担 / 待收
+    assert "含我一份" in card.reply
     assert "CONFIRM_CARD" in card.states and "【群收款确认卡】" in card.reply
-    assert "每人" in card.reply and "余数" in card.reply
+    assert "每人" in card.reply and "我承担" in card.reply and "待收" in card.reply
     assert "已发起" not in card.reply                       # 还没发起，不许这么说
     assert aa_audits(wired) == 0                            # ← T9 未被调用（它必写审计）
     assert confirm_card.current(SESSION) is not None
@@ -109,16 +110,22 @@ def test_confirm_card_issues_no_request_before_confirmation(wired, monkeypatch) 
 # ---------------- ② 分摊与余数：整数分均摊，余数给发起人 ----------------
 
 def test_remainder_goes_to_initiator_in_integer_cents(wired, monkeypatch) -> None:
-    """100.00 元 ÷ 3 人：每人 33.33 元，余 0.01 元由发起人承担（禁浮点）。"""
+    """含我：100.00 元 ÷ **4 份**（3 人 + 我）= 每人 25.00 元，我 25.00 元，待收 75.00 元。
+
+    2026-10-28（用户要求「群收款要包含我」）：份数从「人数」变成「人数 + 1」，
+    我那份 + 余数都由发起人承担（整数分，禁浮点）。
+    """
     card = turn(monkeypatch, "三个人一起 AA 收款", [aa_intent([WANGWU, ZHAOLIU, ZHANG], "100.00")])
-    assert "33.33" in card.reply and "0.01" in card.reply and "3 人" in card.reply
+    assert "25.00" in card.reply and "3 人" in card.reply
+    assert "我承担：25.00 元" in card.reply and "待收：75.00 元" in card.reply
     assert card.executed is False and aa_audits(wired) == 0
 
 
 def test_no_remainder_when_amount_divides_evenly(wired, monkeypatch) -> None:
-    """300.00 元 ÷ 2 人：每人 150.00 元，余 0.00 元。"""
+    """含我：300.00 元 ÷ **3 份**（2 人 + 我）= 每人 100.00 元，我 100.00 元，待收 200.00 元。"""
     card = turn(monkeypatch, "向两人 AA 收款", [aa_intent([WANGWU, ZHAOLIU], "300.00")])
-    assert "150.00" in card.reply and "0.00" in card.reply and "2 人" in card.reply
+    assert "每人：100.00 元" in card.reply and "2 人" in card.reply
+    assert "我承担：100.00 元" in card.reply and "待收：200.00 元" in card.reply
 
 
 # ---------------- ③ 确认后真发起 + 重复提交不重复发起 ----------------
@@ -127,7 +134,8 @@ def test_confirm_issues_the_request_and_writes_audit(wired, monkeypatch) -> None
     turn(monkeypatch, "AA 收款", [aa_intent([WANGWU, ZHAOLIU], "300.00")])
     done = execute_aa(SESSION)                            # v2：含非白名单 → 确认 + 验证码
     assert done.executed is True and "VERIFY_NUMBERS" in done.states
-    assert "已发起" in done.reply and "150.00" in done.reply
+    #: 2026-10-28 含我口径：2 人 + 我 = 3 份 → 每人 100，待收 200（回执说的是待收）
+    assert "已发起" in done.reply and "200.00" in done.reply
     # 执行后审计里出现 `create_aa_request`：一条来自 T9 自身，一条来自编排层记的工具调用。
     # 故只断言「> 0」与「前后不变」，不钉魔法数字。
     assert aa_audits(wired) > 0

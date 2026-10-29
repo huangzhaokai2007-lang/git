@@ -248,5 +248,6 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
         scene_ui.render(executor, session, ask, show_scope=False)
     if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent')):
         slot_form_ui.render(executor, session)
-    if not inline_confirmation_rendered:
+    if not inline_confirmation_rendered and not (
+            scene in ('aa_list', 'aa_collect') and st.session_state.get('bound-aa-query')):
         confirmation()
