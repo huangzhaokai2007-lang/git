@@ -27,7 +27,7 @@ BALANCED = {"age": 35, **_MID}
 AGGRESSIVE = {"age": 50, **_HIGH}
 #: seed 的 25 个理财产品（id, 等级, 预期年化）
 #: 收益率按 2025–2026 年真实市场水平校准（2026-10-29），见 `data/seed.PRODUCT_ROWS`
-PRODUCTS = (("prod_r1_mmf", "R1", 1.35), ("prod_r1_cash", "R1", 1.55),
+PRODUCTS = (("prod_r1_mmf", "R1", 1.15), ("prod_r1_cash", "R1", 1.30),
             ("prod_r1_cd", "R1", 2.05),
             ("prod_r2_bond30", "R2", 2.10), ("prod_r2_bond90", "R2", 2.60),
             ("prod_r2_bond180", "R2", 2.90), ("prod_r2_cd_index", "R2", 1.75),
@@ -244,7 +244,7 @@ def test_t14_sorted_by_yield_descending(seeded: Path) -> None:
     assert yields == ["17.20%", "13.50%", "9.20%", "8.60%", "8.20%", "7.50%", "7.40%",
                       "6.80%", "6.20%", "6.00%", "5.80%", "5.80%", "5.40%", "5.00%",
                       "4.40%", "4.10%", "3.80%", "3.20%", "2.90%", "2.60%", "2.10%",
-                      "2.05%", "1.75%", "1.55%", "1.35%"]
+                      "2.05%", "1.75%", "1.30%", "1.15%"]
 
 
 def test_t14_horizon_and_amount_filters(seeded: Path) -> None:
