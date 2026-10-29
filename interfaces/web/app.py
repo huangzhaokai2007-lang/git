@@ -175,6 +175,7 @@ def _confirm_submit(text: str, *, inline: bool, display: str | None = None) -> N
         st.session_state['bound-payee-query'] = True
         last = st.session_state['messages'][-1]
         turn = last.get('turn') or {}
+        st.session_state['payee-inline-done'] = bool(turn.get('executed'))
         if turn.get('error_code') or turn.get('executed') or not turn:
             st.session_state['payee-edit-feedback'] = last.get('text', '')
         else:
@@ -184,7 +185,7 @@ def _confirm_submit(text: str, *, inline: bool, display: str | None = None) -> N
 
 def _cancel_inline_payee(confirmation) -> None:
     confirm_card.clear(confirmation.session_id)
-    st.session_state['payee-edit-feedback'] = '已取消修改，资料未保存。'
+    st.session_state['payee-edit-feedback'] = '已取消本次操作，未提交执行。'
     st.session_state.pop('payee-inline-intent', None)
 
 

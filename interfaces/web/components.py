@@ -243,7 +243,7 @@ def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
                 continue
             if line.strip():
                 st.markdown(line)
-        st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后保存。')
+        st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后提交执行。')
         left, right = st.columns(2)
         if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
             return 'confirm'
