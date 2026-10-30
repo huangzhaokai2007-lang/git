@@ -382,7 +382,13 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             st.caption("选好参与人后这里会显示均摊金额。")
             return
         amounts: dict[str, str] = {}
-        with st.expander("✏️ 按人设置金额（可选）", expanded=False):
+        #: 2026-10-31（用户：这两个按钮样式不一样）：和「修改参与人」统一成**按钮 + 展开区**
+        _amounts_open = bool(st.session_state.get("aa-amounts-open"))
+        if st.button("✏️ 收起按人设置金额" if _amounts_open else "✏️ 按人设置金额（可选）",
+                     key="aa-amounts-toggle", width="stretch"):
+            st.session_state["aa-amounts-open"] = not _amounts_open
+            st.rerun()
+        if _amounts_open:
             st.caption("默认是当前均摊值；改谁就动谁，**总额会跟着自动变**（总额 = 其他人合计 + 我承担）。")
             #: 2026-03-31：签名只跟**参与人**走 —— 改总额不该把用户已填的金额冲掉。
             for index, pid in enumerate(people):

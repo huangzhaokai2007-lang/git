@@ -85,7 +85,7 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     #: 合并块里「我（承担）」是一行明细，金额用等宽字体显示为 ¥ 150.00
     assert "我（承担）" in marks and "待收 ¥150.00" in marks
     #: 「按人设置金额」也收进 expander 了
-    assert any("按人设置金额" in str(element.label) for element in app.expander)
+    assert any("按人设置金额" in button.label for button in app.button)
     assert any(button.label == "发起群收款" for button in app.button)
 
 

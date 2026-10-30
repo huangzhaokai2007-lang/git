@@ -52,6 +52,7 @@ def _amounts(app: AppTest) -> list[str]:
 def test_weight_split_fills_per_person_amounts(monkeypatch: pytest.MonkeyPatch) -> None:
     """1000 元 · 3 人 · 份数 1/2/2 → 200 / 400 / 400，合计仍是 1000。"""
     app = _app(monkeypatch, total=1000.0, people=2)
+    next(button for button in app.button if "按人设置金额" in button.label).click().run()
     next(button for button in app.button if button.label == "按份数均摊").click().run()
     assert not app.exception, app.exception
     for index, weight in enumerate((1, 2, 2)):
@@ -73,6 +74,7 @@ def test_even_split_restores_equal_shares_without_changing_total(
         monkeypatch: pytest.MonkeyPatch) -> None:
     """先手改成 100/200/700，再点「一键均摊」→ 拉平且合计仍是 1000.00。"""
     app = _app(monkeypatch, total=1000.0, people=2)
+    next(button for button in app.button if "按人设置金额" in button.label).click().run()
     for index, value in enumerate(("100", "200", "700")):
         boxes = [box for box in app.text_input if any(word in box.label for word in AMOUNT_LABELS)]
         boxes[index].set_value(value).run()

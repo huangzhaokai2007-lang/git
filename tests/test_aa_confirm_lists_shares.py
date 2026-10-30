@@ -42,6 +42,7 @@ def test_confirm_card_lists_each_person_share(monkeypatch: pytest.MonkeyPatch) -
     app.multiselect[0].set_value(list(app.multiselect[0].options)[:2]).run()
     next(button for button in app.button if button.label == "添加所选").click().run()
 
+    next(button for button in app.button if "按人设置金额" in button.label).click().run()
     for index, value in ((0, "500"), (1, "300"), (2, "480")):      # 李四 / 王五 / 我
         boxes = [box for box in app.text_input
                  if "应收" in box.label or "我承担" in box.label]

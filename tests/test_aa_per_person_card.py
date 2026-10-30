@@ -43,6 +43,7 @@ def test_per_person_amounts_take_effect_and_labels_are_names(
     app.multiselect[0].set_value(options[:2]).run()
     next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
+    next(button for button in app.button if "按人设置金额" in button.label).click().run()
 
     labels = [box.label for box in app.text_input if "应收" in box.label]
     assert labels, "应该有按人金额输入框"
