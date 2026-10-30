@@ -105,6 +105,24 @@ def test_candles_drift_up_for_positive_yield(seeded: Path) -> None:
     assert ratios[len(ratios) // 2] > 1.0, "中位数必须高于起点"
 
 
+def test_axis_format_is_left_to_vega_so_years_never_disappear() -> None:
+    """横轴不许写死 `format`。
+
+    踩过的坑（2026-10-30）：原来按「周期字符串长度」判断是不是日 K，周 K 也是
+    `YYYY-MM-DD` 就被当成日 K，套了 `%m-%d` —— 16 年跨度下横轴全是「03-30」，没有年份。
+    写死 `%Y` 也不行：放大到几个月后每格都显示同一个年份。
+    正确做法是交给 Vega 按刻度间隔自适应（年/月/日自动切换）。
+    """
+    from interfaces.web import wealth_ui
+
+    for period, step in (("2026-08-03", "day"), ("2026-08", "month")):
+        candles = [{"period": period, "open": 10000, "high": 10200,
+                    "low": 9800, "close": 10150}] * 3
+        spec = wealth_ui._kline_spec(candles).to_dict()
+        axis = spec["layer"][1]["encoding"]["x"]["axis"]
+        assert "format" not in axis, f"{step} 轴写死了 format：{axis}"
+
+
 def test_kline_spec_is_a_candlestick_with_zoom() -> None:
     """图表结构钉死：影线 rule + 实体 bar、开收盘双 y、涨跌条件着色、可交互缩放。
 
