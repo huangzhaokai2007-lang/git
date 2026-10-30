@@ -47,7 +47,17 @@ def test_edit_after_picking_a_same_name_payee_does_not_reopen_the_picker(
     next(button for button in app.button if button.label == "✏️ 修改").click().run()
     assert not app.exception, app.exception
     payee_box = next(box for box in app.text_input if box.label == "收款人")
-    assert "139****" in payee_box.value, f"收款人应回填脱敏号，实际 {payee_box.value!r}"
+    #: 用户要求：框里显示**姓名**（人看得懂）；重检时编排层自己用手机号去歧义。
+    assert payee_box.value == "李四", f"收款人应显示姓名，实际 {payee_box.value!r}"
+
+    #: 只改金额 → 重新预检 → 不该再弹解析卡（也不该换人）
+    amount_box = next(box for box in app.text_input if "金额" in box.label)
+    amount_box.set_value("120").run()
+    next(button for button in app.button if button.label == "按修改重新预检").click().run()
+    assert not app.exception, app.exception
+    assert not [button for button in app.button if button.label == "选这位"], "改金额不该再解析"
+    reply = str(app.session_state["messages"][-1]["text"])
+    assert "120.00" in reply and "139****1001" in reply
 
 
 def test_group_collect_has_no_collapse_button(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -51,10 +51,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
         changed: dict[str, str] = {}
         for field in draft.fields:
-            value = (_current_payee_value(executor, session_id, field.value)
-                     if field.name == "payee" else field.value)
-            new = _field(field, draft.kind, default=value)
-            if new and new != value:
+            #: 框里显示**姓名**（用户要求）；同名重复解析的问题在 `write_flow.edit` 里收口。
+            new = _field(field, draft.kind)
+            if new and new != field.value:
                 changed[field.name] = new
         if draft.kind == "transfer_scheduled":          # 循环频率：一次性 / 每日 / 每周 / 每月
             cycle_now = _current_cycle(executor, session_id)

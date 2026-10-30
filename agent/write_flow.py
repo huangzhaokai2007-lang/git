@@ -184,6 +184,13 @@ def edit(session_id: str, updates: Mapping) -> Step:
             raw["payee_ids"] = names
         if "aa_target" in confirmation.filled:
             raw["aa_target"] = confirmation.filled["aa_target"]
+    #: 2026-10-30（用户实测「点修改后收款人显示成电话号码」）：卡面显示姓名，
+    #: 但**重检**不能拿姓名再解析一遍（同名会再弹解析卡）。用户没改收款人时，
+    #: 直接用卡上已经解析好的脱敏手机号（解析关卡里唯一可辨）。
+    if "payee" not in updates:
+        masked = str(((confirmation.filled or {}).get("masked_phone") or "")).strip()
+        if masked and "payee" in raw:
+            raw["payee"] = masked
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
     derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
