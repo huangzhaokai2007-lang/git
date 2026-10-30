@@ -197,13 +197,14 @@ AA_PEOPLE_CSS = """
   gap: .6rem; padding: .22rem .1rem; font-size: .92rem; color: #d7dae2;
   border-bottom: 1px solid rgba(255,255,255,.04); }
 .aa-split-row:last-child { border-bottom: 0; }
-.aa-split-row .aa-split-amt { color: #b7b1ff; font-family: "SFMono-Regular", Consolas, monospace;
+/* 2026-10-31（用户要求）：金额一律白色，只有"我（承担）"那一行保留暖色 */
+.aa-split-row .aa-split-amt { color: #eceef2; font-family: "SFMono-Regular", Consolas, monospace;
   font-size: .95rem; }
 .aa-split-row.me { color: #f0d9a8; }
 .aa-split-row.me .aa-split-amt { color: #f2b8a0; }
 .aa-split-row.total { font-weight: 650; color: #eceef2;
   border-top: 1px solid rgba(122,120,220,.35); margin-top: .15rem; }
-.aa-split-row.total .aa-split-amt { color: #ffd9a0; }
+.aa-split-row.total .aa-split-amt { color: #ffffff; }
 .aa-split-foot { display: flex; justify-content: space-between; gap: .5rem;
   margin-top: .3rem; color: #9aa0ac; font-size: .8rem; }
 """
