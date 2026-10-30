@@ -100,6 +100,47 @@ def _sync_total() -> None:
     st.session_state["aa-total"] = round(others + mine, 2)
 
 
+def _split_count() -> int:
+    """当前参与人个数（不含我）。"""
+    return len([key for key in st.session_state if str(key).startswith("aa-amt-")])
+
+
+def _write_amounts(values: list[float], mine: float) -> None:
+    """把算好的金额写回输入框（整数分落库口径，避免浮点尾巴）。"""
+    for index, value in enumerate(values):
+        st.session_state[f"aa-amt-{index}"] = f"{value:.2f}"
+    st.session_state["aa-mine"] = f"{mine:.2f}"
+    st.session_state["aa-total"] = round(sum(values) + mine, 2)
+
+
+def _even_split() -> None:
+    """一键均摊：全员（含我）拉回平均。"""
+    total_cents = int(round(_to_yuan(st.session_state.get("aa-total")) * 100))
+    count = _split_count() + 1
+    if total_cents <= 0 or count <= 0:
+        return
+    #: 用整数分算：别人各拿 floor 的那一份，**零头记在我这边** —— 合计不会变成 999.99。
+    per = total_cents // count
+    mine = total_cents - per * (count - 1)
+    _write_amounts([per / 100] * (count - 1), mine / 100)
+
+
+def _apply_weights() -> None:
+    """按份数均摊：每份 = 总额 ÷ 总份数；余下的零头记在我这边（不外溢）。"""
+    total_cents = int(round(_to_yuan(st.session_state.get("aa-total")) * 100))
+    others = [max(1, int(st.session_state.get(f"aa-weight-{i}") or 1))
+              for i in range(_split_count())]
+    mine_weight = max(1, int(st.session_state.get("aa-weight-mine") or 1))
+    shares = sum(others) + mine_weight
+    if total_cents <= 0 or shares <= 0:
+        return
+    unit = total_cents // shares
+    cents = [unit * weight for weight in others]
+    mine_cents = unit * mine_weight + (total_cents - unit * shares)
+    _write_amounts([value / 100 for value in cents], mine_cents / 100)
+    st.session_state["aa-weight-open"] = False
+
+
 def _toggle(key: str) -> None:
     st.session_state[key] = not st.session_state.get(key, False)
 
@@ -281,25 +322,40 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not people:
             st.caption("选好参与人后这里会显示均摊金额。")
             return
-        #: 均摊大区块：大字金额 + 我承担/待收 一行（金额一变就有渐变脉冲）
+        #: 2026-10-31（用户要求）：**有人被单独设过金额时，大字换成"每人应摊明细表"** ——
+        #: 改完能一眼看出谁多少、合计多少；全员一样时仍用原来的大字。
         import premium_css
 
-        #: 2026-10-31：按人金额可改（含"我承担"）→ 这里显示的"我承担/待收"要跟**输入框**，
-        #: 不能再用均摊建议值，否则会出现"改了金额但份额没变"的错觉（用户实测）。
-        _others = sum(_to_yuan(st.session_state.get(f"aa-amt-{i}"))
-                      for i in range(len(people)))
-        _mine = _to_yuan(st.session_state.get("aa-mine"))
-        mine_show = f"{_mine:.2f}" if _mine else plan['mine_yuan']
-        collect_show = f"{_others:.2f}" if _others else plan['collect_yuan']
-        amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
-        st.markdown(
-            f"<div style='text-align:center;margin:.2rem 0 .1rem'>"
-            f"<span style='color:#9aa0ac;font-size:.8rem'>均摊金额（含我）</span><br>"
-            f"<span style='font-size:2rem;font-weight:650'>{amount_html}</span>"
-            f"<div style='color:#9aa0ac;font-size:.8rem;margin-top:.15rem'>"
-            f"我承担 {mine_show} 元 · 待收 <b style='color:#d1d4dc'>"
-            f"{collect_show} 元</b></div></div>",
-            unsafe_allow_html=True)
+        _per = float(plan["per_yuan"])
+        _labels = [catalog.get(pid, {}).get("label") or pid for pid in people]
+        #: 输入框还没初始化（刚加入参与人那一轮）→ 一律按均摊值看待，别急着切成表格
+        _values = [_to_yuan(st.session_state[f"aa-amt-{i}"])
+                   if f"aa-amt-{i}" in st.session_state else _per
+                   for i in range(len(people))]
+        _others = sum(_values)
+        _mine = (_to_yuan(st.session_state["aa-mine"])
+                 if "aa-mine" in st.session_state else _per)
+        custom = (any(abs(value - _per) > 0.005 for value in _values)
+                  or (_mine and abs(_mine - _per) > 0.005))
+        if custom:
+            table = ["| 收款人 | 应收（元） |", "| --- | --- |"]
+            table += [f"| {label} | {value:,.2f} |" for label, value in zip(_labels, _values)]
+            table.append(f"| **我（承担）** | {_mine:,.2f} |")
+            table.append(f"| **合计** | {_others + _mine:,.2f} |")
+            st.markdown("\n".join(table))
+            st.caption(f"待收 {_others:,.2f} 元 · 我承担 {_mine:,.2f} 元")
+        else:
+            mine_show = f"{_mine:.2f}" if _mine else plan['mine_yuan']
+            collect_show = f"{_others:.2f}" if _others else plan['collect_yuan']
+            amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
+            st.markdown(
+                f"<div style='text-align:center;margin:.2rem 0 .1rem'>"
+                f"<span style='color:#9aa0ac;font-size:.8rem'>均摊金额（含我）</span><br>"
+                f"<span style='font-size:2rem;font-weight:650'>{amount_html}</span>"
+                f"<div style='color:#9aa0ac;font-size:.8rem;margin-top:.15rem'>"
+                f"我承担 {mine_show} 元 · 待收 <b style='color:#d1d4dc'>"
+                f"{collect_show} 元</b></div></div>",
+                unsafe_allow_html=True)
 
         amounts: dict[str, str] = {}
         with st.expander("✏️ 按人设置金额（可选）", expanded=False):
@@ -319,6 +375,25 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             #: 2026-10-31（用户要求）：按人编辑里**加上"我"** —— 否则改完其他人金额，
             #: 我那份还是老值，看起来像"均摊份额没变化"。改动会经 _sync_total 反推总额。
             mine_value = st.text_input("我承担（元）", key="aa-mine", on_change=_sync_total)
+
+            #: 两个快捷（用户 2026-10-31 要求）：一键均摊 / 按份数均摊
+            col_even, col_weight = st.columns(2)
+            col_even.button("一键均摊", key="aa-even", width="stretch", on_click=_even_split)
+            col_weight.button("按份数均摊", key="aa-weight-toggle", width="stretch",
+                              on_click=_toggle, args=("aa-weight-open",))
+            if st.session_state.get("aa-weight-open"):
+                st.caption("每份 = 总额 ÷ 总份数（份数可以不同，例如 1 / 2 / 2）。")
+                for index, pid in enumerate(people):
+                    label = catalog.get(pid, {}).get("label") or pid
+                    st.number_input(f"{label} 份数", key=f"aa-weight-{index}",
+                                    min_value=1, max_value=20, step=1, value=1)
+                st.number_input("我 份数", key="aa-weight-mine",
+                                min_value=1, max_value=20, step=1, value=1)
+                col_ok, col_no = st.columns(2)
+                col_ok.button("确认按份数均摊", key="aa-weight-apply", type="primary",
+                              width="stretch", on_click=_apply_weights)
+                col_no.button("取消", key="aa-weight-cancel", width="stretch",
+                              on_click=_toggle, args=("aa-weight-open",))
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
                      disabled=float(total or 0) <= 0):
