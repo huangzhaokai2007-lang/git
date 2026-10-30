@@ -97,6 +97,7 @@ def _sync_total() -> None:
     others = sum(_to_yuan(value) for key, value in list(st.session_state.items())
                  if str(key).startswith("aa-amt-"))
     mine = _to_yuan(st.session_state.get("aa-mine"))
+    st.session_state["aa-amount-touched"] = True      # 用户动过按人金额 → 不再自动对齐均摊值
     st.session_state["aa-total"] = round(others + mine, 2)
 
 
@@ -111,6 +112,7 @@ def _write_amounts(values: list[float], mine: float) -> None:
         st.session_state[f"aa-amt-{index}"] = f"{value:.2f}"
     st.session_state["aa-mine"] = f"{mine:.2f}"
     st.session_state["aa-total"] = round(sum(values) + mine, 2)
+    st.session_state["aa-amount-touched"] = True     # 这是一次"用户设定"，别被默认值对齐覆盖
 
 
 def _even_split() -> None:
@@ -139,6 +141,24 @@ def _apply_weights() -> None:
     mine_cents = unit * mine_weight + (total_cents - unit * shares)
     _write_amounts([value / 100 for value in cents], mine_cents / 100)
     st.session_state["aa-weight-open"] = False
+
+
+def _align_amount_defaults(people: list[str], plan: dict) -> None:
+    """用户还没动过按人金额时，把它对齐到**当前均摊值**。
+
+    2026-10-31 修（用户截图里明细全是 0.00）：总额是后填的（先加人、再填 490），
+    而金额输入框第一次渲染时落了 0.00；这里在**渲染显示区之前**按当前均摊值刷新，
+    用户一旦手改过（`aa-amount-touched`）就不再覆盖。
+    """
+    signature = "|".join(people)
+    if st.session_state.get("aa-amount-signature") != signature:
+        st.session_state["aa-amount-signature"] = signature
+        st.session_state["aa-amount-touched"] = False
+    if st.session_state.get("aa-amount-touched"):
+        return
+    for index in range(len(people)):
+        st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
+    st.session_state["aa-mine"] = plan["per_yuan"]
 
 
 def _toggle(key: str) -> None:
@@ -267,7 +287,8 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款（含你自己）",
                              "填金额 → 选参与人 → 发起；每人均摊，你承担自己那一份", tone="")
-        money_col, title_col = st.columns([1, 2], vertical_alignment="bottom")
+        #: 2026-10-31（用户要求）：总金额与备注 **1:1**（原来 [1, 2]，金额框显得太窄）
+        money_col, title_col = st.columns([1, 1], vertical_alignment="bottom")
         total = money_col.number_input("总金额（元）", min_value=0.0, step=10.0, key="aa-total",
                                        format="%.2f")
         title = title_col.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
@@ -338,6 +359,7 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not people:
             st.caption("选好参与人后这里会显示均摊金额。")
             return
+        _align_amount_defaults(people, plan)          # 先把默认值对齐，后面才读得对
         #: 2026-10-31（用户要求）：**有人被单独设过金额时，大字换成"每人应摊明细表"** ——
         #: 改完能一眼看出谁多少、合计多少；全员一样时仍用原来的大字。
         import premium_css
@@ -377,12 +399,6 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         with st.expander("✏️ 按人设置金额（可选）", expanded=False):
             st.caption("默认是当前均摊值；改谁就动谁，**总额会跟着自动变**（总额 = 其他人合计 + 我承担）。")
             #: 2026-03-31：签名只跟**参与人**走 —— 改总额不该把用户已填的金额冲掉。
-            signature = "|".join(people)
-            if st.session_state.get("aa-amount-signature") != signature:
-                st.session_state["aa-amount-signature"] = signature
-                for index in range(len(people)):
-                    st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
-                st.session_state["aa-mine"] = plan["per_yuan"]
             for index, pid in enumerate(people):
                 #: 标签用人话（李四（139****1001）），键仍用 payee_id（同名不会串）
                 label = catalog.get(pid, {}).get("label") or pid
