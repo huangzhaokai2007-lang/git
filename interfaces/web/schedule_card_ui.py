@@ -16,16 +16,15 @@ from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
 
 import premium_ui
+import step_record
 from agent import confirm_card, schedule_flow, write_flow
 
 FILTERS = ("全部", "单笔", "循环")
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
-    state = st.session_state
-    text = step.reply or step.ask or ""
-    state["messages"].append({"role": "assistant", "text": text, "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    """按钮路径的回执记账（含 L3 的 pending_id）。"""
+    step_record.record_step(step, summary)
 
 
 def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,

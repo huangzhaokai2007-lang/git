@@ -18,13 +18,12 @@ import streamlit as st
 from agent import aa_flow, confirm_card, payee_flow, payee_picker, write_flow
 
 import premium_ui
+import step_record
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
-    state = st.session_state
-    state["messages"].append({"role": "assistant", "text": step.reply or step.ask or "",
-                              "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    """按钮/卡面路径的回执记账（含 L3 的 pending_id，否则待复核卡不显示）。"""
+    step_record.record_step(step, summary)
 
 
 def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,

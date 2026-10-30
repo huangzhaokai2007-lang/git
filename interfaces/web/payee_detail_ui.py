@@ -19,6 +19,7 @@ import streamlit as st
 from agent import confirm_card, payee_risk, pending_slots, write_flow
 
 import premium_ui
+import step_record
 import time_inputs
 
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
@@ -45,10 +46,8 @@ def _dispatch(executor: ThreadPoolExecutor, session_id: str, intent: str,
     if (st.session_state.get('payee-inline-intent') == intent
             and executor.submit(confirm_card.current, session_id).result() is None):
         st.session_state['payee-edit-feedback'] = step.reply or step.ask or ''
-    state = st.session_state
-    state["messages"].append({"role": "assistant", "text": step.reply or step.ask or "",
-                              "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": text, "turn": None})
+    #: 2026-10-30：回执统一用 step_record 记（带 pending_id，L3 待复核卡才显示）
+    step_record.record_step(step, text)
     st.rerun()
 
 
