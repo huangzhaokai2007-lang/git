@@ -57,10 +57,9 @@ RISK_DESC = {
 #: 来源：本 demo 的 RISK_DESC 文字分档（R2「5% 以内」、R3「5%-10%」、R4「10%-20%」、
 #: R5「20% 以上」演示取 30%）。并非历史数据或可验证的最大收益/亏损，必须在界面显著标明。
 RISK_SWING = {"R1": 0.0, "R2": 5.0, "R3": 10.0, "R4": 20.0, "R5": 30.0}
-#: 历年表现的口径：最近五个完整年度（演示数据锚在 2026-09，故 2021–2025）。
-HISTORY_YEARS = (2021, 2022, 2023, 2024, 2025)
-#: 月 K 的口径：最近 60 个月（5 年，末月 = `AS_OF` 所在月），净值基点 10000 = 1.0000。
-CANDLE_MONTHS = 201      # 2010-01 至今的月数（用户要求 K 线从 2010 开始）
+#: 月 K 的口径：**2010-01 至今**共 201 个月（用户要求 K 线从 2010 开始），
+#: 末月 = `AS_OF` 所在月；净值基点 10000 = 1.0000。
+CANDLE_MONTHS = 201
 _NAV_BASE = 10_000
 #: 单月波动的分母：见 `_product_candles()` 里的注释（不随窗口长度变）。
 _STEP_DIVISOR = 24
@@ -207,22 +206,6 @@ def _rank(level: str) -> int:
         raise ToolError(ErrorCode.INVALID_ARGUMENT,
                         f"风险等级只能是 {'/'.join(RISK_LEVELS)} 或对应的中文名")
     return RISK_LEVELS.index(level) + 1
-
-
-def _pct_facts(basis_points: int, name: str) -> dict:
-    """百分比进事实包：**整数基点**本体 + 展示形态（红线 2：facts 里不许出现 float）。
-
-    零值不带符号（`0.00%`），否则货基「年内最大回撤」会显示成 `+0.00%`，读着像涨了。
-    """
-    text = "0.00%" if basis_points == 0 else f"{basis_points / 100:+.2f}%"
-    return {name: basis_points, f"{name}_text": text}
-
-
-def _candle_period(offset: int) -> str:
-    """第 `offset` 个月（0 = 最早）的 `YYYY-MM`；末月 = `AS_OF` 所在月。"""
-    end = AS_OF.year * 12 + (AS_OF.month - 1)
-    total = end - (CANDLE_MONTHS - 1) + offset
-    return f"{total // 12:04d}-{total % 12 + 1:02d}"
 
 
 def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[dict]:
