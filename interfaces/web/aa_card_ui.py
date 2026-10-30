@@ -471,14 +471,17 @@ def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> N
         #: 2026-10-31（用户要求）：登记已付改成**勾选式** —— 点按钮放出未付的人，
         #: 勾谁付了（可多选）+ 确认/取消，不再一个一个地下拉选。
         open_key = f"aa-paid-open-{request_id}"
-        picked_key = f"aa-paid-pick-{request_id}"
+        gen_key = f"aa-paid-gen-{request_id}"
+        #: 2026-10-31 修（浏览器红屏 `StreamlitWidgetAlreadyInstantiatedError`）：
+        #: 勾选框用**代际 key**，开/关一次就换一代，旧 key 自然作废 —— 不用去 set/pop widget key。
+        picked_key = f"aa-paid-pick-{request_id}-{int(st.session_state.get(gen_key) or 0)}"
         col_pay, col_cancel = st.columns(2, vertical_alignment="center")
         if pending:
             label = "✏️ 收起登记" if st.session_state.get(open_key) else "登记已付"
             if col_pay.button(label, key=f"aa-paid-{request_id}", type="primary",
                               width="stretch"):
                 st.session_state[open_key] = not st.session_state.get(open_key)
-                st.session_state[picked_key] = []
+                st.session_state[gen_key] = int(st.session_state.get(gen_key) or 0) + 1
                 st.rerun()
         else:
             col_pay.caption("这笔群收款已全部付清 ✅")
@@ -502,13 +505,13 @@ def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> N
                 st.session_state["aa-paid-queue"] = rest
                 st.session_state[open_key] = False
                 #: 勾选框是**已实例化**的 widget，这里不能直接清 → 挂标记，下一轮开头清
-                st.session_state["aa-paid-clear"] = True
+                st.session_state[gen_key] = int(st.session_state.get(gen_key) or 0) + 1
                 _start(executor, session_id, "aa_mark_paid",
                        {"request_id": request_id, "payee_id": options[picked[0]]},
                        f"（按钮）登记 {picked[0]} 已付")
             if col_no.button("取消", key=f"aa-paid-no-{request_id}", width="stretch"):
                 st.session_state[open_key] = False
-                st.session_state["aa-paid-clear"] = True
+                st.session_state[gen_key] = int(st.session_state.get(gen_key) or 0) + 1
                 st.rerun()
 
 
@@ -551,9 +554,6 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     _apply_pending_reset()
     if st.session_state.pop("aa-reset-form-pending", False):
         _reset_form()                     # 新的一句「我要 aa 收款」→ 表单归零
-    if st.session_state.pop("aa-paid-clear", False):     # 勾选式登记：下一轮清掉勾选
-        for key in [k for k in list(st.session_state) if str(k).startswith("aa-paid-pick-")]:
-            st.session_state.pop(key, None)
     _drain_paid_queue(executor, session_id)
     confirmation = executor.submit(confirm_card.current, session_id).result()
     if confirmation is not None and getattr(confirmation, "intent", "") == "aa_collect":
