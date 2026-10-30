@@ -100,7 +100,12 @@ def _sync_total() -> None:
                  if str(key).startswith("aa-amt-"))
     mine = _to_yuan(st.session_state.get("aa-mine"))
     st.session_state["aa-amount-touched"] = True      # 用户动过按人金额 → 不再自动对齐均摊值
-    st.session_state["aa-total"] = round(others + mine, 2)
+    #: 2026-10-31 修（用户实测：点「按份数均摊」后总金额被清零）——
+    #: 输入框还空着 / 都是 0 时**不要**拿 0 去覆盖已有总额。
+    total_now = round(others + mine, 2)
+    if total_now <= 0:
+        return
+    st.session_state["aa-total"] = total_now
 
 
 def _split_count() -> int:
