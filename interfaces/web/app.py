@@ -290,7 +290,10 @@ def _sidebar() -> None:
             st.session_state['workspace-shortcut'] = prompt
             st.session_state.pop('workspace-result', None)
             st.session_state.pop('workspace-error', None)
-            if prompt == '查看操作记录':
+            if prompt == '出一份上个月的账单报告':
+                import legacy_bill_ui
+                legacy_bill_ui.open_picker()
+            elif prompt == '查看操作记录':
                 st.session_state['operation-records-open'] = True
             else:
                 _ask(prompt)

@@ -19,6 +19,7 @@ from tools._query_analysis import (
     AMOUNT_RATIO_THRESHOLD,
     BASELINE_DAYS,
     _anomalies,
+    _income_groups,
     _owned_txns,
     _period_bounds,
     _previous_period,
@@ -340,6 +341,7 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
     PERIOD_KINDS = {
         "monthly": re.compile(r"^\d{4}-\d{2}$"),
         "yearly": re.compile(r"^\d{4}$"),
+        "range": re.compile(r"^\d{4}-\d{2}-\d{2} 至 \d{4}-\d{2}-\d{2}$"),
     }
     if PERIOD_KINDS.get(kind) is None or not PERIOD_KINDS[kind].match(clean):
         logger.warning("kind 与 period 粒度不符：kind=%s period=%r", kind, period)
@@ -352,7 +354,7 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
         prev_rows = _owned_txns(prev_start.isoformat(), prev_end.isoformat())
         prev_total = _spend_groups(prev_rows, "category")[1]
         prev_in_sum = sum(row["amount"] for row in prev_rows if row["amount"] > 0)
-        subs = _owned_subscriptions()
+        subs = _active_subscription_facts()
         anomalies = _anomalies(rows, series, merchants)
     except ToolError as exc:
         return _fail(exc.code, exc.message)
@@ -370,6 +372,20 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
             "amount_yuan": _money(amount),
         }
         for (key, amount), pct in zip(ranked, pcts)
+    ]
+    #: Comment 10：收入也按分类聚合成同形状的 groups（占比基数是收入合计），
+    #: 界面把两张饼并排画 —— 聚合只能在工具层做，界面不重算。
+    in_totals, in_total = _income_groups(rows, "category")
+    in_ranked = sorted(in_totals.items(), key=lambda pair: (-pair[1], pair[0]))
+    in_pcts = _split_pct([amount for _, amount in in_ranked], in_total)
+    income_groups = [
+        {
+            "key": key,
+            "amount": amount,
+            "pct": pct,
+            "amount_yuan": _money(amount),
+        }
+        for (key, amount), pct in zip(in_ranked, in_pcts)
     ]
     out_sum = sum(-row["amount"] for row in rows if row["amount"] < 0)
     in_sum = sum(row["amount"] for row in rows if row["amount"] > 0)
@@ -395,21 +411,16 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
         "vs_prev_in_pct": _vs_prev_pct(in_sum, prev_in_sum),
         "anomaly_count": len(anomalies),
         "groups": groups,
-        "subscriptions": [
-            {
-                "id": sub["id"],
-                "merchant": sub["merchant"],
-                "cycle": sub["cycle"],
-                "next_charge_date": sub["next_charge_date"],
-                **_money_facts(sub["amount"], "amount"),
-            }
-            for sub in subs
-        ],
+        "income_groups": income_groups,
+        "income_group_count": len(income_groups),
+        #: Comment 7：订阅块改成网页端「管订阅」同一套组件 → facts 直接搬 T10 的 items
+        #: （带 `cycle_cn` / `amount_yuan` / 逾期标记），界面不再自己拼文案、也不另取一份数。
+        "subscriptions": subs,
     }
 
     from tools._query_analysis import KIND_LABELS
 
-    markdown = _report_markdown(clean, kind, facts, groups, facts["subscriptions"])
+    markdown = _report_markdown(clean, kind, facts, groups)
     summary = {key: value for key, value in facts.items() if isinstance(value, int)}
     data = BillReportData(markdown=markdown, summary_numbers=summary)
 
@@ -420,7 +431,21 @@ def generate_bill_report(period: str, kind: str = "monthly") -> ToolResult:
     return _ok(data.model_dump(), facts, message)
 
 
-def _owned_subscriptions() -> list[dict]:
-    """当前用户的进行中订阅（按 user_id 显式查询 → 归属由构造保证，天然无越权）。"""
-    from data import dao
-    return dao.list_subscriptions(current_user_id(), "active")
+def _active_subscription_facts() -> list[dict]:
+    """进行中订阅：**直接调 T10 `list_subscriptions("active")`**，与网页「管订阅」同一份 facts。
+
+    Comment 7 要求报告里的订阅块和「快捷场景 → 管订阅」**同一个数据源、同一套组件**：
+    界面拿到的就是这串 items（`id/merchant/cycle/cycle_cn/next_charge_date/amount_yuan`…），
+    归属由工具层按 `current_user_id()` 圈定（天然无越权）。失败一律冒泡成 `ToolError`，
+    报告整体 fail-closed —— 不拿半截订阅数据凑一块卡片。
+    """
+    from tools import subscription
+
+    listed = subscription.list_subscriptions("active")
+    if not listed.ok:
+        try:
+            code = ErrorCode(str(listed.error_code))
+        except ValueError:                              # 未知错误码 → 按参数错处理（仍是受控失败）
+            code = ErrorCode.INVALID_ARGUMENT
+        raise ToolError(code, listed.message)
+    return list(listed.facts["items"])

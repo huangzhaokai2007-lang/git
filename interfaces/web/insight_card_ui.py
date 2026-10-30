@@ -33,7 +33,10 @@ from agent.render_query import TXN_STATUS_LABELS      # 交易状态改名表（
 from interfaces.web import anomaly_card_ui, chart_ui, txn_card_ui
 
 #: 有富卡片的意图（其余意图一律不画 —— 宁可朴素，也不许拿半截数据凑图）。
-INSIGHT_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check", "bill_report")
+#: 2026-10-29（用户 Comment 9）：`bill_report` 从这张卡里**整体摘掉** —— 三格指标（支出/收入/净额）、
+#: 「接着问」按钮、「导出 / 复制这份回执」用户都不要，报告只留正文（分类饼图在 `spending_pie`、
+#: 订阅块由 `legacy_bill_ui` 挂 `subscription_ui`）。留在这里就等于把它们再画回来。
+INSIGHT_INTENTS = ("balance_query", "txn_query", "bill_analysis", "anomaly_check")
 
 #: 每个意图的追问按钮：`(按钮文案, 替用户说的那句话)`。
 #: 三列排布，文案是**给用户看的动作**，话是**真送进编排层的输入**（两者不同：按钮要短，话要完整）。
@@ -50,9 +53,6 @@ FOLLOW_UPS: dict[str, tuple[tuple[str, str], ...]] = {
     "anomaly_check": (("💰 查一下余额", "查一下余额"),
                       ("📄 看流水明细", "上个月的流水"),
                       ("🧾 出一份账单总结", "上个月的账单总结")),
-    "bill_report": (("🔍 查异常交易", "上个月有没有异常交易"),
-                    ("📊 按分类分析支出", "上个月花了多少"),
-                    ("💰 查一下余额", "查一下余额")),
 }
 
 #: 流水图最多画多少根柱子（回执表格是 `agent/render_query.TXN_ROWS` 行，这里取同一量级；
@@ -118,21 +118,11 @@ def _draw_anomalies(facts: Mapping[str, Any]) -> None:
     anomaly_card_ui.render(facts, key="anomaly")
 
 
-def _draw_report(facts: Mapping[str, Any]) -> None:
-    """F24：收/支/净三指标和收支对比；分类饼图随正文展示。"""
-    cols = st.columns(3)
-    cols[0].metric("支出合计（元）", str(facts.get("out_sum_yuan") or "—"))
-    cols[1].metric("收入合计（元）", str(facts.get("in_sum_yuan") or "—"))
-    cols[2].metric("净额（元）", str(facts.get("net_yuan") or "—"))
-    _bar([("支出", facts.get("out_sum_yuan")), ("收入", facts.get("in_sum_yuan"))], height=200)
-
-
 _DRAWERS: dict[str, Callable[[Mapping[str, Any]], None]] = {
     "balance_query": _draw_balance,
     "txn_query": _draw_txns,
     "bill_analysis": _draw_spending,
     "anomaly_check": _draw_anomalies,
-    "bill_report": _draw_report,
 }
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from data.seed import CREDIT_ID, USER_ID
-from tools import query
+from tools import query, subscription
 
 from tests.conftest import (FOREIGN_TXN, FOREIGN_AMOUNT, raw, facts_numbers, assert_covered, assert_dates_covered, assert_no_floats, txns_of)
 from tests.test_query_common import assert_facts_verbatim
@@ -68,6 +68,48 @@ def test_bill_report_lists_only_the_users_active_subscriptions(seeded: Path, for
         seeded, "SELECT merchant FROM subscription WHERE user_id = ? AND status = 'active'", (USER_ID,))}
     assert "健悦健身" not in merchants and "轻食工坊" not in merchants     # 已取消的订阅不出现
     assert foreign is not None                                            # 越权订阅见下面的用例
+
+
+def test_report_drops_the_disclaimer_and_the_text_subscription_list(seeded: Path) -> None:
+    """Comment 6 / Comment 7（2026-10-29 用户意见）：报告里那句「数字取自工具事实包」的
+    blockquote 删掉；「订阅（进行中）」不再印成文字 bullet —— 改为网页端 `subscription_ui`
+    渲染与「快捷场景 → 管订阅」同一套订阅卡（数据 = 下面的 facts["subscriptions"]）。
+
+    这里钉**工具层文案**的新口径；组件是否真的画出来由网页端用例管（`insight`/`bill` 页面测试）。
+    """
+    markdown = query.generate_bill_report("2026-08").data["markdown"]
+    assert "未经模型改写" not in markdown and "工具事实包" not in markdown
+    assert "> " not in markdown                                     # 报告里不再有 blockquote
+    assert "订阅（进行中）" not in markdown
+    assert "云音乐" not in markdown                                  # 订阅商户不再出现为文字列
+
+
+def test_report_subscriptions_are_the_same_facts_as_the_subscription_scene(seeded: Path) -> None:
+    """Comment 7 的数据口径：报告订阅块直接用 T10 `list_subscriptions("active")` 的 items
+    （含 `cycle_cn` / `amount_yuan`），界面不必自己拼文案、也不另取一份数。"""
+    report = query.generate_bill_report("2026-08")
+    listed = subscription.list_subscriptions("active")
+    assert listed.ok and report.facts["subscriptions"] == listed.facts["items"]
+    assert all({"cycle_cn", "amount_yuan", "next_charge_date"} <= set(item)
+               for item in report.facts["subscriptions"])
+
+
+def test_report_income_groups_widen_the_breakdown_to_both_sides(seeded: Path) -> None:
+    """Comment 10：标题改「收支明细」，收入分类也在**工具层**聚合好（界面只搬运，不重算）。
+
+    盈亏两边的分组形状、占比口径一致：各自按分类聚合，占比基数分别是支出合计 / 收入合计。
+    """
+    result = query.generate_bill_report("2026-03")
+    markdown = result.data["markdown"]
+    assert "## 收支明细" in markdown and "按占比" not in markdown
+    income = result.facts["income_groups"]
+    rows = raw(seeded, "SELECT category, SUM(amount) AS amount FROM txn"
+                       " WHERE amount > 0 AND substr(ts, 1, 7) = '2026-03'"
+                       " GROUP BY category ORDER BY amount DESC, category")
+    assert [(item["key"], item["amount"]) for item in income] == [(row["category"], row["amount"]) for row in rows]
+    assert sum(item["amount"] for item in income) == result.facts["in_sum"]
+    assert sum(item["pct"] for item in income) == 100
+    assert all(set(item) == {"key", "amount", "pct", "amount_yuan"} for item in income)
 
 
 def test_bill_report_on_empty_period_is_still_consistent(seeded: Path) -> None:

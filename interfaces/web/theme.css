@@ -34,7 +34,7 @@ button:focus-visible{outline:2px solid var(--bank-accent);outline-offset:3px}
 .st-key-subs-banner-dismiss button[kind]:hover{background:#ffffff08;color:var(--bank-title)}
 .st-key-detail-balance button[kind]{width:28px;height:28px;min-height:28px;padding:3px;border:0;background:transparent;box-shadow:none;border-radius:50%}
 .st-key-detail-balance button[kind]:hover{background:#24262b;border:0;box-shadow:none}
-.st-key-reveal-open button[kind],.st-key-detail-close button[kind],.st-key-lock-open button[kind],.st-key-lost-open button[kind]{box-sizing:border-box;width:144px;max-width:100%;height:40px;min-height:40px}
+.st-key-reveal-open button[kind],.st-key-detail-close button[kind],.st-key-limit-open button[kind],.st-key-lock-open button[kind],.st-key-lost-open button[kind]{box-sizing:border-box;width:144px;max-width:100%;height:40px;min-height:40px}
 [class*="st-key-scene-item-"],[class*="st-key-scene-active-"]{margin:0!important}
 [class*="st-key-scene-item-"] button[kind],[class*="st-key-scene-active-"] button[kind]{justify-content:flex-start;text-align:left;min-height:37px;padding:6px 12px;font-size:14px;background:transparent;border:0;box-shadow:none}
 [class*="st-key-scene-item-"] button[kind]:hover,[class*="st-key-scene-active-"] button[kind]:hover{background:#1c1d21;border:0;box-shadow:none}

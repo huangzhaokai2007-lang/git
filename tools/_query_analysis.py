@@ -36,7 +36,7 @@ NIGHT_START_HOUR = 23       # 凌晨时段开始
 NIGHT_END_HOUR = 6          # 凌晨时段结束
 VELOCITY_MINUTES_T4 = 60    # 短时高频窗口（分钟）
 VELOCITY_MIN_TXNS = 3       # 短时高频笔数阈值
-KIND_LABELS = {"monthly": "月度", "yearly": "年度"}
+KIND_LABELS = {"monthly": "月度", "yearly": "年度", "range": "区间"}
 
 #: 周期展示文案（**仅展示**，不改枚举值）。与 `tools/subscription.py` 的 `CYCLE_LABELS` 同口径 ——
 #: 两侧必须一致，`tests/test_tools_subscription_cancel.py` 钉住了这一点。
@@ -126,6 +126,14 @@ def _period_bounds(period: str) -> tuple[date, date]:
     非法账期（含 13 月这类越界月份）**必须抛 `ToolError`** 而不是 `ValueError`：后者会穿透
     工具层直接炸栈，`tests/test_query_analysis.py` 的非法账期用例钉住了这一口径。
     """
+    if isinstance(period, str) and ' 至 ' in period:
+        try:
+            start, end = (date.fromisoformat(value) for value in period.split(' 至 '))
+            if start > end:
+                raise ValueError('reversed range')
+            return start, end
+        except ValueError:
+            raise ToolError(ErrorCode.INVALID_ARGUMENT, '账期日期范围不正确')
     match = _PERIOD_RE.match(period.strip()) if isinstance(period, str) else None
     if match is None or (match.group(2) and not 1 <= int(match.group(2)) <= 12):
         raise ToolError(ErrorCode.INVALID_ARGUMENT, "账期格式不对")
@@ -139,6 +147,10 @@ def _period_bounds(period: str) -> tuple[date, date]:
 def _previous_period(period: str) -> str:
     """上一个同长度账期。"""
     period = period.strip()
+    if ' 至 ' in period:
+        start, end = _period_bounds(period)
+        previous_end = start - timedelta(days=1)
+        return f'{(previous_end - (end - start)).isoformat()} 至 {previous_end.isoformat()}'
     if len(period) == 7:  # YYYY-MM
         d = date.fromisoformat(f"{period}-01")
         if d.month == 1:
@@ -199,6 +211,20 @@ def _spend_groups(rows: list[dict], group_by: str) -> tuple[dict[str, int], int]
             totals[key] += abs(row["amount"])
     total = sum(totals.values())
     return dict(totals), total
+
+
+def _income_groups(rows: list[dict], group_by: str) -> tuple[dict[str, int], int]:
+    """按维度分组统计收入（正金额）。返回 ({key: amount}, total)。
+
+    Comment 10「收入饼图要与支出饼同比」：收入的分类聚合必须在**工具层**算好放进 facts，
+    界面只搬运（`interfaces/web/spending_pie.py` 不求和、不排序、不算占比）。
+    """
+    totals = defaultdict(int)
+    for row in rows:
+        if row["amount"] > 0:  # 收入
+            key = row.get(group_by, "未知")
+            totals[key] += row["amount"]
+    return dict(totals), sum(totals.values())
 
 
 def _split_pct(amounts: list[int], total: int) -> list[int]:
@@ -355,8 +381,16 @@ def _delta_line(label: str, diff: int, abs_yuan: str, prev_yuan: str, now_yuan: 
     return f"- 较上一账期{label}：{word}{change}（上期 {prev_yuan} 元 → 本期 {now_yuan} 元，{pct}%）"
 
 
-def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict], subs: list[dict]) -> str:
-    """生成 Markdown 账单报告：每个数字都从 `facts` 取（幻觉红线）。"""
+def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict]) -> str:
+    """生成 Markdown 账单报告：每个数字都从 `facts` 取（幻觉红线）。
+
+    2026-10-29 用户界面意见（三条都落在这里，界面侧见 `_draw_report` 的接任者）：
+    - Comment 6：末尾那句「数字取自工具事实包」的 blockquote 删掉（用户不看免责声明）；
+    - Comment 7：「订阅（进行中）」**不再印成文字 bullet** —— 网页端由 `subscription_ui`
+      画出与「快捷场景 → 管订阅」同一套订阅卡（数据同为 `list_subscriptions` 的 facts）；
+    - Comment 10：「支出明细（按占比）」改名「收支明细」；收支两张饼并排由 `spending_pie`
+      画（它原位替换这张支出表），收入分类走 `facts["income_groups"]`。
+    """
     lines = [f"# {KIND_LABELS[kind]}账单报告 · {period}", "", "## 总览",
              f"- 本期支出合计：{facts['out_sum_yuan']} 元（{facts['out_count']} 笔）",
              f"- 本期收入合计：{facts['in_sum_yuan']} 元（{facts['in_count']} 笔）",
@@ -367,13 +401,9 @@ def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict], su
     if facts["vs_prev_in_pct"] is not None:
         lines.append(_delta_line("收入", facts["vs_prev_in_diff"], facts["vs_prev_in_diff_abs_yuan"],
                                  facts["prev_in_sum_yuan"], facts["in_sum_yuan"], facts["vs_prev_in_pct"]))
-    lines += ["", "## 支出明细（按占比）", "| 项目 | 金额（元） | 占比 |", "| --- | --- | --- |"]
+    lines += ["", "## 收支明细", "| 项目 | 金额（元） | 占比 |", "| --- | --- | --- |"]
     lines += [f"| {group['key']} | {group['amount_yuan']} | {group['pct']}% |" for group in groups]
-    lines += ["", "## 订阅（进行中）"]
-    lines += ([f"- {sub['merchant']}：{sub['amount_yuan']} 元／{CYCLE_LABELS[sub['cycle']]}，下次扣费 {sub['next_charge_date']}"
-               for sub in subs] or ["- 无"])
-    lines += ["", "## 异常提示", f"本期发现 {facts['anomaly_count']} 笔可疑交易（详见异常检测结果）。", "",
-              "> 本报告全部数字取自工具事实包，未经模型改写。"]
+    lines += ["", "## 异常提示", f"本期发现 {facts['anomaly_count']} 笔可疑交易（详见异常检测结果）。"]
     return "\n".join(lines)
 
 
@@ -389,7 +419,7 @@ VELOCITY_MIN_TXNS = 3               # 来源：卡 04 第 3 条「≥3 笔」
 
 CYCLE_LABELS = {"monthly": "每月", "yearly": "每年"}
 
-KIND_LABELS = {"monthly": "月度", "yearly": "年度"}
+KIND_LABELS = {"monthly": "月度", "yearly": "年度", "range": "区间"}
 
 REASON_AMOUNT_JUMP, REASON_NIGHT, REASON_VELOCITY = "金额显著高于近期均值", "凌晨时段交易", "同商户短时密集交易"
 #: T4 第 4 条规则（规格 §2 T4 备注，SPEC-CHANGE b84ac38 定稿）：过去 90 天该 user 无交易的 counterparty

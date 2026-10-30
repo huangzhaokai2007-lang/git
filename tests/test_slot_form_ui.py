@@ -76,7 +76,7 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     assert not any(button.label == "继续" for button in app.button), "补齐后不该还有填表卡"
     next(button for button in app.button if button.key == 'confirm-cancel').click().run()
     assert app.session_state['workspace-result']['turn']['trace_id'] == original
-    assert any(button.label == '📊 按分类分析支出' for button in app.button)
+    assert any(button.key == 'bill-range-go' for button in app.button)
 
 
 def test_form_waits_for_the_payee_picker(monkeypatch: pytest.MonkeyPatch) -> None:

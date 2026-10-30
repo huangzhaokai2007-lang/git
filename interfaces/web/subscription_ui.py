@@ -82,8 +82,12 @@ def banner(summary: Mapping[str, Any], *, ask: Callable[[str], None]) -> None:
 
 
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
-                key_prefix: str = "subs") -> None:
-    """紧贴订阅列表 / 订阅提醒回执，逐行渲染「取消订阅」入口。"""
+                key_prefix: str = "subs", heading: str = "订阅管理 · 可直接取消") -> None:
+    """紧贴订阅列表 / 订阅提醒回执，逐行渲染「取消订阅」入口。
+
+    `heading` 只在**账单报告**里换一行标题（「订阅（进行中）」）——组件、数据、按钮行为
+    全都是同一套：报告里的订阅块就是「快捷场景 → 管订阅」那一块，不再另印一份文字清单。
+    """
     intent = turn.get("intent")
     if intent not in ("subscription_list", "subscription_remind") or turn.get("error_code"):
         return
@@ -94,7 +98,7 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
         return
     if intent == "subscription_list" and str(facts.get("status") or "active") != CANCELLABLE:
         return                                   # 已取消 / 已暂停：只读记录，不给按钮
-    st.markdown("#### 订阅管理 · 可直接取消")
+    st.markdown(f"#### {heading}")
     st.markdown("点「取消订阅」会走正常流程：确认卡 → 确认后才生效。")
     #: 逾期项排前面（扣费日已过，更需要处理）；它们同样是 active，可以取消。
     for item in overdue:

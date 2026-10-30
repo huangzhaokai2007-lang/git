@@ -235,6 +235,8 @@ T_NEED_RISK = ("您还没有完成风险测评，暂时不能买理财。\n\n"
 
 
 def tool_error(error_code: str | None, detail: str) -> str:
+    if error_code == "OVER_LIMIT" and detail.startswith("超过单笔转账上限"):
+        return "超过单笔转账上限"
     if error_code == "INVALID_STATE" and ("风险测评" in detail or "风险评估" in detail):
         return T_NEED_RISK
     if error_code in _REFUSED_CODES:                     # 业务拒绝：换成「不能办理」

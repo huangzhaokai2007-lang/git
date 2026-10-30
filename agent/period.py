@@ -73,6 +73,8 @@ def resolve_period(value: object) -> str | None:
     text = str(value or "").strip()
     if re.fullmatch(r"\d{4}-\d{2}", text) or re.fullmatch(r"\d{4}", text):
         return text
+    if re.fullmatch(r'\d{4}-\d{2}-\d{2} 至 \d{4}-\d{2}-\d{2}', text):
+        return text
     canonical = normalize_relative_period(text)
     return None if canonical is None else month_shift(RELATIVE_PERIOD_OFFSETS[canonical])
 

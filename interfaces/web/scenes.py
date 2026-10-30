@@ -10,7 +10,6 @@ from __future__ import annotations
 
 SCENES: tuple[tuple[str, str], ...] = (
     ("看账单", "出一份上个月的账单报告"),
-    ("转账", "给王五转 100 元"),
     ("收款人", "我的收款人有哪些"),
     ("管订阅", "我有哪些订阅"),
     ("管卡", "卡片查询"),
@@ -24,6 +23,6 @@ SCENES: tuple[tuple[str, str], ...] = (
 )
 
 SCENE_ICONS = tuple(f":material/{name}:" for name in (
-    "receipt_long", "swap_horiz", "group", "autorenew", "credit_card",
+    "receipt_long", "group", "autorenew", "credit_card",
     "tune", "monitoring", "grid_view", "shield_person", "lock", "credit_card_off", "history",
 ))

@@ -60,15 +60,17 @@ def test_chat_query_replaces_current_business_and_retains_history(monkeypatch, s
     before = list(at.session_state['messages'])
     original = card_binding_flow.handle
     def reply(text, **kwargs):
-        if text.startswith('出一份') and text.endswith('账单报告'):
+        if text.endswith('账单报告'):
             return orchestrator.Turn(trace_id='bill-test', intent='bill_report',
                                      reply='2026-08 账单：支出 9,152.00 元\n| 电商 | 4,370.00 | 48% |\n| 转账 | 3,000.00 | 32% |')
         return original(text, **kwargs)
     monkeypatch.setattr(card_binding_flow, 'handle', reply)
     at.chat_input[0].set_value('出一份上个月的账单报告').run()
     assert not any(i.label == '银行卡密码' for i in at.text_input)
+    assert any(b.key == 'bill-range-go' for b in at.button)
+    click(at, '生成账单报告')
     assert any('2026-08 账单' in item.value for item in at.markdown)
-    assert any(item.label == '📊 这份账单的图表' for item in at.expander)
+    assert not any(item.label == '📊 这份账单的图表' for item in at.expander)
     assert at.session_state['messages'][:len(before)] == before
     assert at.session_state['workspace-result']['scene'] == 'bills'
     assert len(at.chat_input) == 1

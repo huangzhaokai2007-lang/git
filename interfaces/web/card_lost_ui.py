@@ -183,7 +183,8 @@ def records(executor: ThreadPoolExecutor, session: str, *, prefix: str = 'panel'
 
 def render(executor: ThreadPoolExecutor, session: str, *, show_button: bool = True) -> None:
     state = _state(executor, session)
-    if show_button and st.button('挂失并补卡', key='lost-open'):
+    if show_button and st.button('挂失并补卡', key='lost-open', width='stretch'):
+        # 2026-10-29（Comment 12/13）：与「调整额度 / 临时锁卡」同一宽度规格。
         import card_lock_ui
         card_lock_ui.reset()
         accept_turn(executor, session, 'card_lost')

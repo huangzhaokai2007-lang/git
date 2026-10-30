@@ -112,6 +112,9 @@ def handle(text: str, *, history: list[str] | None = None, clarify_round: int = 
 
 def _resolve_intent(text: str, history: list[str] | None) -> classifier.IntentOut:
     """仅完整匹配明确查询指令；含写操作或其它条件的表达仍交由原分类器。"""
+    if str(text).split("\n", 1)[0].strip() == '给某人转账':
+        return classifier.IntentOut(intent='transfer_single', confidence=1.0,
+                                    slots={}, missing_slots=['payee', 'amount'])
     if card_request_language.recognize(text):
         return classifier.IntentOut(intent="card_query", confidence=1.0, slots={})
     #: 订阅卡上的「取消订阅」按钮是**界面固定句式**（`interfaces/web/subscription_ui.py`）：

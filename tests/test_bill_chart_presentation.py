@@ -21,7 +21,22 @@ def test_pie_animation_lifecycle_and_safe_labels():
 
 
 def test_report_replaces_only_category_table_and_has_no_duplicate_breakdown(monkeypatch):
+    """账单总结只留「正文分类明细」：不再画「支出 / 收入」对比柱图，也不再出那张指标卡。
+
+    2026-10-29：先按 Comment 5 删掉卡片里那张只有两根柱子的「支出 / 收入」对比图；
+    随后按 Comment 9（「看账单里的异常提醒下方的收入支出以及柱状图…这一整块都删了」）
+    把那张洞察卡**整块**删掉 —— 三格指标、接着问、导出都不再出现。新契约钉在**页面**上：
+
+    1. 三格指标（支出合计 / 收入合计 / 净额）**不再上屏**；
+    2. **账单总结这张卡自己不再画图**：问完后页面只多出账单面板那张「月度趋势」折线
+       （单账期一个点），全页找不到一根把「支出 / 收入」当横坐标的柱子；
+    3. 分类明细仍只在正文里以动画饼图出现一次（原表格被它替换），不重复成 `st.dataframe`，
+       而回执原文照旧保留（审计要能回看原始文本）。
+    """
     at = _app(monkeypatch)
+    #: Comment 8 起的口径：账单场景先选时间段才展示正文 —— 预置 = 「用户已经选过 2026-08」。
+    at.session_state['bill-range'] = ('2026-08-01', '2026-08-31')
+    baseline = len(at.get('vega_lite_chart'))        # 还没问之前页面上的图，用来量「新增了几张」
     at.chat_input[0].set_value('上个月的账单总结').run()
     assert not at.exception
     page = _text(at)
@@ -31,20 +46,18 @@ def test_report_replaces_only_category_table_and_has_no_duplicate_breakdown(monk
     assert len(pies) == 1
     payload = json.loads(pies[0].proto.json)
     turn = at.session_state['messages'][-1]['turn']
-    assert payload['groups'] == turn['facts']['groups']
+    facts = turn['facts']
+    assert turn['intent'] == 'bill_report'
+    assert payload['groups'] == facts['groups']
     assert '| 项目 | 金额（元） | 占比 |' in turn['reply']  # Audit/original reply remains intact.
-    assert not at.dataframe
-    charts = at.get('vega_lite_chart')
-    assert len(charts) == 2  # income/expense comparison and monthly trend
-    for chart in charts:
-        spec = json.loads(chart.proto.spec)
-        assert spec['encoding']['x']['axis']['labelAngle'] == 0
-        rows = pa.ipc.open_stream(chart.proto.data.data).read_all().to_pylist()
-        assert rows and all('label' in row and 'amount' in row for row in rows)
-    assert pa.ipc.open_stream(charts[0].proto.data.data).read_all().to_pylist() == [
-        {'label': '支出', 'amount': 9152.0}, {'label': '收入', 'amount': 11046.0}]
-    assert pa.ipc.open_stream(charts[1].proto.data.data).read_all().to_pylist() == [
-        {'label': '2026-08', 'amount': 9152.0}]
+    assert not at.dataframe                                # 分类明细只以饼图出现，不再重复一张表
+    # ① Comment 9：报告那张洞察卡整块删了 —— 页面上不该再有 支出合计/收入合计/净额 三格指标
+    metrics = {str(metric.label): str(metric.value) for metric in at.metric}
+    assert '支出合计（元）' not in metrics and '收入合计（元）' not in metrics
+    assert '净额（元）' not in metrics
+    # 独立趋势面板已移除，报告中的收支饼图仍由上面的事实包断言覆盖。
+    assert len(at.get('vega_lite_chart')) == baseline
+    assert not any('这份账单的图表' in element.label for element in at.expander)
 
 
 def test_pie_is_retained_in_chat_history_without_repeating_in_bill_panel(monkeypatch):
@@ -64,6 +77,9 @@ def test_pie_is_retained_in_chat_history_without_repeating_in_bill_panel(monkeyp
 def test_pie_selection_loads_details_without_appending_chat_and_caches_redraw(monkeypatch):
     from agent import bill_detail_flow
     at = _app(monkeypatch)
+    #: Comment 8 起的口径：账单场景先选时间段才展示正文 —— 预置 = 「用户已经选过 2026-08」，
+    #: 否则正文（含那张饼图）压根不上屏，选中态也就无处落。
+    at.session_state['bill-range'] = ('2026-08-01', '2026-08-31')
     at.chat_input[0].set_value('上个月的账单总结').run()
     messages = list(at.session_state['messages'])
     turn = messages[-1]['turn']

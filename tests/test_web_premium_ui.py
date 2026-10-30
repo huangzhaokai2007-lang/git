@@ -107,7 +107,7 @@ def test_transfer_turn_renders_without_exception(monkeypatch: pytest.MonkeyPatch
     assert not app.exception, app.exception
 
 
-def test_payee_card_transfer_button_actually_dispatches(monkeypatch) -> None:
+def test_payee_card_transfer_button_opens_inline_amount(monkeypatch) -> None:
     """用户实测 bug：点专属卡的「转账」**毫无反应**。
 
     根因：`payee_detail_ui._dispatch` 写的是 `last-turn` / `pending-*` 这些**不存在的会话键**，
@@ -119,6 +119,8 @@ def test_payee_card_transfer_button_actually_dispatches(monkeypatch) -> None:
     app.chat_input[0].set_value("我的收款人有哪些").run()
     assert not app.exception, app.exception
     before = len(app.session_state["messages"])
+    next(button for button in app.button if "王五" in button.label and str(button.key).startswith("payee-open-")).click().run()
     next(button for button in app.button if button.label == "转账").click().run()
     assert not app.exception, app.exception
-    assert len(app.session_state["messages"]) > before, "点「转账」后会话里没有新增回执"
+    assert len(app.session_state["messages"]) == before
+    assert any(field.label == "转账金额（元）" for field in app.text_input)

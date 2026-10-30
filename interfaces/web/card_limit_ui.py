@@ -156,7 +156,8 @@ def _panel(executor: ThreadPoolExecutor, session_id: str, state: dict) -> None:
 
 def render(executor: ThreadPoolExecutor, session_id: str, *, show_button: bool = True) -> None:
     state = _state(executor, session_id)
-    if show_button and st.button("调整额度", key="limit-open"):
+    if show_button and st.button("调整额度", key="limit-open", width=144):
+        # 与相邻的卡片操作按钮保持相同宽度。
         state.update(open=True, kind=None, selected=None, preview=None, result=None, error=None)
         st.session_state.pop("limit-amount", None)
     if state["open"]:
@@ -186,12 +187,3 @@ def records(executor: ThreadPoolExecutor) -> None:
                    "类型": i["kind_cn"], "原额度（元）": i["old_limit_yuan"], "申请额度（元）": i["target_yuan"],
                    "核准额度（元）": i["approved_limit_yuan"], "状态": i["status_cn"]} for i in filtered],
                  hide_index=True, width="stretch")
-    for item in filtered:
-        with st.expander(f"申请详情 · {item['card_no_mask']} · {item['status_cn']} · {item['id']}"):
-            st.write(item["reason"])
-            st.write(f"生效时间：{item['effective_at'] or '尚未生效'}")
-            if item["expires_at"]:
-                st.write(f"{'申请期限截止' if item['status'] != 'approved' else '到期时间'}：{item['expires_at']}")
-                if item["expired"]:
-                    st.info("此笔临时申请已到期；当前生效额度以银行卡额度查询为准。")
-            st.caption(f"审计追踪：{item['trace_id']}")
