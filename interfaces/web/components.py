@@ -235,7 +235,8 @@ def _evidence(confirmation: Any) -> None:
     premium_ui.evidence(confirmation)
 
 
-def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
+def confirm_card(confirmation: Any, *, compact: bool = False,
+                 edit_panel: Callable[[], None] | None = None) -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     if compact:
         st.markdown('**核对修改**')
@@ -293,6 +294,10 @@ def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
                         width="stretch"):
             st.session_state["card-edit-open"] = not opened
             st.rerun()
+        #: 2026-10-30（用户要求）：修改面板做成**卡内抽屉** —— 就在这张卡里往下展开，
+        #: 不再是页面上另起一块（用户："要有个拉开的效果"）。
+        if opened and edit_panel is not None:
+            edit_panel()
     return None
 
 

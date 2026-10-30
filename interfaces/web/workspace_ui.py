@@ -254,7 +254,5 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
     if not inline_confirmation_rendered and not (
             scene in ('aa_list', 'aa_collect') and st.session_state.get('bound-aa-query')):
         confirmation()
-    #: 2026-10-30（用户要求）：「修改这张确认卡」放在**确认卡下方**（原来在上方，
-    #: 用户点「修改」后眼睛要往上找，很别扭）。
-    if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent') == 'transfer_single'):
-        card_edit_ui.render(executor, session)
+    #: 2026-10-30：修改面板已作为**确认卡内部抽屉**渲染（见 components.confirm_card），
+    #: 这里不再单独画，避免页面上出现两块一样的编辑区。

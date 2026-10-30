@@ -258,10 +258,34 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
                                               str(preview.facts.get("tier") or "L2"),
                                               factors=preview.facts.get("factors") or [])
-    return Prepared(ok=True,
-                    facts={**preview.facts, "tier": tier, "payee_phone": masked,
-                           "schedule": str(filled["schedule"]), "quota_note": quota_note},
-                    credential=str(preview.data["preview_token"]))
+    facts = {**preview.facts, "tier": tier, "payee_phone": masked,
+             "schedule": str(filled["schedule"]), "quota_note": quota_note}
+    #: 2026-10-30（用户实测「产生了 bug」）：同收款人 + 同金额 + **同一天**已经有一笔待执行预约时，
+    #: 卡面给一行警示（不阻止 —— 可能你就是要再建一笔），避免"悄悄多出一笔"。
+    duplicate = _duplicate_schedule(filled, facts)
+    if duplicate:
+        facts["duplicate_hint"] = duplicate
+    return Prepared(ok=True, facts=facts, credential=str(preview.data["preview_token"]))
+
+
+def _duplicate_schedule(filled: dict, facts: Mapping) -> str:
+    """返回重复提示文案（没有重复 → 空串）。只比对**待执行**的预约。"""
+    from agent import schedule_flow
+
+    amount = int(facts.get("amount_cents") or 0)
+    when = str(facts.get("schedule") or "")[:10]
+    name = str(facts.get("payee_name") or "")
+    try:
+        pending = schedule_flow.pending_schedules()
+    except Exception:                              # noqa: BLE001 —— 只读守卫，失败不影响出卡
+        return ""
+    for item in pending:
+        if (str(item.get("payee_name")) == name
+                and int(item.get("amount") or item.get("amount_cents") or 0) == amount
+                and str(item.get("execute_at"))[:10] == when):
+            return (f"你已有一笔相同预约（{str(item['execute_at']).replace('T', ' ')} "
+                    f"向 {name} {item.get('amount_yuan')} 元）；确认后会**再建一笔**")
+    return ""
 
 
 def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
@@ -283,6 +307,8 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
         rows.insert(3, ("循环方式", cycle))
         if filled.get("repeat_until"):
             rows.insert(4, ("循环结束", f"{filled['repeat_until']}（之后不再续期）"))
+    if facts.get("duplicate_hint"):                        # 重复预约：卡面点明，别静默多建一笔
+        rows.append(("⚠️ 重复提示", str(facts["duplicate_hint"])))
     return confirm_card.CardInput(
         title="定时转账确认卡", intent_cn="定时转账", rows=rows,
         tier=tier, requires_otp=requires_otp,

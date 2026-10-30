@@ -51,9 +51,19 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
         changed: dict[str, str] = {}
         for field in draft.fields:
-            new = _field(field)
+            new = _field(field, draft.kind)
             if new and new != field.value:
                 changed[field.name] = new
+        if draft.kind == "transfer_scheduled":          # 循环频率：一次性 / 每日 / 每周 / 每月
+            cycle_now = _current_cycle(executor, session_id)
+            labels = list(_REPEAT_OPTIONS)
+            picked = st.selectbox("循环频率", labels, index=labels.index(_CYCLE_LABEL.get(cycle_now,
+                                                                                        "（一次性）")),
+                                  key="edit-repeat")
+            picked_code = _REPEAT_OPTIONS[picked]
+            if picked_code != (cycle_now or ""):
+                #: 「一次性」在槽位里用「不循环」表达（`repeat_cycle` 认不出 → None = 一次性）
+                changed["repeat"] = picked_code or "不循环"
         col_ok, col_tip = st.columns([1, 3], vertical_alignment="center")
         if col_ok.button("按修改重新预检", key=f"recheck-{draft.kind}", type="primary",
                          disabled=not changed, width="stretch"):
@@ -64,9 +74,20 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         col_tip.caption("改完自动重走收款人解析与风控；确认/验证码按卡片提示回复。")
 
 
-def _field(field) -> str:
+#: 循环频率选项（label → 周期码；空串 = 一次性，提交时转成「不循环」）
+_REPEAT_OPTIONS = {"（一次性）": "", "每日": "daily", "每周": "weekly", "每月": "monthly"}
+_CYCLE_LABEL = {"daily": "每日", "weekly": "每周", "monthly": "每月"}
+
+
+def _current_cycle(executor: ThreadPoolExecutor, session_id: str) -> str:
+    """在途确认卡当前记的循环周期（来自 agent 层，界面不自己推断）。"""
+    confirmation = executor.submit(confirm_card.current, session_id).result()
+    return str(((getattr(confirmation, "filled", None) or {}).get("repeat_cycle") or ""))
+
+
+def _field(field, kind: str) -> str:
     """一个字段的输入控件；**时间类字段一律用日历**（schedule 带时刻，date/expire 只选日期）。"""
-    key = f"edit-{field.kind}-{field.name}"
+    key = f"edit-{kind}-{field.name}"
     if field.name == "schedule":
         value, too_early = time_inputs.datetime_field(field.label, key)
         return "" if too_early else value

@@ -27,6 +27,7 @@ import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
 import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
+import card_edit_ui
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
 import workspace_ui                                             # noqa: E402
 
@@ -213,7 +214,10 @@ def _render_confirm(*, inline: bool = False) -> None:
                 _confirm_submit(action[1], inline=inline, display="（短信验证码已提交，值不回显）")
             st.rerun()
         return
-    action = ui.confirm_card(confirmation, compact=inline)
+    #: 2026-10-30（用户要求）：修改面板做成**确认卡内部抽屉**（点「✏️ 修改」在这张卡里展开）
+    action = ui.confirm_card(
+        confirmation, compact=inline,
+        edit_panel=lambda: card_edit_ui.render(_agent_executor(), st.session_state["session_id"]))
     if action == "confirm":
         _confirm_submit("确认", inline=inline)
         st.rerun()
