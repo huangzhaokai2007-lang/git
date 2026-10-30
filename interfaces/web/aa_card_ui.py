@@ -239,7 +239,11 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             slots = {"payee_ids": people, "amount": plan["total_yuan"]}
             if title.strip():
                 slots["title"] = title.strip()
-            filled = {name: value.strip() for name, value in amounts.items() if value.strip()}
+            #: 2026-10-30 修：默认值就是均摊值，**不要**当"按人金额"发下去 ——
+            #: 含我口径下 Σ每人 ≠ 含我总额，会被判「每人金额合计与总金额不符」，
+            #: 卡面停在发起态 → 用户再点一次又会触发收款人解析（用户实测的"还是会解析"）。
+            filled = {name: value.strip() for name, value in amounts.items()
+                      if value.strip() and value.strip() != plan["per_yuan"]}
             if filled:
                 slots["amounts"] = "、".join(f"{name} {value}" for name, value in filled.items())
             _start(executor, session_id, "aa_collect", slots,

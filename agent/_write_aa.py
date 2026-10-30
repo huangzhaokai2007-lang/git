@@ -136,11 +136,14 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
         else:
             filled["amount_cents"] = cents
     if filled.get("per_person_cents") and filled.get("amount_cents") is not None:
-        total = sum(filled["per_person_cents"])
-        if total != filled["amount_cents"]:
+        shares = sum(filled["per_person_cents"])
+        #: 2026-10-30（含我口径）：Σ每人只要求 **不超过** 含我总额，
+        #: 差额就是我承担的那一份（`amount_cents` 是含我总额，卡面上写的 300）。
+        if shares > filled["amount_cents"]:
             return ShapeResult(filled=filled, error_code="INVALID_ARGUMENT",
-                               message=f"每人金额合计 {total / 100:.2f} 元，与总金额 "
-                                       f"{filled['amount_cents'] / 100:.2f} 元不符，请改一个")
+                               message=f"每人金额合计 {shares / 100:.2f} 元，超过群收款总额 "
+                                       f"{filled['amount_cents'] / 100:.2f} 元，请改一个")
+        filled["my_share_cents"] = filled["amount_cents"] - shares
     return ShapeResult(filled=filled, missing=missing, clarify=clarify,
                        candidates=candidates)
 
