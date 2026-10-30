@@ -155,6 +155,8 @@ def _preset(executor: ThreadPoolExecutor, session_id: str) -> dict:
     item = executor.submit(pending_slots.peek, session_id).result() or {}
     slots = dict(item.get("slots") or {})
     names = [str(name) for name in (slots.get("aa_names") or []) if str(name).strip()]
+    #: 已解析成 id 的名单：卡面优先用它预填（同名也唯一）
+    ids = [str(pid) for pid in (slots.get("payee_ids") or []) if str(pid).startswith("payee_")]
     if not names and slots.get("payee_ids"):
         names = [str(pid) for pid in slots["payee_ids"]]
     amount = slots.get("amount")
@@ -162,7 +164,8 @@ def _preset(executor: ThreadPoolExecutor, session_id: str) -> dict:
         total = float(str(amount)) if amount not in (None, "") else 0.0
     except ValueError:
         total = 0.0
-    return {"names": names, "total": total, "title": str(slots.get("title") or "")}
+    return {"names": names, "ids": ids, "total": total,
+            "title": str(slots.get("title") or "")}
 
 
 def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
@@ -170,13 +173,17 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     preset = _preset(executor, session_id)
     if (preset["names"] and not st.session_state.get("aa-people")
             and not st.session_state.get("aa-people-touched")):
-        #: 预填：把上一句解析出的**姓名**映射成 id（同名就不猜，留给用户自己选）
-        catalog_now = list(_normalize_candidates(executor.submit(aa_flow.candidates).result()).values())
-        preset_ids = []
-        for name in preset["names"]:
-            matches = [item["id"] for item in catalog_now if item["name"] == name]
-            if len(matches) == 1:
-                preset_ids.append(matches[0])
+        #: 预填（2026-10-30 修）：**优先用已解析出来的 payee_id**（`preset["ids"]`，
+        #: 同名两位也唯一确定）；没有 id 时才退回按姓名映射，且只在姓名唯一时采用。
+        catalog_now = list(_normalize_candidates(
+            executor.submit(aa_flow.candidates).result()).values())
+        known = {item["id"] for item in catalog_now}
+        preset_ids = [pid for pid in preset.get("ids", []) if pid in known]
+        if not preset_ids:
+            for name in preset["names"]:
+                matches = [item["id"] for item in catalog_now if item["name"] == name]
+                if len(matches) == 1:
+                    preset_ids.append(matches[0])
         if preset_ids:
             st.session_state["aa-people"] = preset_ids
             st.session_state["aa-picked"] = preset_ids

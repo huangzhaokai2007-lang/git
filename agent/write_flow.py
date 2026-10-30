@@ -330,7 +330,10 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
         if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
             ask = f"{_dedupe_lines(shaped.clarify)}\n请补充：{'、'.join(absent)}。"
         #: 2026-10-27：登记「还差什么」，让用户下一句短答能**续接补槽**（不再被当新意图）。
-        pending_slots.remember(session_id, intent, dict(slots), list(shaped.missing))
+        #: 2026-10-30：登记**解析之后**的槽位（`filled` 里已有 payee_id / aa_names），
+        #: 否则下一轮卡面拿到的是原始姓名，同名就没法回填（用户实测"解析完人没进参与人"）。
+        pending_slots.remember(session_id, intent, {**dict(slots), **dict(shaped.filled)},
+                               list(shaped.missing))
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
     #: 2026-10-30（用户实测）：走到这里说明**不再缺槽**（要出卡/要执行了），
