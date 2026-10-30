@@ -58,11 +58,13 @@ def test_confirm_button_disabled_until_people_picked(monkeypatch: pytest.MonkeyP
     app.chat_input[0].set_value("发起群收款").run()
     assert not app.exception, app.exception
     labels = [box.label for box in app.number_input]
-    assert any("群收款总金额" in label for label in labels)
-    assert any(button.label.startswith("参与人数") for button in app.button)
-    next(button for button in app.button if button.label.startswith("参与人数")).click().run()
-    confirm = next(button for button in app.button if button.label == "确认参与人")
-    assert confirm.disabled is True, "没选人时「确认参与人」必须不可按"
+    assert any("总金额（元）" in label for label in labels)
+    #: 2026-10-30：参与人编辑收进 expander（面板里挑人）；没挑人时「添加所选」不可按
+    assert any("修改参与人" in str(element.label) for element in app.expander)
+    add = next(button for button in app.button if button.label == "添加所选")
+    assert add.disabled is True, "没挑人时「添加所选」必须不可按"
+    captions = "\n".join(str(element.value) for element in app.caption)
+    assert "还没有参与人" in captions
 
 
 def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -70,17 +72,17 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     app = _app(monkeypatch)
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
-    next(button for button in app.button if button.label.startswith("参与人数")).click().run()
-    app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，确认按钮才会解禁
-    next(button for button in app.button if button.label == "确认参与人").click().run()
+    app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，添加按钮才会解禁
+    next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
-    captions = "\n".join(str(element.value) for element in app.caption)
-    assert "含我" in captions and "我承担" in captions and "待收" in captions
+    all_text = "\n".join(str(element.value) for element in app.markdown)
+    assert "含我" in all_text                             # 参与人区块：2 人（含我）
     marks = "\n".join(str(element.value) for element in app.markdown)
     assert "均摊金额" in marks and "¥ 150.00" in marks      # 大字均摊金额（300 / 2 份）
-    labels = [button.label for button in app.button]
-    assert any(label.startswith("按人设置金额") for label in labels)
-    assert "发起群收款" in labels
+    assert "我承担 150.00 元" in marks and "待收" in marks
+    #: 「按人设置金额」也收进 expander 了
+    assert any("按人设置金额" in str(element.label) for element in app.expander)
+    assert any(button.label == "发起群收款" for button in app.button)
 
 
 def test_aa_card_has_no_policy_lines(seeded, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -93,3 +95,176 @@ def test_aa_card_has_no_policy_lines(seeded, monkeypatch: pytest.MonkeyPatch) ->
     text = confirm_card.render(card)
     assert "权限档" not in text and "短信验证码" not in text
     assert "总金额" in text and "风险提示" in text
+
+
+def test_people_parsed_from_speech_are_prefilled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户实测：说「向李四、张小美、王五群收款」→ 追问总金额，卡面却显示"还没有参与人"。
+
+    人已经从话里解析出来了，就该直接带进卡面（不必再点一遍）。
+    """
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五", "赵六"]},
+                                          "missing_slots": ["amount"]})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("向王五和赵六群收款").run()
+    assert not app.exception, app.exception
+    all_text = "\n".join(str(element.value) for element in app.markdown)
+    assert "王五" in all_text and "赵六" in all_text, "已解析的参与人没有带进卡面"
+    assert "3 人（含我）" in all_text                     # 2 人 + 我
+
+
+def test_confirm_button_actually_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户实测：「点击确认后直接卡 bug」—— 确认按钮必须真的走完执行，且不抛异常。
+
+    根因：卡面里调了**不存在**的 `write_flow.confirm`（AttributeError）。
+    """
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"], "amount": "300"},
+                                          "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    assert not app.exception, app.exception
+
+    button = next(b for b in app.button if b.label == "✅ 确认")
+    button.click().run()
+    assert not app.exception, app.exception
+    captions = "\n".join(str(element.value) for element in app.caption)
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "已发起" in captions or "已发起" in marks or "待收" in marks
+
+
+def test_ambiguous_name_does_not_show_empty_card(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同名多命中 → 上方已出解析卡，群收款卡面**不得**再画「还没有确认参与人」。
+
+    用户实测「这又是什么」：两张卡叠着 —— 一张让选人、一张说还没选人。
+    """
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["李四"], "amount": "100"},
+                                          "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("向李四群收款 100 元").run()
+    assert not app.exception, app.exception
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "同名收款人，请选择" in marks          # 解析卡在
+    assert "还没有确认参与人" not in marks         # 群收款卡面不再抢戏
+
+
+def test_new_person_adder_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「参与人数」展开后有「新增收款人」入口（姓名 + 手机号）。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            #: 缺金额 → 停在"发起态"（参与人数/新增收款人都在这）；给全了会直接进确认态
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"]},
+                                          "missing_slots": ["amount"]})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("向王五群收款").run()
+    assert not app.exception, app.exception
+    assert not app.exception, app.exception
+    expanders = [str(element.label) for element in app.expander]
+    assert any("新增收款人" in label for label in expanders)
+    labels = [box.label for box in app.text_input]
+    assert "姓名" in labels and "手机号" in labels
+
+
+def test_remove_participant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """「修改参与人」里可以对已选的人点「删除」，删掉后回到空状态。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            # 缺金额 -> 停在发起态（参与人编辑器在这一屏）
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"]},
+                                          "missing_slots": ["amount"]})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("我和王五群收款").run()
+    assert not app.exception, app.exception
+    assert not app.exception, app.exception
+    delete = next(b for b in app.button if b.label == "删除")
+    delete.click().run()
+    assert not app.exception, app.exception
+    captions = "\n".join(str(element.value) for element in app.caption)
+    assert "还没有参与人" in captions, "删除后应回到空状态"
+
+
+def test_create_form_is_collapsed_behind_a_button(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户 2026-10-29：查看群收款时别直接铺开表单 —— 先给「＋ 新增群收款」按钮，点了再展开。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_list", "confidence": 0.95,
+                                          "slots": {}, "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("查看我的群收款").run()
+    assert not app.exception, app.exception
+
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "总金额（元）" not in marks, "查看列表时不该直接铺开发起表单"
+    assert any(button.label == "＋ 新增群收款" for button in app.button)
+
+    next(button for button in app.button if button.label == "＋ 新增群收款").click().run()
+    assert not app.exception, app.exception
+    assert any(box.label == "总金额（元）" for box in app.number_input), "点了按钮才展开表单"
+
+
+def test_form_is_cleared_after_completion(monkeypatch: pytest.MonkeyPatch) -> None:
+    """群收款办完后，「新增群收款」表单不该还留着上一轮的内容（用户实测）。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            return schema.model_validate({"intent": "aa_collect", "confidence": 0.95,
+                                          "slots": {"payee_ids": ["王五"], "amount": "300"},
+                                          "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    next(button for button in app.button if button.label == "✅ 确认").click().run()
+    assert not app.exception, app.exception
+    # 办完后再看页面：不该再展开表单
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "总金额（元）" not in marks, "办完后表单应已收起"
+    assert any(button.label == "＋ 新增群收款" for button in app.button)

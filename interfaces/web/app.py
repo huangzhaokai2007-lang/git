@@ -27,6 +27,7 @@ import card_limit_ui as limits_ui                                # noqa: E402
 import card_lock_ui as locks_ui                                  # noqa: E402
 import card_lost_ui as lost_ui                                   # noqa: E402
 import forms                                                     # noqa: E402  （F10：表单桥拆出，含风险测评问卷）
+import card_edit_ui
 import premium_ui                                               # noqa: E402  （管线条/依据/示例/动效）
 import workspace_ui                                             # noqa: E402
 
@@ -97,6 +98,11 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
                              'error_code': 'SERVICE_UNAVAILABLE'}, text)
         state['messages'].append({'role': 'assistant', 'turn': None, 'text': failure})
         return
+    #: 2026-10-29（用户要求）：群收款出确认卡时，原始文本卡不再刷进聊天 ——
+    #: 卡面（a_card_ui）已经把金额/参与人/分摊说清楚了，两份重复很难看。
+    #: 用 getattr 兜底：测试桩/降级路径可能给的不是完整 Turn（缺 intent/states）
+    keep_text = not (getattr(turn, "intent", "") == "aa_collect"
+                     and "CONFIRM_CARD" in (getattr(turn, "states", None) or ()))
     dump = turn.model_dump()
     workspace_ui.accept(dump, text)
     if turn.error_code:
@@ -118,7 +124,10 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
     import scene_ui
     scene_ui.accept(_agent_executor(), state["session_id"], turn)
     premium_ui.toast_for(turn)                    # 成功/失败微反馈（只读回合不打扰）
-    state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
+    if keep_text:
+        state["messages"].append({"role": "assistant", "text": turn.reply, "turn": dump})
+    else:                                   # 群收款确认回合：只留轨迹，文本不刷屏
+        state["messages"].append({"role": "assistant", "text": "", "turn": dump})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
@@ -205,7 +214,10 @@ def _render_confirm(*, inline: bool = False) -> None:
                 _confirm_submit(action[1], inline=inline, display="（短信验证码已提交，值不回显）")
             st.rerun()
         return
-    action = ui.confirm_card(confirmation, compact=inline)
+    #: 2026-10-30（用户要求）：修改面板做成**确认卡内部抽屉**（点「✏️ 修改」在这张卡里展开）
+    action = ui.confirm_card(
+        confirmation, compact=inline,
+        edit_panel=lambda: card_edit_ui.render(_agent_executor(), st.session_state["session_id"]))
     if action == "confirm":
         _confirm_submit("确认", inline=inline)
         st.rerun()

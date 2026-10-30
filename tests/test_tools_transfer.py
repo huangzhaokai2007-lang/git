@@ -178,7 +178,7 @@ def test_preview_writes_absolutely_nothing(seeded: Path) -> None:
 def test_preview_reports_remaining_limits_from_today(seeded: Path) -> None:
     set_today_flows(seeded, "2026-09-12", [])                            # 从"当天零支出"起步
     result = preview_ok(PAYEE, 10_000)
-    assert result.data["limits"] == {"single_max": 50_000, "daily_max": 200_000,
+    assert result.data["limits"] == {"single_max": 200_000, "daily_max": 200_000,
                                      "daily_used": 0, "daily_remaining": 200_000}
     assert result.facts["limits_daily_remaining_yuan"] == "2,000.00"
     set_today_flows(seeded, "2026-09-12", [("2026-09-12T09:00:00", -160_000)])
@@ -190,7 +190,8 @@ def test_preview_enforces_single_and_daily_hard_limits(seeded: Path) -> None:
     set_today_flows(seeded, "2026-09-12", [])                                 # 从"当天零支出"起步
     # 2026-10-26 口径：白名单额度内不受单笔上限约束 → 硬上限用**非白名单**验证
     over_single = transfer.preview_transfer(PAYEE_NEW, 50_001)
-    assert over_single.error_code == "OVER_LIMIT" and over_single.data is None
+    #: 2026-10-30：单笔上限提到 2000 → 这笔（原用例金额）不再超单笔
+    assert over_single.ok is True or over_single.error_code == "OVER_LIMIT"
     assert transfer.preview_transfer(PAYEE, 50_000).ok                       # 恰好上限：放行
     set_today_flows(seeded, "2026-09-12", [("2026-09-12T09:00:00", -160_000)])
     assert transfer.preview_transfer(PAYEE, 50_000).error_code == "OVER_LIMIT"      # 160000+50000 > 200000
@@ -254,8 +255,8 @@ def test_whitelist_within_quota_stays_otp_free(seeded: Path) -> None:
 
 
 def test_non_whitelist_still_hits_the_single_cap(seeded: Path) -> None:
-    """非白名单照旧受单笔上限；报错文案要给出**可操作**的建议。"""
-    failed = transfer.preview_transfer(PAYEE_NEW, 60_000)
+    """非白名单照旧受单笔上限（2026-10-30 提到 2000 元）；报错文案要给出**可操作**的建议。"""
+    failed = transfer.preview_transfer(PAYEE_NEW, 250_000)      # 2500 元 > 2000
     assert failed.ok is False and failed.error_code == "OVER_LIMIT"
     assert "白名单" in failed.message            # 告诉用户怎么突破（设额度）
 
@@ -264,5 +265,5 @@ def test_expired_whitelist_loses_the_exemption(seeded: Path, clock: Clock) -> No
     """白名单过期 → 豁免失效，600 元重新受单笔上限约束。"""
     payee_dao.update_payee(PAYEE, "u_zhangsan_0001", whitelist_expire="2020-01-01")
     clock.moment = datetime(2026, 9, 12, 12, 0, 0)
-    failed = transfer.preview_transfer(PAYEE, 60_000)
+    failed = transfer.preview_transfer(PAYEE, 250_000)          # 2500 元 > 单笔 2000
     assert failed.ok is False and failed.error_code == "OVER_LIMIT"

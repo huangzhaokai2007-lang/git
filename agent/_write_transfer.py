@@ -186,8 +186,9 @@ def _prepare_transfer(filled: dict) -> Prepared:
     事实包补一个 `payee_phone`（脱敏手机号）—— 它来自工具层 `resolve_payee` 的候选，不是编排层编的；
     确认卡上要显示它，`verify_numbers` 必须能在事实包里找到（铁律 2）。
 
-    ⚠️ **F16 未实现**：本函数**不传** `schedule`，故 `transfer_scheduled` 实际走的是即时转账语义 ——
-    「明天转」会被当即时转账出卡并立刻扣款。F16 的验收第 1 条正是禁止这一点，待 F16 卡修复。
+    **只管即时转账**（`transfer_single`）：`transfer_scheduled` 走另一条准备函数
+    `_prepare_scheduled`（F16 已实现：落 `scheduled_transfer` 待执行行、到点才扣款），
+    两条路径分开，本函数不传 `schedule` 是**设计如此**，不是缺口。
     """
     preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"])
     if not preview.ok:
@@ -257,10 +258,34 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
                                               str(preview.facts.get("tier") or "L2"),
                                               factors=preview.facts.get("factors") or [])
-    return Prepared(ok=True,
-                    facts={**preview.facts, "tier": tier, "payee_phone": masked,
-                           "schedule": str(filled["schedule"]), "quota_note": quota_note},
-                    credential=str(preview.data["preview_token"]))
+    facts = {**preview.facts, "tier": tier, "payee_phone": masked,
+             "schedule": str(filled["schedule"]), "quota_note": quota_note}
+    #: 2026-10-30（用户实测「产生了 bug」）：同收款人 + 同金额 + **同一天**已经有一笔待执行预约时，
+    #: 卡面给一行警示（不阻止 —— 可能你就是要再建一笔），避免"悄悄多出一笔"。
+    duplicate = _duplicate_schedule(filled, facts)
+    if duplicate:
+        facts["duplicate_hint"] = duplicate
+    return Prepared(ok=True, facts=facts, credential=str(preview.data["preview_token"]))
+
+
+def _duplicate_schedule(filled: dict, facts: Mapping) -> str:
+    """返回重复提示文案（没有重复 → 空串）。只比对**待执行**的预约。"""
+    from agent import schedule_flow
+
+    amount = int(facts.get("amount_cents") or 0)
+    when = str(facts.get("schedule") or "")[:10]
+    name = str(facts.get("payee_name") or "")
+    try:
+        pending = schedule_flow.pending_schedules()
+    except Exception:                              # noqa: BLE001 —— 只读守卫，失败不影响出卡
+        return ""
+    for item in pending:
+        if (str(item.get("payee_name")) == name
+                and int(item.get("amount") or item.get("amount_cents") or 0) == amount
+                and str(item.get("execute_at"))[:10] == when):
+            return (f"你已有一笔相同预约（{str(item['execute_at']).replace('T', ' ')} "
+                    f"向 {name} {item.get('amount_yuan')} 元）；确认后会**再建一笔**")
+    return ""
 
 
 def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
@@ -271,16 +296,19 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
     而 F16 验收第 2 条正是不许把预约当即时。
     """
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    cycle = {"monthly": "每月循环（首期后按月续期，月末自动对齐）",
-             "weekly": "每周循环（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
-    if cycle and filled.get("repeat_until"):               # 人类规格「周期结束条件」
-        cycle = f"{cycle}，循环至 {filled['repeat_until']}"
+    cycle = {"daily": "每日（首期后按天续期）",
+             "monthly": "每月（首期后按月续期，月末自动对齐）",
+             "weekly": "每周（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
     rows = [("收款人", f"{facts['payee_name']}（{masked}）"),
             ("金额", f"{facts['amount_yuan']} 元"),
             ("预约时间", str(facts["schedule"]).replace("T", " ")),
             ("执行说明", "到预约时间后才扣款，此前不会动钱")]
-    if cycle:                                                              # 循环预约：多一行讲清续期口径
-        rows.insert(3, ("循环", cycle))
+    if cycle:                                              # 循环预约：方式与结束分两行，更醒目
+        rows.insert(3, ("循环方式", cycle))
+        if filled.get("repeat_until"):
+            rows.insert(4, ("循环结束", f"{filled['repeat_until']}（之后不再续期）"))
+    if facts.get("duplicate_hint"):                        # 重复预约：卡面点明，别静默多建一笔
+        rows.append(("⚠️ 重复提示", str(facts["duplicate_hint"])))
     return confirm_card.CardInput(
         title="定时转账确认卡", intent_cn="定时转账", rows=rows,
         tier=tier, requires_otp=requires_otp,

@@ -12,6 +12,7 @@ from interfaces.web.scenes import SCENES, SCENE_ICONS    # 场景文案拆出（
 from interfaces.web.theme import CSS, load_css
 from interfaces.web import reply_animation
 from interfaces.web import chart_ui, spending_pie
+from interfaces.web import time_inputs
 
 #: 顶部合规标注（卡 16 第 5 条）
 SIM_NOTICE = "模拟环境 · 全部为合成数据：不连接任何真实银行，无真实用户 / 账户 / 资金 / 卡号。"
@@ -228,13 +229,14 @@ def _aa_table(confirmation: Any) -> None:
 def _evidence(confirmation: Any) -> None:
     """确认卡的「依据」面板（实现在 `premium_ui`；单测按路径加载本模块时优雅跳过）。"""
     try:
-        import premium_ui
+        import premium_ui                                  # noqa: F401
     except ModuleNotFoundError:
         return
     premium_ui.evidence(confirmation)
 
 
-def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
+def confirm_card(confirmation: Any, *, compact: bool = False,
+                 edit_panel: Callable[[], None] | None = None) -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     if compact:
         st.markdown('**核对修改**')
@@ -244,11 +246,16 @@ def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
             if line.strip():
                 st.markdown(line)
         st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后提交执行。')
-        left, right = st.columns(2)
+        left, middle, right = st.columns(3)
         if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
             return 'confirm'
-        if right.button('✖ 取消', key='confirm-cancel', width='stretch'):
+        if middle.button('✖ 取消', key='confirm-cancel', width='stretch'):
             return 'cancel'
+        opened = bool(st.session_state.get('card-edit-open'))
+        if right.button('✏️ 收起修改' if opened else '✏️ 修改', key='confirm-modify',
+                        width='stretch'):
+            st.session_state['card-edit-open'] = not opened
+            st.rerun()
         return None
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
@@ -275,11 +282,22 @@ def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")
         _evidence(confirmation)                       # 「依据：为什么是这个档位」
-        left, right, _rest = st.columns([1, 1, 3])
+        #: 2026-10-30（用户要求）：「修改」放在确认/取消旁边，点了才把修改面板**拉出来**，
+        #: 不再默认把「修改这张确认卡」整块铺在卡面上方。
+        left, middle, right, _rest = st.columns([1, 1, 1, 2])
         if left.button("✅ 确认", type="primary", key="confirm-ok", width="stretch"):
             return "confirm"
-        if right.button("✖ 取消", key="confirm-cancel", width="stretch"):
+        if middle.button("✖ 取消", key="confirm-cancel", width="stretch"):
             return "cancel"
+        opened = bool(st.session_state.get("card-edit-open"))
+        if right.button("✏️ 收起修改" if opened else "✏️ 修改", key="confirm-modify",
+                        width="stretch"):
+            st.session_state["card-edit-open"] = not opened
+            st.rerun()
+        #: 2026-10-30（用户要求）：修改面板做成**卡内抽屉** —— 就在这张卡里往下展开，
+        #: 不再是页面上另起一块（用户："要有个拉开的效果"）。
+        if opened and edit_panel is not None:
+            edit_panel()
     return None
 
 
@@ -327,8 +345,8 @@ def payee_form(defaults: dict | None = None) -> dict | None:
                                  value=str(defaults.get("name") or ""))
             phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678",
                                   value=str(defaults.get("phone") or ""))
-            card_no = st.text_input("银行卡号（可空）", key="payee-card-no",
-                                    placeholder="只保存脱敏形态（**** **** **** 8888）")
+            #: 2026-10-30（用户要求）：新增收款人**不再收银行卡号**（卡号仍可在收款人详情里补录）
+            card_no = ""
             tags = st.text_input("标签（可空，多个用、分隔；**能用来指代这个人**）", key="payee-tags",
                                  placeholder="例如：妈妈、房东（之后可以说「给我妈转 200」）")
             note = st.text_input("备注（可空；**只给自己看，不参与识别**）", key="payee-note",
@@ -342,8 +360,9 @@ def payee_form(defaults: dict | None = None) -> dict | None:
                 col_a, col_b = st.columns(2)
                 quota = col_a.text_input("专属额度（元/月）", key="payee-quota",
                                          placeholder="例如 5000（不填 = 一律要验证码）")
-                expire = col_b.text_input("有效期至", key="payee-expire",
-                                          placeholder="例如 2026-12-31 或 月底（不填 = 长期）")
+                #: 2026-10-29（用户要求）：有效期用日历选，不再手敲
+                expire = time_inputs.date_field("有效期至", "payee-expire") \
+                    if col_b.checkbox("设置有效期", key="payee-expire-on") else ""
             submitted = st.form_submit_button("添加收款人", type="primary", width="stretch")
         if submitted:
             return {"name": name, "phone": phone, "whitelist": bool(whitelist),

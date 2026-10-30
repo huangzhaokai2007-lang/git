@@ -17,7 +17,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
+import premium_ui
+import time_inputs
 from agent import card_draft, confirm_card, write_flow
+
+#: 这些槽位是「时间」，必须用日历选（用户 2026-10-30 反复强调）
+_TIME_FIELDS = {"schedule": "时刻", "date": "日期", "expire": "日期"}
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
@@ -27,63 +32,65 @@ def _record(step: write_flow.Step, summary: str) -> None:
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
 
 
-def _aa_amounts(executor: ThreadPoolExecutor, session_id: str) -> None:
-    """AA 卡：每人应收金额**表格** + 可改（一键均摊的值作为初值）。"""
-    confirmation = executor.submit(confirm_card.current, session_id).result()
-    if confirmation is None:
-        return
-    filled = dict(confirmation.filled or {})
-    names = [str(name) for name in (filled.get("aa_names") or [])]
-    if not names:
-        return
-    per = [int(cents) for cents in (filled.get("per_person_cents") or [])]
-    if len(per) != len(names):                          # 一键均摊：用均摊值做初值
-        total = int(confirmation.amount_cents or 0)
-        per = [total // len(names)] * len(names)
-    with st.container(border=True):
-        st.markdown("##### ✏️ AA 每人收款金额（可改）")
-        head = st.columns([2, 2, 3])
-        head[0].caption("收款人")
-        head[1].caption("应收金额（元）")
-        values: list[tuple[str, str]] = []
-        for index, (name, cents) in enumerate(zip(names, per)):
-            left, right = st.columns([2, 2])
-            left.markdown(f"**{name}**")
-            value = right.text_input("金额", value=f"{cents / 100:.2f}",
-                                     label_visibility="collapsed",
-                                     key=f"aa-amt-{index}-{name}")
-            values.append((name, value))
-        st.caption("改完点下面的按钮会重新算总额与每人金额（不是直接改卡）；确认仍按上面卡片的按钮。")
-        if st.button("按新金额重新预检", key="aa-recheck", type="primary"):
-            amounts = "、".join(f"{name} {value.strip()} 元"
-                                for name, value in values if value.strip())
-            step = executor.submit(write_flow.edit, session_id, {"amounts": amounts}).result()
-            _record(step, "（AA 每人金额已修改）")
-            st.rerun()
-
-
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """渲染可编辑面板：有在途确认卡且该意图有编辑字段时才出现。"""
     draft = executor.submit(card_draft.draft_of, session_id).result()
     if draft is None or draft.status != "confirm":
+        st.session_state["card-edit-open"] = False      # 卡没了就复位，别留个空展开态
+        return
+    #: 2026-10-30（用户要求）：默认**收起**，点确认卡上的「✏️ 修改」才拉出来。
+    if not st.session_state.get("card-edit-open"):
         return
     #: 2026-10-28（用户要求）：这张「每人收款金额」卡**不再出现** ——
     #: 群收款已由卡面的「按人设置金额」负责，页面上不要出现两块同样的表单。
     if draft.kind == "aa_collect":                      # 群收款由卡面的「按人设置金额」负责
-        _aa_amounts(executor, session_id)
         return
     if not draft.fields:
         return
-    with st.container(border=True):
-        st.markdown("##### ✏️ 修改这张确认卡")
+    with st.container(border=True, key="card-edit-box"):
+        premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
         changed: dict[str, str] = {}
         for field in draft.fields:
-            new = st.text_input(field.label, value=field.value,
-                                key=f"edit-{draft.kind}-{field.name}")
-            if new.strip() and new.strip() != field.value:
-                changed[field.name] = new.strip()
-        if st.button("按修改重新预检", key=f"recheck-{draft.kind}", disabled=not changed):
+            new = _field(field, draft.kind)
+            if new and new != field.value:
+                changed[field.name] = new
+        if draft.kind == "transfer_scheduled":          # 循环频率：一次性 / 每日 / 每周 / 每月
+            cycle_now = _current_cycle(executor, session_id)
+            labels = list(_REPEAT_OPTIONS)
+            picked = st.selectbox("循环频率", labels, index=labels.index(_CYCLE_LABEL.get(cycle_now,
+                                                                                        "（一次性）")),
+                                  key="edit-repeat")
+            picked_code = _REPEAT_OPTIONS[picked]
+            if picked_code != (cycle_now or ""):
+                #: 「一次性」在槽位里用「不循环」表达（`repeat_cycle` 认不出 → None = 一次性）
+                changed["repeat"] = picked_code or "不循环"
+        col_ok, col_tip = st.columns([1, 3], vertical_alignment="center")
+        if col_ok.button("按修改重新预检", key=f"recheck-{draft.kind}", type="primary",
+                         disabled=not changed, width="stretch"):
             step = executor.submit(write_flow.edit, session_id, changed).result()
             _record(step, f"（卡片编辑：{', '.join(changed)}）")
+            st.session_state["card-edit-open"] = False      # 用户要求：重新预检后收起
             st.rerun()
-        st.caption("修改后重新走一遍收款人解析与风控（不是直接改卡）；确认/验证码请按卡片提示回复。")
+        col_tip.caption("改完自动重走收款人解析与风控；确认/验证码按卡片提示回复。")
+
+
+#: 循环频率选项（label → 周期码；空串 = 一次性，提交时转成「不循环」）
+_REPEAT_OPTIONS = {"（一次性）": "", "每日": "daily", "每周": "weekly", "每月": "monthly"}
+_CYCLE_LABEL = {"daily": "每日", "weekly": "每周", "monthly": "每月"}
+
+
+def _current_cycle(executor: ThreadPoolExecutor, session_id: str) -> str:
+    """在途确认卡当前记的循环周期（来自 agent 层，界面不自己推断）。"""
+    confirmation = executor.submit(confirm_card.current, session_id).result()
+    return str(((getattr(confirmation, "filled", None) or {}).get("repeat_cycle") or ""))
+
+
+def _field(field, kind: str) -> str:
+    """一个字段的输入控件；**时间类字段一律用日历**（schedule 带时刻，date/expire 只选日期）。"""
+    key = f"edit-{kind}-{field.name}"
+    if field.name == "schedule":
+        value, too_early = time_inputs.datetime_field(field.label, key)
+        return "" if too_early else value
+    if field.name in _TIME_FIELDS:
+        return time_inputs.date_field(field.label, key)
+    return str(st.text_input(field.label, value=field.value, key=key) or "").strip()

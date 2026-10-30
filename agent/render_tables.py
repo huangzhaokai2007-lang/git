@@ -98,7 +98,7 @@ def _repeat_cell(item: Mapping) -> str:
     cycle = str(item.get("repeat_cycle") or "")
     if not cycle:
         return "一次性"
-    label = {"monthly": "每月", "weekly": "每周"}.get(cycle, cycle)
+    label = {"daily": "每日", "weekly": "每周", "monthly": "每月"}.get(cycle, cycle)
     until = str(item.get("repeat_until") or "")
     nxt = str(item.get("next_run_at") or "").replace("T", " ")
     parts = [label]

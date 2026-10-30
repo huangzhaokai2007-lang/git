@@ -272,6 +272,25 @@ SLOT_LABELS = {
 }
 
 
+def _dedupe_lines(text: str) -> str:
+    """追问文案去重：**同一行重复只留一次**（用户实测出现过同一句问三遍）。
+
+    只做「整行完全相同」与「紧邻重复」的合并 —— 不做模糊合并，
+    避免把「请补充金额」和「请补充总金额、预约时间」这类不同信息误删。
+    """
+    kept: list[str] = []
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if kept and kept[-1] == stripped:          # 紧邻重复
+            continue
+        if stripped in kept:                       # 已经出现过（非紧邻）
+            continue
+        kept.append(stripped)
+    return "\n".join(kept)
+
+
 def missing_hint(missing: list[str]) -> str:
     """缺槽追问（**兜底**：描述符没给 clarify 时用）。
 
@@ -303,13 +322,13 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
             payee_picker.capture(session_id, intent, dict(slots), shaped.candidates,
                                  slot=slot)
         hint = missing_hint(shaped.missing)
-        ask = shaped.clarify or hint                   # 描述符优先，否则兜底
+        ask = _dedupe_lines(shaped.clarify) or hint    # 描述符优先，否则兜底
         #: 描述符的追问如果**没提到**缺的那几项，就补一句 —— 用户一次知道要补什么，
         #: 不会出现「只问了标签、其实还差收款人」这种半句追问（实测）。
         labels = [SLOT_LABELS.get(slot, slot) for slot in shaped.missing]
         absent = [label for label in dict.fromkeys(labels) if label not in shaped.clarify]
         if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
-            ask = f"{shaped.clarify}\n请补充：{'、'.join(absent)}。"
+            ask = f"{_dedupe_lines(shaped.clarify)}\n请补充：{'、'.join(absent)}。"
         #: 2026-10-27：登记「还差什么」，让用户下一句短答能**续接补槽**（不再被当新意图）。
         pending_slots.remember(session_id, intent, dict(slots), list(shaped.missing))
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,

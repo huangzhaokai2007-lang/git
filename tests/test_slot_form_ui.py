@@ -45,8 +45,11 @@ def test_missing_slots_open_a_form_card(monkeypatch: pytest.MonkeyPatch) -> None
     app.chat_input[0].set_value("预约转账").run()
     assert not app.exception, app.exception
     labels = [box.label for box in app.text_input]
-    for expect in ('收款人', '总金额', '预约时间'):
+    #: 2026-10-29：日期改成**日历**（`st.date_input` + `st.time_input`），不再走文本框
+    for expect in ('收款人', '总金额'):
         assert expect in labels, f"填表卡缺字段：{expect}；实际 {labels}"
+    assert [box.label for box in app.date_input] == ["预约时间"], "预约时间应该是日历控件"
+    assert [box.label for box in app.time_input], "预约时间还要能选时刻"
     assert any(button.label == "继续" for button in app.button)
 
 
@@ -59,6 +62,10 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     for box in app.text_input:
         if box.label in FILLS:
             box.set_value(FILLS[box.label])
+    import datetime
+    #: 2026-10-29：预约时间用**日历选**（日期 + 时刻），不再手敲字符串。
+    #: 日期取「今天 + 30 天」—— 业务上不允许超过 1 年，写死 2030 会被直接拒。
+    app.date_input[0].set_value(datetime.date.today() + datetime.timedelta(days=30)).run()
     next(button for button in app.button if button.label == "继续").click().run()
 
     assert not app.exception, app.exception
@@ -70,3 +77,24 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     next(button for button in app.button if button.key == 'confirm-cancel').click().run()
     assert app.session_state['workspace-result']['turn']['trace_id'] == original
     assert any(button.label == '📊 按分类分析支出' for button in app.button)
+
+
+def test_form_waits_for_the_payee_picker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """同名候选还在解析卡里等点选时，**不要**同时弹「还差这几项」表单（用户实测）。"""
+    def chat_json(system: str, user: object, schema):
+        if schema is classifier.IntentOut:
+            #: 同名（两个李四）+ 缺金额 → 解析卡与表单抢戏的场景
+            return schema.model_validate({"intent": "transfer_single", "confidence": 0.95,
+                                          "slots": {"payee": "李四"}, "missing_slots": []})
+        raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
+
+    import os
+    os.environ["DB_PATH"] = str(demo.build_temp_db())
+    monkeypatch.setattr(llm, "chat_json", chat_json)
+    app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
+    app.run()
+    app.chat_input[0].set_value("给李四转").run()
+    assert not app.exception, app.exception
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "同名收款人，请选择" in marks, "应当先出解析卡"
+    assert "还差这几项" not in marks, "解析卡未选完时不该同时弹表单"

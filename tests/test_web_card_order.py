@@ -37,7 +37,10 @@ def test_active_panel_is_the_only_query_panel_and_precedes_confirmation(monkeypa
     if scene == 'aa_list':
         assert 'confirm' not in calls  # main renders confirmation inside the group collection card.
     else:
-        assert calls[-1] == 'confirm'
+        #: 2026-10-30（用户要求）：「修改这张确认卡」挪到**确认卡下方**，
+        #: 所以确认之后只允许出现 edit（编辑面板），其它面板都必须在确认之前。
+        tail = [name for name in calls[calls.index('confirm') + 1:] if name != 'edit']
+        assert not tail, f'确认卡后面不该再有其它面板：{tail}'
         assert calls.index(expected) < calls.index('confirm')
     assert [name for name in calls if name in ('cards', 'payee', 'schedule', 'aa', 'gift')] == [expected]
 

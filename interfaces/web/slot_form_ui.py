@@ -22,6 +22,7 @@ import streamlit as st
 from agent import pending_slots, write_flow
 
 import premium_ui
+import time_inputs
 
 #: 平台候选（不是业务数据，只是输入便利）
 PLATFORM_CHOICES = ("京东", "天猫", "淘宝", "得物", "其它")
@@ -59,6 +60,13 @@ def _field(slot: str) -> str:
     if slot == "platform":
         choice = st.selectbox(label, ("", *PLATFORM_CHOICES), key=key)
         return str(choice or "")
+    #: 2026-10-29（用户要求）：**所有**时间类槽位都用日历，不再手敲字符串。
+    if slot == "schedule":                       # 预约时间 = 日期 + 时刻
+        value, too_early = time_inputs.datetime_field(label, key)
+        st.session_state[f"{key}-too-early"] = too_early
+        return "" if too_early else value         # 过去的时刻当作"没填"
+    if slot in ("date", "expire"):               # 送礼日期 / 白名单有效期 = 只选日期
+        return time_inputs.date_field(label, key)
     return str(st.text_input(label, key=key,
                              placeholder=PLACEHOLDERS.get(slot, "")) or "").strip()
 
@@ -80,6 +88,12 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     #: 2026-10-28（用户要求）：群收款由卡面自己收集（总额/选人/按人金额），
     #: 不再弹通用表单 —— 否则一张页面出现「每人金额卡 + 还差几项」两块，很散。
     if item.get("intent") == "aa_collect":
+        return
+    #: 2026-10-29（用户实测）：同名候选还在「解析卡」里等用户点选时，
+    #: 这里再弹表单问"收款人是？"等于让人重填 —— 先等解析卡选完。
+    from agent import payee_picker
+
+    if executor.submit(payee_picker.pending, session_id).result():
         return
     if not missing:
         return

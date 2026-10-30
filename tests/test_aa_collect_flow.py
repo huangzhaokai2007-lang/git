@@ -222,8 +222,16 @@ def test_per_person_amounts_card_and_execute(wired, monkeypatch) -> None:
     assert len(raw(wired, "SELECT 1 FROM audit_log WHERE tool = 'create_aa_request_with_amounts'")) > 0
 
 
-def test_per_person_amounts_sum_must_match_total(wired, monkeypatch) -> None:
-    """合计与总额不符 → 直接报错，不出卡。"""
-    script = [aa_intent([WANGWU, ZHAOLIU], "300.00", amounts=f"{WANGWU} 100 元、{ZHAOLIU} 100 元")]
-    result = turn(monkeypatch, "AA 收款", script)
-    assert result.executed is False and "不符" in result.reply
+def test_per_person_amounts_must_not_exceed_total(wired, monkeypatch) -> None:
+    """按人金额**超过**含我总额 → 报错不出卡；不超过时差额就是「我承担」。
+
+    2026-10-30（含我口径）：原来要求 Σ每人 == 总额；现在总额含我自己那份，
+    所以 Σ每人 只要不超过总额就合法，差额记作我承担。
+    """
+    over = [aa_intent([WANGWU, ZHAOLIU], "300.00", amounts=f"{WANGWU} 200 元、{ZHAOLIU} 200 元")]
+    result = turn(monkeypatch, "AA 收款", over)
+    assert result.executed is False and "超过群收款总额" in result.reply
+
+    ok = [aa_intent([WANGWU, ZHAOLIU], "300.00", amounts=f"{WANGWU} 100 元、{ZHAOLIU} 100 元")]
+    card = turn(monkeypatch, "AA 收款", ok)
+    assert card.executed is False and "分摊方式" in card.reply      # 按人金额卡面

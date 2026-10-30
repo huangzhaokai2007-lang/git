@@ -176,7 +176,22 @@ div[class*="st-key-payee-row-"] button:focus:not(:active) {
 div[class*="st-key-payee-row-"] { border-bottom: 1px solid rgba(44,45,51,.7); }
 """
 
-CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{PAYEE_CSS}{PAYEE_ROW_CSS}{REDUCED_MOTION_CSS}</style>"
+
+#: 群收款「参与人」区（人数徽章 + 名字芯片）
+AA_PEOPLE_CSS = """
+.aa-people { background: rgba(102,103,201,.07); border: 1px solid rgba(102,103,201,.22);
+  border-radius: 12px; padding: .5rem .7rem; margin: .3rem 0 .2rem; }
+.aa-people-head { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.aa-people-label { color: #9aa0ac; font-size: .8rem; letter-spacing: .3px; }
+.aa-people-count { background: #2b2940; color: #b7b1ff; border-radius: 999px;
+  padding: 1px 9px; font-size: .78rem; font-weight: 650; }
+.aa-chips { display: flex; gap: .35rem; flex-wrap: wrap; margin-top: .35rem; }
+.aa-chip { background: #1c1d21; border: 1px solid #2c2d33; border-radius: 999px;
+  padding: 2px 10px; font-size: .9rem; color: #E6E8EE; }
+.aa-empty { color: #9aa0ac; font-size: .82rem; margin-top: .3rem; }
+"""
+
+CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{PAYEE_CSS}{PAYEE_ROW_CSS}{AA_PEOPLE_CSS}{REDUCED_MOTION_CSS}</style>"
 
 
 def num_html(text: str, *, flash: bool = False) -> str:

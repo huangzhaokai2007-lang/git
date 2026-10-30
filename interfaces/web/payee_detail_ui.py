@@ -19,6 +19,7 @@ import streamlit as st
 from agent import confirm_card, payee_risk, pending_slots, write_flow
 
 import premium_ui
+import time_inputs
 
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
 TONE = {"whitelist": "ok", "blacklist": "danger", "normal": ""}
@@ -73,8 +74,10 @@ def _editor(executor: ThreadPoolExecutor, session_id: str, person: dict, who: di
             col_a, col_b = st.columns(2)
             quota = col_a.text_input("新的专属额度（元/月，留空=不改）",
                                      key=f"d-q-{person['payee_id']}")
-            expire_new = col_b.text_input("新的有效期（留空=不改）", key=f"d-e-{person['payee_id']}",
-                                          placeholder="2026-12-31 或 月底")
+            #: 2026-10-29：有效期改用日历（留空=不改 → 用「是否调整」勾选表达）
+            expired_edit = col_b.checkbox("调整有效期", key=f"d-e-on-{person['payee_id']}")
+            expire_new = (time_inputs.date_field("新的有效期", f"d-e-{person['payee_id']}")
+                          if expired_edit else "")
             if st.button("保存白名单信息（需验证码）", key=f"d-q-ok-{person['payee_id']}",
                          disabled=not (quota.strip() or expire_new.strip())):
                 slots = dict(who)
