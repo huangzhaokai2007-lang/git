@@ -31,9 +31,18 @@ def _app(monkeypatch: pytest.MonkeyPatch, verdict: dict) -> AppTest:
     path = demo.build_temp_db()
     monkeypatch.setenv("DB_PATH", str(path))
 
+    #: **在 `classify` 这一层打桩**，而不是只桩 `llm.chat_json`。
+    #: 只桩 LLM 的话，UI 用例的意图还依赖「分类管道能不能走到那个桩」——
+    #: 2026-10-30 实测：全量跑时约 1/3 概率分类失败 → 兜底 `out_of_scope` → 用例红，
+    #: 单独跑必过。UI 用例本来就不该考分类管道，桩在入口最稳。
+    def classify(text: str, history: list[str] | None = None):
+        return classifier.IntentOut.model_validate(verdict)
+
+    monkeypatch.setattr(classifier, "classify", classify)
+
+    #: 回执润色（`agent/templates` 的 `_Polished`）仍走 LLM 桩并抛异常 → 回退静态文案，
+    #: 免得 UI 用例真的去调模型（慢且不确定）。
     def chat_json(system: str, user: object, schema):
-        if schema is classifier.IntentOut:
-            return schema.model_validate(verdict)
         raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
 
     monkeypatch.setattr(llm, "chat_json", chat_json)
