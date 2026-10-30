@@ -156,9 +156,20 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
 
         people = list(st.session_state.get("aa-people") or [])
         plan = executor.submit(aa_flow.group_plan, people, float(total or 0)).result()
-        summary = (f"{plan['count']} 人（含我）· {'、'.join(people)}" if people
-                   else "还没有参与人")
-        st.caption(f"参与人：{summary}")
+        #: 2026-10-30（用户要求）：参与人要**醒目** —— 人数徽章 + 名字芯片，
+        #: 不再是一行灰色小字。
+        if people:
+            chips = "".join(f'<span class="aa-chip">{name}</span>' for name in people)
+            st.markdown(
+                f'<div class="aa-people"><div class="aa-people-head">'
+                f'<span class="aa-people-label">参与人</span>'
+                f'<span class="aa-people-count">{plan["count"]} 人（含我）</span></div>'
+                f'<div class="aa-chips">{chips}</div></div>', unsafe_allow_html=True)
+        else:
+            st.markdown('<div class="aa-people"><div class="aa-people-head">'
+                        '<span class="aa-people-label">参与人</span></div>'
+                        '<div class="aa-empty">还没有参与人 —— 点下面「✏️ 修改参与人」添加</div>'
+                        '</div>', unsafe_allow_html=True)
 
         #: 参与人的增删都收进这个 expander（不再占主视野）
         with st.expander("✏️ 修改参与人", expanded=False):

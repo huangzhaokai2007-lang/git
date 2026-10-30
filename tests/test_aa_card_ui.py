@@ -75,8 +75,8 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，添加按钮才会解禁
     next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
-    captions = "\n".join(str(element.value) for element in app.caption)
-    assert "含我" in captions                             # 参与人摘要：2 人（含我）
+    all_text = "\n".join(str(element.value) for element in app.markdown)
+    assert "含我" in all_text                             # 参与人区块：2 人（含我）
     marks = "\n".join(str(element.value) for element in app.markdown)
     assert "均摊金额" in marks and "¥ 150.00" in marks      # 大字均摊金额（300 / 2 份）
     assert "我承担 150.00 元" in marks and "待收" in marks
@@ -116,9 +116,9 @@ def test_people_parsed_from_speech_are_prefilled(monkeypatch: pytest.MonkeyPatch
     app.run()
     app.chat_input[0].set_value("向王五和赵六群收款").run()
     assert not app.exception, app.exception
-    captions = "\n".join(str(element.value) for element in app.caption)
-    assert "王五、赵六" in captions, "已解析的参与人没有带进卡面"
-    assert "3 人（含我）" in captions                    # 2 人 + 我
+    all_text = "\n".join(str(element.value) for element in app.markdown)
+    assert "王五" in all_text and "赵六" in all_text, "已解析的参与人没有带进卡面"
+    assert "3 人（含我）" in all_text                     # 2 人 + 我
 
 
 def test_confirm_button_actually_executes(monkeypatch: pytest.MonkeyPatch) -> None:
