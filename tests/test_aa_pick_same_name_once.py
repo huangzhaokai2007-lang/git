@@ -69,6 +69,9 @@ def test_picker_pick_does_not_reopen_the_slot_form(monkeypatch: pytest.MonkeyPat
 
     next(button for button in app.button if button.label == "选这位").click().run()
     assert not app.exception, app.exception
-    assert "群收款确认卡" in str(app.session_state["messages"][-1]["text"])
+    #: 2026-10-31：选完停在**发起卡**（可核对可改），点发起才出确认卡
     marks = "\n".join(str(element.value) for element in app.markdown)
     assert "还差这几项" not in marks, "选完解析卡不该再弹填表卡"
+    assert any(button.label == "发起群收款" for button in app.button), "应停在发起卡"
+    next(button for button in app.button if button.label == "发起群收款").click().run()
+    assert "群收款确认卡" in str(app.session_state["messages"][-1]["text"])

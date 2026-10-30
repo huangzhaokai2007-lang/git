@@ -143,6 +143,7 @@ def test_confirm_button_actually_executes(monkeypatch: pytest.MonkeyPatch) -> No
     app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
     app.run()
     app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    next(button for button in app.button if button.label == "发起群收款").click().run()
     assert not app.exception, app.exception
 
     button = next(b for b in app.button if b.label == "✅ 确认")
@@ -286,6 +287,7 @@ def test_form_is_cleared_after_completion(monkeypatch: pytest.MonkeyPatch) -> No
     app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
     app.run()
     app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    next(button for button in app.button if button.label == "发起群收款").click().run()
     next(button for button in app.button if button.label == "✅ 确认").click().run()
     assert not app.exception, app.exception
     # 办完后再看页面：不该再展开表单

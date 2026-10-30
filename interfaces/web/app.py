@@ -19,7 +19,7 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import balance_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
+from agent import balance_flow, card_binding_flow, confirm_card, orchestrator, write_flow  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -326,6 +326,8 @@ def _sidebar() -> None:
             st.rerun()
 
 def _chat_page() -> None:
+    #: 网页里群收款要先出**可编辑的发起卡**（用户 2026-10-31），点「发起群收款」才出确认卡
+    write_flow.set_aa_edit_first(True)
     workspace_ui.notifications(_agent_executor(), st.session_state['session_id'], _follow_up)
     workspace_ui.transcript(st.session_state['messages'], _agent_executor(),
                             st.session_state['session_id'], _follow_up)

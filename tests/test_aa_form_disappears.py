@@ -38,6 +38,8 @@ def test_form_disappears_after_group_collect_is_created(monkeypatch: pytest.Monk
     app.run()
     app.chat_input[0].set_value("我和王五群收款 300 元").run()
     assert not app.exception, app.exception
+    #: 2026-10-31：网页里先出**发起卡**，点发起才进确认卡
+    next(button for button in app.button if button.label == "发起群收款").click().run()
     next(button for button in app.button if button.label == "✅ 确认").click().run()
     assert not app.exception, app.exception
 

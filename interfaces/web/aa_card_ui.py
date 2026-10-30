@@ -31,7 +31,9 @@ def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
     from agent import pending_slots
 
     confirm_card.clear(session_id)
-    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    #: 卡面点「发起群收款」= 用户已看过编辑卡 → 直接进预检/确认（不再绕回编辑卡）
+    step = executor.submit(write_flow.start, intent, slots, session_id,
+                           from_card=True).result()
     #: 2026-10-30 修（用户实测「成功发起后卡面不消失」）：出确认卡 / 已发起 → 清掉补槽记录，
     #: 否则下一轮 `pending_slots` 里那条 aa_collect 会把发起表单**又自动展开**并回填旧值。
     if not getattr(step, "missing", None):

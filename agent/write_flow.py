@@ -311,7 +311,22 @@ def missing_hint(missing: list[str]) -> str:
     return templates.clarify_missing(labels)
 
 
-def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -> Step:
+#: 网页端「群收款先出编辑卡」的开关（agent 层用例保持默认关闭 = 旧的"直接出确认卡"契约）
+_AA_EDIT_FIRST = False
+
+
+def set_aa_edit_first(enabled: bool) -> None:
+    """界面在每次渲染时打开/关闭：网页里要先看到可编辑的发起卡。"""
+    global _AA_EDIT_FIRST
+    _AA_EDIT_FIRST = bool(enabled)
+
+
+def aa_edit_first_enabled() -> bool:
+    return _AA_EDIT_FIRST
+
+
+def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "",
+          from_card: bool = False) -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
     spec = write_intents.spec_of(intent)
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
@@ -346,6 +361,14 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
     #: 2026-10-30（用户实测）：走到这里说明**不再缺槽**（要出卡/要执行了），
     #: 把之前的补槽记录清掉 —— 否则「还差这几项」表单会在随后几轮一直挂着
     #: （选完解析卡还在、业务都完成了还在）。
+    #: 2026-10-31（用户要求）：群收款在**聊天里**说全了也先铺发起卡（可改人/可改钱），
+    #: 只有点卡上的「发起群收款」（`from_card=True`）才继续做预检、出确认卡。
+    if intent == "aa_collect" and not from_card and aa_edit_first_enabled():
+        pending_slots.remember_prefill(session_id, intent,
+                                       {**dict(slots), **dict(shaped.filled)})
+        return Step(states=["SLOT_FILL"], intent=intent,
+                    reply="已按你说的铺好群收款卡：核对参与人与金额，点「发起群收款」我再出确认卡。",
+                    ask="aa_prefill")
     pending_slots.clear(session_id)
     filled = shaped.filled
     if confirm_card.is_locked(session_id):

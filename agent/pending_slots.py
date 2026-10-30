@@ -43,6 +43,17 @@ def remember(session_id: str, intent: str, slots: dict, missing: list[str]) -> N
                             "missing": [slot for slot in missing if slot], "at": time.monotonic()}
 
 
+def remember_prefill(session_id: str, intent: str, slots: dict) -> None:
+    """登记**只用于预填**的槽位（不缺东西，例如群收款要先铺一张可编辑卡）。
+
+    与 `remember()` 的区别：`missing` 允许为空；`slot_form_ui` 看到 missing 为空不会出填表卡。
+    """
+    if not session_id or not intent:
+        return
+    _PENDING[session_id] = {"intent": intent, "slots": dict(slots),
+                            "missing": [], "prefill": True, "at": time.monotonic()}
+
+
 def clear(session_id: str | None = None) -> None:
     """清掉登记（会话重置 / 已补齐 / 用户改口时用）。"""
     if session_id is None:
