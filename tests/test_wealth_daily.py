@@ -117,12 +117,17 @@ def test_card_period_switch_fetches_on_demand() -> None:
 
     at = AppTest.from_function(page, args=(turn, loader, calls), default_timeout=30).run()
     assert not at.exception
-    assert at.radio[0].value == "月K"          # 默认月K
+    #: 按**标签**选，不能按序号 —— 推荐区顶部还有「期限 / 排序」两个筛选 radio，
+    #: 用 `at.radio[0]` 会选到筛选控件（2026-10-31 加筛选时踩到）。
+    def period_radio():
+        return next(r for r in at.radio if r.label == "K 线周期")
+
+    assert period_radio().value == "月K"       # 默认月K
     assert calls == []                          # 月K 用 facts，不发请求
 
-    at.radio[0].set_value("日K").run()
+    period_radio().set_value("日K").run()
     assert calls == [("p1", "daily")]
-    at.radio[0].set_value("周K").run()
+    period_radio().set_value("周K").run()
     assert calls[-1] == ("p1", "weekly")
-    at.radio[0].set_value("月K").run()
+    period_radio().set_value("月K").run()
     assert len(calls) == 2                      # 回到月K 不再请求

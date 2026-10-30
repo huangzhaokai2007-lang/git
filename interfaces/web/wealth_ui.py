@@ -293,9 +293,38 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     #: **按产品大类分组铺卡**（2026-10-29 用户要求"推荐必须分类，不要毫无规律扔出来"）：
     #: 一组一个标题 + 该组内的 2 列网格；预览模式先铺前 N 只（可能截断某个组），
     #: 组序稳健 → 进取，组内保持 facts 原序（收益降序）。
+    #: **视图筛选**：只筛「工具已经返回的 items」，不重新查工具。
+    #: 风险上限由工具层保证（列表里本来就不会有超过用户等级的），
+    #: 所以这里只给「按期限找货 + 换个排序」——纯视图，不动业务口径。
+    fcol1, fcol2 = st.columns(2)
+    term_choice = fcol1.radio(
+        '期限', ['全部', '1 年内', '1–3 年', '3 年以上'], horizontal=True,
+        key=f'{key_prefix}-term', label_visibility='collapsed')
+    sort_choice = fcol2.radio(
+        '排序', ['收益 ↓', '期限 ↑'], horizontal=True,
+        key=f'{key_prefix}-sort', label_visibility='collapsed')
+
+    def _term_ok(term: object) -> bool:
+        days = int(term or 0)
+        if term_choice == '1 年内':
+            return days <= 365
+        if term_choice == '1–3 年':
+            return 365 < days <= 1095
+        if term_choice == '3 年以上':
+            return days > 1095
+        return True
+
+    filtered = [item for item in items if _term_ok(item.get('term'))]
+    if sort_choice == '期限 ↑':
+        #: 收益序是工具层给的（降序），这里只在用户要求时换一种看法。
+        filtered = sorted(filtered, key=lambda row: int(row.get('term') or 0))
+    if not filtered:
+        st.info('这个期限档位下暂时没有产品，换个档位看看。')
+        return
+
     expanded_key = f'{key_prefix}-expanded'
     expanded = bool(st.session_state.get(expanded_key))
-    shown = items if expanded else items[:_PREVIEW_COUNT]
+    shown = filtered if expanded else filtered[:_PREVIEW_COUNT]
     for category, group in wealth_groups(shown):
         st.markdown(f'#### {category_label(category)}')
         for start in range(0, len(group), _COLUMNS):
@@ -304,9 +333,9 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
                 with col:
                     _card(item, ask=ask, key_prefix=key_prefix,
                           daily_loader=daily_loader, readonly=readonly)
-    if len(items) > _PREVIEW_COUNT:
+    if len(filtered) > _PREVIEW_COUNT:
         label = (f'收起，只看前 {_PREVIEW_COUNT} 只' if expanded
-                 else f'展开其余 {len(items) - _PREVIEW_COUNT} 只产品')
+                 else f'展开其余 {len(filtered) - _PREVIEW_COUNT} 只产品')
         if st.button(label, key=f'{key_prefix}-toggle', width='stretch'):
             st.session_state[expanded_key] = not expanded
             st.rerun()
