@@ -45,7 +45,7 @@ def _cycle_badge(item: dict) -> str:
     cycle = str(item.get("repeat_cycle") or "")
     if not cycle:
         return "· 一次性"
-    label = {"monthly": "🔁 每月", "weekly": "🔁 每周"}.get(cycle, f"🔁 {cycle}")
+    label = {"daily": "🔁 每日", "weekly": "🔁 每周", "monthly": "🔁 每月"}.get(cycle, f"🔁 {cycle}")
     nxt = str(item.get("next_run_at") or "").replace("T", " ")
     until = str(item.get("repeat_until") or "")
     detail = " · ".join(x for x in (f"至 {until}" if until else "", f"下次 {nxt}" if nxt else "") if x)

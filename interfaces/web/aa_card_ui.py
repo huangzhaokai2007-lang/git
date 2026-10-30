@@ -212,10 +212,16 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
 
         amounts: dict[str, str] = {}
         with st.expander("✏️ 按人设置金额（可选）", expanded=False):
-            st.caption("只填**其他人**该给你的金额；你自己那份由总额自动扣。")
+            st.caption("默认就是**当前均摊值**，只改需要不同的那几位；你自己那份由总额自动扣。")
+            #: 2026-10-30 修：key 一旦进 session，`value=` 就失效 → 上一轮存下的 0.00 会一直沿用，
+            #: 最后提交「王五 0.00」被判"金额看不懂"（用户实测）。用签名变化把初值刷成当前均摊值。
+            signature = f"{plan['total_yuan']}:{plan['count']}"
+            if st.session_state.get("aa-amount-signature") != signature:
+                st.session_state["aa-amount-signature"] = signature
+                for index in range(len(people)):
+                    st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
             for index, name in enumerate(people):
-                amounts[name] = st.text_input(f"{name} 应收（元）", key=f"aa-amt-{index}",
-                                              value=plan["per_yuan"])
+                amounts[name] = st.text_input(f"{name} 应收（元）", key=f"aa-amt-{index}")
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
                      disabled=float(total or 0) <= 0):

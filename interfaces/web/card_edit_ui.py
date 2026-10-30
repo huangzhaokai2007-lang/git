@@ -17,7 +17,12 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
+import premium_ui
+import time_inputs
 from agent import card_draft, confirm_card, write_flow
+
+#: 这些槽位是「时间」，必须用日历选（用户 2026-10-30 反复强调）
+_TIME_FIELDS = {"schedule": "时刻", "date": "日期", "expire": "日期"}
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
@@ -42,16 +47,29 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         return
     if not draft.fields:
         return
-    with st.container(border=True):
-        st.markdown("##### ✏️ 修改这张确认卡")
+    with st.container(border=True, key="card-edit-box"):
+        premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
         changed: dict[str, str] = {}
         for field in draft.fields:
-            new = st.text_input(field.label, value=field.value,
-                                key=f"edit-{draft.kind}-{field.name}")
-            if new.strip() and new.strip() != field.value:
-                changed[field.name] = new.strip()
-        if st.button("按修改重新预检", key=f"recheck-{draft.kind}", disabled=not changed):
+            new = _field(field)
+            if new and new != field.value:
+                changed[field.name] = new
+        col_ok, col_tip = st.columns([1, 3], vertical_alignment="center")
+        if col_ok.button("按修改重新预检", key=f"recheck-{draft.kind}", type="primary",
+                         disabled=not changed, width="stretch"):
             step = executor.submit(write_flow.edit, session_id, changed).result()
             _record(step, f"（卡片编辑：{', '.join(changed)}）")
+            st.session_state["card-edit-open"] = False      # 用户要求：重新预检后收起
             st.rerun()
-        st.caption("修改后重新走一遍收款人解析与风控（不是直接改卡）；确认/验证码请按卡片提示回复。")
+        col_tip.caption("改完自动重走收款人解析与风控；确认/验证码按卡片提示回复。")
+
+
+def _field(field) -> str:
+    """一个字段的输入控件；**时间类字段一律用日历**（schedule 带时刻，date/expire 只选日期）。"""
+    key = f"edit-{field.kind}-{field.name}"
+    if field.name == "schedule":
+        value, too_early = time_inputs.datetime_field(field.label, key)
+        return "" if too_early else value
+    if field.name in _TIME_FIELDS:
+        return time_inputs.date_field(field.label, key)
+    return str(st.text_input(field.label, value=field.value, key=key) or "").strip()

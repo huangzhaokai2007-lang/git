@@ -34,7 +34,7 @@ from tools.schemas import ErrorCode, ToolResult
 RUN_NOW_TOOL, MODIFY_TOOL = "run_scheduled_now", "reschedule_scheduled"
 REPEAT_TOOL, NEXT_TOOL = "set_schedule_repeat", "schedule_next_occurrence"
 #: 循环周期（人类口径：每月 = monthly；每周 = weekly）
-REPEAT_CYCLES = ("monthly", "weekly")
+REPEAT_CYCLES = ("daily", "weekly", "monthly")      # 2026-10-30：新增「每日」
 
 #: 预约时间接受 `YYYY-MM-DDTHH:MM` / `YYYY-MM-DD HH:MM` / `YYYY-MM-DD`
 _TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}))?$")
@@ -128,6 +128,8 @@ def _next_occurrence(execute_at: str, cycle: str) -> str:
     用户「每个月末」的语义就丢了。
     """
     moment = datetime.datetime.fromisoformat(execute_at)
+    if cycle == "daily":                                   # 2026-10-30：每日 = +1 天
+        return (moment + datetime.timedelta(days=1)).isoformat(timespec="minutes")
     if cycle == "weekly":
         return (moment + datetime.timedelta(days=7)).isoformat(timespec="minutes")
     year, month = (moment.year + 1, 1) if moment.month == 12 else (moment.year, moment.month + 1)
@@ -166,7 +168,7 @@ def set_schedule_repeat(schedule_id: str, cycle: str, until: str = "") -> ToolRe
                          params_json={"schedule_id": schedule_id, "cycle": value,
                                       "until": end or None},
                          risk_level="L1", permission_tier="L1", result="success", error_code=None)
-    label = {"monthly": "每月", "weekly": "每周"}.get(value, "不循环")
+    label = {"daily": "每日", "monthly": "每月", "weekly": "每周"}.get(value, "不循环")
     suffix = f"（循环至 {end}）" if end else ""
     return _ok({"schedule_id": schedule_id, "repeat_cycle": value, "repeat_until": end or None},
                {"schedule_id": schedule_id, "repeat_label": label},

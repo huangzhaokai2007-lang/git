@@ -120,7 +120,10 @@ def yuan_to_cents(value: object) -> int | None:
 #: 循环说法 → 周期码（确定性映射，不猜：认不出就按一次性处理）
 _REPEAT_WORDS = {"每月": "monthly", "每个月": "monthly", "月月": "monthly", "月度": "monthly",
                  "每月末": "monthly", "每个月月末": "monthly", "月末": "monthly",
-                 "每周": "weekly", "每星期": "weekly", "每礼拜": "weekly", "每周一次": "weekly"}
+                 "每周": "weekly", "每星期": "weekly", "每礼拜": "weekly", "每周一次": "weekly",
+                 #: 2026-10-30（用户要求「每日/每天」）：每天类说法 → daily（+1 天续期）
+                 "每天": "daily", "每日": "daily", "天天": "daily", "日均": "daily",
+                 "每天一次": "daily"}
 
 
 def repeat_cycle(raw: object) -> str | None:
@@ -128,7 +131,7 @@ def repeat_cycle(raw: object) -> str | None:
     text = str(raw or "").strip()
     if not text:
         return None
-    if text in ("monthly", "weekly"):
+    if text in ("daily", "weekly", "monthly"):       # 2026-10-30：daily 也直接认
         return text
     for word, cycle in _REPEAT_WORDS.items():
         if word in text:
