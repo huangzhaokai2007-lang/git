@@ -93,7 +93,7 @@ def test_aa_card_has_no_policy_lines(seeded, monkeypatch: pytest.MonkeyPatch) ->
                                   rows=[("总金额", "300.00 元")], tier="L1",
                                   requires_otp=False, risk_note="常规群收款")
     text = confirm_card.render(card)
-    assert "权限档" not in text and "短信验证码" not in text
+    assert "权限档" not in text and "验证码" not in text
     assert "总金额" in text and "风险提示" in text
 
 

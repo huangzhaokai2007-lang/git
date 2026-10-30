@@ -87,7 +87,7 @@ def test_transfer_confirm_card_renders(monkeypatch: pytest.MonkeyPatch, clock: o
                                  "slots": {"payee": "王五", "amount": "100.00"}}, clock),
               "给王五转 100 元")
     assert "转账确认卡" in _markdown(at)
-    assert _metric_labels(at) == ["金额（元）", "收款人", "权限档（风险等级）", "短信验证码"]
+    assert _metric_labels(at) == ["金额（元）", "收款人", "权限档", "验证码"]
     assert "王五" in _markdown(at) or "王五" in _caption(at)
 
 
@@ -103,7 +103,7 @@ def test_transfer_otp_card_renders(monkeypatch: pytest.MonkeyPatch, clock: objec
     confirm = next(b for b in at.button if str(getattr(b, "key", "")) == "confirm-ok")
     confirm.click().run()
     assert not at.exception, at.exception
-    assert any(str(element.label) == "短信验证码" for element in at.text_input)
+    assert any(str(element.label) == "验证码" for element in at.text_input)
     assert "张小美" in _caption(at)                                   # OTP 卡也要正确显示主对象
 
 

@@ -180,8 +180,11 @@ def result(executor, session: str, ask, detail_loader) -> None:
           and (turn.get('facts') or {}).get('status', 'active') == 'active'
           and ((turn.get('facts') or {}).get('items') or (turn.get('facts') or {}).get('overdue_items'))):
         subscription_ui.render_turn(turn, ask=ask, key_prefix='workspace-subs-' + str(turn.get('trace_id')))
-    elif scene not in ('cards', 'payee_list') and not any(
+    elif scene not in ('cards', 'payee_list', 'scheduled_list', 'aa_list', 'aa_collect',
+                       'gift_order_list') and not any(
             state in turn.get('states', []) for state in ('CONFIRM_CARD', 'OTP')):
+        #: 2026-10-31 精简：这几类场景下面就有对应业务卡，回复正文在聊天区已经显示过一次，
+        #: 这里再贴一遍就是重复（用户截图里"同一句话出现两遍"）。
         st.markdown(turn.get('reply') or '当前没有查询结果。')
 
 
