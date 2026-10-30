@@ -9,7 +9,7 @@ from typing import Callable, Mapping
 from pydantic import BaseModel, ConfigDict, Field
 
 from agent import (classifier, confirm_card, payee_flow, pending_slots, read_flow, risk_flow,
-                   scheduled_runner, session_memory, templates, write_flow, scene_runtime)
+                   scheduled_runner, session_memory, smalltalk, templates, write_flow, scene_runtime)
 from agent.period import anchor_period, resolve_day, resolve_period
 from agent.read_routes import TOOL_ROUTES
 from data import dao
@@ -91,6 +91,7 @@ class _Ctx:
         #: 写路径与各种提前返回的路径恒为 `{}` —— 只有**工具真的执行成功**才填，避免界面拿
         #: 到半成品数据画出空图。
         self.facts: dict = {}
+        self.raw_text = ""                           #: 卡 27：用户原话（闲聊措辞 / 追问续接要用）
 
     def enter(self, state: str) -> None:
         """进入一个状态（规格 §4 的状态名；顺序在返回结果里可查，便于断言「不可跳步」）。"""
@@ -208,6 +209,7 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
             intent_resolver: Callable[[str, list[str] | None], classifier.IntentOut] | None = None) -> Turn:
     '处理一句用户输入，返回 `Turn`（含到达过的状态序列与调用过的工具）。'
     ctx = _Ctx(f"trace-{uuid.uuid4().hex[:12]}", session_id or current_session_id(), clarify_round)
+    ctx.raw_text = str(text or "")
     ctx.enter("IDLE")
     screen = injection.detect(text)                        # 规则层先行：确定性，命中就不调 LLM（卡 12b）
     if screen.blocked:
@@ -276,6 +278,12 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
 
 def _read_flow(ctx: _Ctx, *, card_reader: Callable[[dict], ToolResult] | None = None) -> Turn:
     """只读路径（卡 09）：SLOT_FILL → PRECHECK → EXECUTE → VERIFY_NUMBERS → 回执。"""
+    if ctx.intent in ("smalltalk", "out_of_scope"):
+        #: 2026-10-31（用户要求）：闲聊/聊不来的话题也要往业务上靠 ——
+        #: 一句热络或一句婉拒 + 顺手给业务入口（不编任何业务数字，守铁律 2）。
+        ctx.enter("PRECHECK")
+        return _finish(ctx, smalltalk.reply_for(ctx.raw_text or "", intent=ctx.intent),
+                       result="success")
     if ctx.intent not in READ_INTENTS:
         ctx.enter("PRECHECK")
         return _finish(ctx, templates.unsupported(ctx.intent), result="rejected")

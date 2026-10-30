@@ -38,7 +38,8 @@ def _app(monkeypatch: pytest.MonkeyPatch, intent: str, slots: dict) -> AppTest:
     return app
 
 
-def test_edit_panel_is_collapsed_until_clicked(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_edit_panel_is_collapsed_until_clicked(clock,
+                                               monkeypatch: pytest.MonkeyPatch) -> None:
     """默认收起：只有三个按钮；点「✏️ 修改」后才出现编辑控件。"""
     app = _app(monkeypatch, "transfer_single", {"payee": "王五", "amount": "100"})
     app.chat_input[0].set_value("给王五转 100 元").run()
@@ -53,7 +54,8 @@ def test_edit_panel_is_collapsed_until_clicked(monkeypatch: pytest.MonkeyPatch) 
     assert "按修改重新预检" in [button.label for button in app.button]
 
 
-def test_scheduled_edit_uses_calendar_and_cycle_picker(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_scheduled_edit_uses_calendar_and_cycle_picker(clock,
+                                                       monkeypatch: pytest.MonkeyPatch) -> None:
     """定时转账抽屉：预约时间是**日历**，另有「循环频率」下拉（一次性/每日/每周/每月）。"""
     app = _app(monkeypatch, "transfer_scheduled",
                {"payee": "王五", "amount": "100", "schedule": "明天"})
