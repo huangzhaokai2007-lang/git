@@ -69,7 +69,10 @@ def _parse_per_person(raw: object, picked: dict[str, str],
         if match is None:
             return None, f"「{seg}」看不懂，请写成「王五 100 元、赵六 200 元」的样子"
         name = match.group(1).strip()
-        payee_id = by_name.get(name) or (aliases or {}).get(name)
+        #: 2026-10-30：卡面按 id 选人，按人金额这里也可能是 `payee_0003 1500` —— 
+        #: 直接认 id（同名两位也不会串），再退回姓名/原话别名。
+        payee_id = (name if name in picked else None) or by_name.get(name) \
+            or (aliases or {}).get(name)
         if payee_id is None or payee_id not in picked:
             return None, f"「{name}」不在这次群收款的名单里"
         cents = yuan_to_cents(match.group(2))

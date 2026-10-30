@@ -279,8 +279,10 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                 st.session_state["aa-amount-signature"] = signature
                 for index in range(len(people)):
                     st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
-            for index, name in enumerate(people):
-                amounts[name] = st.text_input(f"{name} 应收（元）", key=f"aa-amt-{index}")
+            for index, pid in enumerate(people):
+                #: 标签用人话（`李四（139****1001）`），键仍用 payee_id（同名不会串）
+                label = catalog.get(pid, {}).get("label") or pid
+                amounts[pid] = st.text_input(f"{label} 应收（元）", key=f"aa-amt-{index}")
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
                      disabled=float(total or 0) <= 0):
