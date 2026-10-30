@@ -364,15 +364,16 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         item = executor.submit(pending_slots.peek, session_id).result() or {}
         if item.get("intent") == "aa_collect":
             st.session_state["aa-create-open"] = True     # 正在补槽 → 直接展开
-        #: 2026-10-30（用户：按钮写「新增」但表单是开着的）：按钮文案与面板**同一个变量**，
-        #: 切换后立刻 rerun，避免同一轮里文案和面板对不上。
+        #: 2026-10-30（用户：收起按钮点了没用，干脆去掉）：
+        #: 只在**收起时**给一个「＋ 新增群收款」入口；展开后不再放收起按钮，
+        #: 办完（发起/完成）会自动收起（`_start` / `_say` 里清状态）。
         open_now = bool(st.session_state.get("aa-create-open"))
-        if st.button("收起新增群收款" if open_now else "＋ 新增群收款",
-                     key="aa-create-toggle",
-                     type="secondary" if open_now else "primary", width="stretch"):
-            st.session_state["aa-create-open"] = not open_now
-            st.rerun()
-        if open_now:
+        if not open_now:
+            if st.button("＋ 新增群收款", key="aa-create-toggle", type="primary",
+                         width="stretch"):
+                st.session_state["aa-create-open"] = True
+                st.rerun()
+        else:
             _create_panel(executor, session_id)
     for item in executor.submit(aa_flow.active).result():
         _status_card(executor, session_id, item)

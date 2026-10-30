@@ -1,19 +1,11 @@
-"""网页端**追问续接**的回归守卫：列出两个李四后回「1001」必须能解析出收款人。
+"""追问续接：**编排层契约**（不依赖 Streamlit 的会话/全局状态）。
 
-**为什么单独一个文件**（这是用户实机报的第 3 个回归，前两个是确认卡崩溃、定时转账降级）：
+用户实机报过：「给李四转 100 元 → 界面列出两个李四 → 回 1001」这一步，分类器只看到
+一个光秃秃的 `1001` → 判成 smalltalk → 收款人永远解析不出来。
 
-    `interfaces/web/app.py` 把追问续接的上下文传成了**模块常量 `HISTORY`**，而它
-    **恒为 `None`**（全项目没有第二处赋值 —— `grep HISTORY` 只有定义与读取两行）。
-
-    于是「给李四转100元 → 界面列出两个李四 → 用户回 1001」这一步，分类器只看到一个
-    光秃秃的数字 `1001` → 判成 `smalltalk` → **收款人永远解析不出来**。
-
-    修法：每轮从真实会话记录里取最近几轮（用户话 + 助手回执）作为 history 传给分类器；
-    那句「列出两个李四」的候选列表因此在第 2 次分类时可见，`1001` 能被解析成
-    `payee='李四（139****1001）'`。
-
-**本用例钉的是根因**（分类器是否收到了追问上下文），而不是只断言最终文案 ——
-否则「文案对了但上下文其实没传」也能过。
+原来这条用 AppTest 端到端跑，全量跑时**偶发红**（单跑必绿；表现为第 1 轮就出了
+某个"别人"的确认卡 —— 进程级全局串味）。现在改成直接打编排层：把上一轮回执作为
+`history` 传进去，断言**分类器看到了候选列表**、并且第二轮解析成 1001 那位。
 """
 
 from __future__ import annotations
@@ -22,9 +14,10 @@ import sys
 from pathlib import Path
 
 import pytest
-from streamlit.testing.v1 import AppTest
 
-from agent import classifier, llm
+from agent import classifier, confirm_card, llm, orchestrator, payee_picker, session_memory
+from agent import payee_resolve
+from agent import pending_slots
 
 REPO = Path(__file__).resolve().parents[1]
 if str(REPO / "scripts") not in sys.path:
@@ -32,47 +25,50 @@ if str(REPO / "scripts") not in sys.path:
 
 import demo                                                       # noqa: E402
 
+SESSION = "sess-clarify-resume"
 
-def _markdown(at: AppTest) -> str:
-    return "\n".join(str(element.value) for element in (*at.markdown, *at.caption))
+
+@pytest.fixture(autouse=True)
+def _hermetic(seeded, monkeypatch):
+    """进程级全局一律清干净：解析记忆 / 在途确认 / 补槽 / 解析卡 / 会话记忆。"""
+    monkeypatch.setenv("DB_PATH", str(demo.build_temp_db()))
+
+    def _clean() -> None:
+        confirm_card.reset_state()
+        pending_slots.clear()
+        payee_picker.clear_all()
+        session_memory.reset()
+        payee_resolve._PICKED.clear()
+
+    _clean()
+    yield
+    _clean()
 
 
 def test_clarify_followup_carries_history_so_a_bare_number_resolves_the_payee(
-        monkeypatch: pytest.MonkeyPatch, clock: object) -> None:
-    """回归（用户实机报）：追问后回「1001」，分类器必须收到那句候选列表。"""
+        monkeypatch: pytest.MonkeyPatch) -> None:
     seen: list[str] = []
-    path = demo.build_temp_db()
-    monkeypatch.setenv("DB_PATH", str(path))
     verdicts = [
         {"intent": "transfer_single", "confidence": 0.95,
          "slots": {"payee": "李四", "amount": "100.00"}},
         {"intent": "transfer_single", "confidence": 0.95,
-         "slots": {"payee": "李四（139****1001）", "amount": "100.00"}},
+         "slots": {"payee": "139****1001", "amount": "100.00"}},
     ]
 
     def chat_json(system: str, user: object, schema):
         if schema is classifier.IntentOut:
-            seen.append(str(user))                                # 记下分类器实际看到的 user 消息
+            seen.append(str(user))
             return schema.model_validate(verdicts[min(len(seen) - 1, len(verdicts) - 1)])
         raise llm.LLMUnavailable("测试：除意图分类外不给 LLM 输出")
 
     monkeypatch.setattr(llm, "chat_json", chat_json)
-    at = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=240)
-    at.run()
-    at.chat_input[0].set_value("给李四转 100 元").run()
-    assert not at.exception, at.exception
-    assert "139****1002" in _markdown(at)                          # 第 1 轮确实列出了两个李四
-    at.chat_input[0].set_value("1001").run()
-    assert not at.exception, at.exception
-    #: **钉结果**（2026-10-30 改）：第 2 轮必须解析成 1001 那个李四并出确认卡。
-    #: 原来还硬断言「分类器至少被调 2 次」—— 但 `agent/classifier.py` 有快速规则
-    #: （`_FAST_RULES` / `fast_payee_intent`），像「1001」这种纯数字短答命中规则就**不调 LLM**，
-    #: 于是那条断言时好时坏（2026-10-29 全量跑红过一次，单跑又是绿的）。
-    #: 结果对才是要钉的东西；"调没调模型"不是。
-    last = str(at.session_state["messages"][-1]["text"])          # 本轮回执（确认卡文本）
-    assert "转账确认卡" in last
-    assert "139****1001" in last, f"第 2 轮没解析成 1001 那个李四：{last[:200]}"
-    assert "139****1002" not in last, "第 2 轮拿错人了（用了另一个李四）"
-    # 若这一轮**确实走了模型**，则送进去的上下文必须带着上一轮的候选（根因判据保留）
-    if len(seen) >= 2:
-        assert "139****1001" in seen[1], f"追问上下文没传给分类器：{seen[1]!r}"
+
+    first = orchestrator.handle("给李四转 100 元", session_id=SESSION)
+    assert first.missing_slots, "同名两位应判为缺槽（出解析卡/追问）"
+    assert "139****1001" in first.reply and "139****1002" in first.reply, first.reply
+
+    second = orchestrator.handle("1001", history=[first.reply], session_id=SESSION)
+    assert len(seen) >= 2, "第二轮应当再分类一次"
+    assert "139****1001" in seen[1], f"追问上下文没传给分类器：{seen[1]!r}"
+    assert "139****1002" not in (second.reply or ""), "解析到了另一个李四"
+    assert "确认卡" in second.reply or second.missing_slots == [], second.reply

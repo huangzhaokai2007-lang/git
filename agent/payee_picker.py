@@ -49,6 +49,11 @@ def clear(session_id: str) -> None:
     _PENDING.pop(session_id, None)
 
 
+def clear_all() -> None:
+    """清掉**所有会话**的待选（用例隔离用；进程级全局状态不该跨用例泄漏）。"""
+    _PENDING.clear()
+
+
 def pick(session_id: str, payee_id: str) -> tuple[str, dict] | None:
     """用户在解析卡里选了某一位 → `(intent, 补齐 payee_id 的槽位)`，并清掉待选。"""
     state = _PENDING.get(session_id)

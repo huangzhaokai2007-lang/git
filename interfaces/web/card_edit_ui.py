@@ -51,8 +51,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
         changed: dict[str, str] = {}
         for field in draft.fields:
-            new = _field(field, draft.kind)
-            if new and new != field.value:
+            value = (_current_payee_value(executor, session_id, field.value)
+                     if field.name == "payee" else field.value)
+            new = _field(field, draft.kind, default=value)
+            if new and new != value:
                 changed[field.name] = new
         if draft.kind == "transfer_scheduled":          # 循环频率：一次性 / 每日 / 每周 / 每月
             cycle_now = _current_cycle(executor, session_id)
@@ -79,13 +81,25 @@ _REPEAT_OPTIONS = {"（一次性）": "", "每日": "daily", "每周": "weekly",
 _CYCLE_LABEL = {"daily": "每日", "weekly": "每周", "monthly": "每月"}
 
 
+def _current_payee_value(executor: ThreadPoolExecutor, session_id: str, original: str) -> str:
+    """收款人字段回填值：有脱敏手机号就用它（唯一可辨），没有才退回原值。
+
+    2026-10-30（用户实测「在李四那里修改后却出现了收款人解析」）：卡面原本把 `李四` 回填进
+    输入框，用户点「按修改重新预检」时又拿 `李四` 去解析 → 两个李四 → 又弹解析卡。
+    回填 `139****1001` 就一次命中。
+    """
+    confirmation = executor.submit(confirm_card.current, session_id).result()
+    masked = str(((getattr(confirmation, "filled", None) or {}).get("masked_phone") or "")).strip()
+    return masked or original
+
+
 def _current_cycle(executor: ThreadPoolExecutor, session_id: str) -> str:
     """在途确认卡当前记的循环周期（来自 agent 层，界面不自己推断）。"""
     confirmation = executor.submit(confirm_card.current, session_id).result()
     return str(((getattr(confirmation, "filled", None) or {}).get("repeat_cycle") or ""))
 
 
-def _field(field, kind: str) -> str:
+def _field(field, kind: str, *, default: str | None = None) -> str:
     """一个字段的输入控件；**时间类字段一律用日历**（schedule 带时刻，date/expire 只选日期）。"""
     key = f"edit-{kind}-{field.name}"
     if field.name == "schedule":
@@ -93,4 +107,5 @@ def _field(field, kind: str) -> str:
         return "" if too_early else value
     if field.name in _TIME_FIELDS:
         return time_inputs.date_field(field.label, key)
-    return str(st.text_input(field.label, value=field.value, key=key) or "").strip()
+    return str(st.text_input(field.label, value=default if default is not None else field.value,
+                             key=key) or "").strip()
