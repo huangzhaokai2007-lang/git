@@ -63,8 +63,9 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
         if box.label in FILLS:
             box.set_value(FILLS[box.label])
     import datetime
-    #: 2026-10-29：预约时间用**日历选**（日期 + 时刻），不再手敲字符串
-    app.date_input[0].set_value(datetime.date(2030, 11, 20)).run()
+    #: 2026-10-29：预约时间用**日历选**（日期 + 时刻），不再手敲字符串。
+    #: 日期取「今天 + 30 天」—— 业务上不允许超过 1 年，写死 2030 会被直接拒。
+    app.date_input[0].set_value(datetime.date.today() + datetime.timedelta(days=30)).run()
     next(button for button in app.button if button.label == "继续").click().run()
 
     assert not app.exception, app.exception

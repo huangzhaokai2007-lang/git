@@ -99,7 +99,9 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
         return
     #: 2026-10-29（用户要求）：群收款出确认卡时，原始文本卡不再刷进聊天 ——
     #: 卡面（a_card_ui）已经把金额/参与人/分摊说清楚了，两份重复很难看。
-    keep_text = not (turn.intent == "aa_collect" and "CONFIRM_CARD" in turn.states)
+    #: 用 getattr 兜底：测试桩/降级路径可能给的不是完整 Turn（缺 intent/states）
+    keep_text = not (getattr(turn, "intent", "") == "aa_collect"
+                     and "CONFIRM_CARD" in (getattr(turn, "states", None) or ()))
     dump = turn.model_dump()
     workspace_ui.accept(dump, text)
     if turn.error_code:
