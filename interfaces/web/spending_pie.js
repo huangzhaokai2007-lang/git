@@ -155,8 +155,70 @@ export default function ({ parentElement, data, setStateValue = () => {} }) {
     total.append(element('strong', '', `${data.total} 元`));
     details.append(total);
   }
+  // Comment 10: the income pie mirrors the expense one (same geometry, colors, legend markup,
+  // totals label) and only carries facts values — no summation, no percentages recomputed.
+  const incomePie = () => {
+    const groups = data.income_groups || [];
+    const weights = groups.map(group => Number(String(group.amount_yuan ?? '').replaceAll(',', '')));
+    const total = weights.filter(weight => Number.isFinite(weight) && weight > 0)
+      .reduce((sum, weight) => sum + weight, 0);
+    const figure = element('figure', 'bank-pie-figure');
+    const svg = svgElement('svg', { viewBox: '0 0 240 240', role: 'group', 'aria-label': '收入分类饼图' });
+    const defs = svgElement('defs');
+    const maskId = `pie-mask-income-${data.animation_id}`;
+    const mask = svgElement('mask', { id: maskId, maskUnits: 'userSpaceOnUse', x: 0, y: 0, width: 240, height: 240 });
+    mask.append(svgElement('circle', { cx: 120, cy: 120, r: 52, fill: 'none', stroke: 'white',
+      'stroke-width': 104, pathLength: 1, 'stroke-dasharray': 1, transform: 'rotate(-90 120 120)', class: 'bank-pie-sweep' }));
+    defs.append(mask);
+    svg.append(defs, svgElement('circle', { cx: 120, cy: 120, r: 104, fill: '#191b20' }));
+    const slices = svgElement('g', { mask: `url(#${maskId})` });
+    let angle = -Math.PI / 2;
+    weights.forEach((weight, index) => {
+      if (!(Number.isFinite(weight) && weight > 0) || !total) return;
+      const next = angle + (weight / total) * Math.PI * 2;
+      const point = a => `${120 + 104 * Math.cos(a)} ${120 + 104 * Math.sin(a)}`;
+      const attrs = { fill: colors[index % colors.length], stroke: '#0b0c0e', 'stroke-width': 1.5,
+        'vector-effect': 'non-scaling-stroke' };
+      const path = weights.filter(item => item > 0).length === 1
+        ? svgElement('circle', { ...attrs, cx: 120, cy: 120, r: 104 })
+        : svgElement('path', { ...attrs, d: `M120 120 L${point(angle)} A104 104 0 ${next - angle > Math.PI ? 1 : 0} 1 ${point(next)} Z` });
+      const title = svgElement('title');
+      title.textContent = `${groups[index].key} · ${groups[index].amount_yuan} 元 · ${groups[index].pct}%`;
+      path.append(title);
+      slices.append(path);
+      angle = next;
+    });
+    svg.append(slices);
+    figure.append(svg);
+    const details = element('div', 'bank-pie-details');
+    const legend = element('ul', 'bank-pie-legend');
+    legend.setAttribute('aria-label', '收入分类金额与占比');
+    groups.forEach((group, index) => {
+      const row = element('li');
+      const dot = element('i', 'bank-pie-dot');
+      dot.style.backgroundColor = colors[index % colors.length];
+      row.append(dot, element('span', '', group.key), element('span', 'bank-pie-value', `${group.amount_yuan} 元`),
+        element('span', 'bank-pie-pct', `${group.pct}%`));
+      legend.append(row);
+    });
+    details.append(legend);
+    if (data.income_total != null) {
+      const totalNode = element('p', 'bank-pie-total', '收入合计');
+      totalNode.append(element('strong', '', `${data.income_total} 元`));
+      details.append(totalNode);
+    }
+    const box = element('div', 'bank-pie-layout bank-pie-static');
+    box.append(figure, details);
+    return box;
+  };
   layout.append(figure, details);
-  root.append(layout);
+  if ((data.income_groups || []).some(group => Number(String(group.amount_yuan ?? '').replaceAll(',', '')) > 0)) {
+    const pair = element('div', 'bank-pie-pair');
+    pair.append(layout, incomePie());
+    root.append(pair);
+  } else {
+    root.append(layout);
+  }
   highlight(selectedIndex());
   renderLedger(root, data, select, element);
   const focusKey = `bank-pie-focus:${data.animation_id}`;

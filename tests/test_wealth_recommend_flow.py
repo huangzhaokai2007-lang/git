@@ -434,6 +434,9 @@ def test_holdings_detail_without_assessment_offers_the_form(seeded: Path,
     monkeypatch.setenv("DB_PATH", str(seeded))
     path = Path(__file__).resolve().parents[1] / "interfaces" / "web" / "app.py"
     at = AppTest.from_file(str(path), default_timeout=120).run()
+    from agent import classifier
+    monkeypatch.setattr(classifier, 'classify', lambda *args, **kwargs:
+                        classifier.IntentOut(intent='wealth_holdings', confidence=1.0, slots={}))
     next(b for b in at.sidebar.button if b.label == "我的理财").click().run()
     assert not at.exception
     next(b for b in at.button if b.label == "查看所选详情").click().run()

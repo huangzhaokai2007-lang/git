@@ -8,9 +8,9 @@ def test_original_bill_and_ledger_presentation(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     at.chat_input[0].set_value('查八月账单').run()
     assert not at.exception
-    assert any(b.label == '📊 按分类分析支出' for b in at.button)
+    assert any(b.key == 'bill-range-go' for b in at.button)
     assert not any(b.label in ('最大的一笔', '返回账单', '修改范围') for b in at.button)
-    assert any(e.label == '📊 这份账单的图表' for e in at.expander)
+    assert not any(e.label == '📊 这份账单的图表' for e in at.expander)
     at.chat_input[0].set_value('最近的交易').run()
     assert not at.exception
     assert any(b.label == '🧾 出一份账单总结' for b in at.button)

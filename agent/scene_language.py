@@ -133,6 +133,15 @@ def _explicit_intent(text: str) -> str | None:
 
 
 def _time(text: str, context: dict) -> dict | None:
+    span = re.fullmatch(r'(\d{4})年(\d{1,2})月(\d{1,2})日至(\d{4})年(\d{1,2})月(\d{1,2})日的账单报告', text)
+    if span:
+        from datetime import date
+        try:
+            y, m, d, ey, em, ed = map(int, span.groups())
+            period = f'{date(y, m, d).isoformat()} 至 {date(ey, em, ed).isoformat()}'
+        except ValueError:
+            return None
+        return _out('bill_report', {'period': period, 'kind': 'range'})
     explicit = _explicit_intent(text)
     period = _period(text) or (explicit and _embedded_period(text))
     if not period:

@@ -205,8 +205,6 @@ def _row_label(person: dict, kind: str) -> str:
 def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict], confirmation=None) -> None:
     """一列「整行按钮」；点谁就在谁下面拉开详情（再点收起）。"""
     opened = st.session_state.get("payee-open")
-    premium_ui.card_head(f"👥 收款人管理（{len(people)} 位）",
-                         "点某一行展开这位收款人的详情与操作，再点一次收起", tone="")
     for person in people:
         payee_id = str(person["payee_id"])
         kind = _kind_of(person)

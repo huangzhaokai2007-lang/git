@@ -139,7 +139,7 @@ class GenerateBillReportReq(BaseModel):
     model_config = STRICT
 
     period: str
-    kind: Literal["monthly", "yearly"] = "monthly"
+    kind: Literal["monthly", "yearly", "range"] = "monthly"
 
 
 class BillReportData(BaseModel):

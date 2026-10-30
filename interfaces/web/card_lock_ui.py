@@ -188,7 +188,8 @@ def _panel(executor: ThreadPoolExecutor, session: str) -> None:
 
 def render(executor: ThreadPoolExecutor, session: str, *, show_button: bool = True) -> None:
     state = _state(executor, session)
-    if show_button and st.button('临时锁卡', key='lock-open'):
+    if show_button and st.button('临时锁卡', key='lock-open', width='stretch'):
+        # 2026-10-29（Comment 12/13）：与「调整额度 / 挂失并补卡」同一宽度规格。
         import card_limit_ui
         card_limit_ui.reset()
         _cancel_preview(executor, session, state)

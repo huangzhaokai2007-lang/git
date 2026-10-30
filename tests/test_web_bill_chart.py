@@ -107,19 +107,33 @@ def test_series_still_falls_back_to_reply_text() -> None:
 
 
 def test_chat_page_charts_the_facts(monkeypatch: pytest.MonkeyPatch) -> None:
-    """端到端：问一句账单总结 → 聊天页内嵌图表出图；**抹掉回执文案里的数字，图还在**。
+    """端到端：问一句账单总结 → **先选时间段** → 聊天页内嵌图表出图；**抹掉回执文案里的数字，图还在**。
 
-    最后那一步是本用例的价值所在：老实现靠正则扫回执文案出坐标，文案一改图就静默变空；
-    现在数字来自 `Turn.facts`，把 `text` 换成一句没有数字的话，图**一张不少**。
+    前提变了（用户 2026-10-29 Comment 8）：账单报告不再「问一句就铺开」，而是先给时间段选择。
+    所以第一步只断言**门关着**（有日期框、没图、正文被挡），第二步补上门槛（预置
+    `bill-range`）才断言图表真上屏 —— 后面「抹掉回执文案」那一步的价值不变：老实现靠正则扫
+    回执文案出坐标，文案一改图就静默变空；现在数字来自 `Turn.facts`，把 `text` 换成一句没有
+    数字的话，图**一张不少**。
     """
     at = _app(monkeypatch)
     at.chat_input[0].set_value("上个月的账单总结").run()
     assert not at.exception, at.exception
 
+    # —— 新流程的前置步骤：还没选时间段 → 只有选择区，报告与图表都不出 ——
+    assert {box.label for box in at.date_input} >= {"开始日期", "结束日期"}
+    assert not at.get("vega_lite_chart"), "没选时间段就先画图 = 旧的一步到底行为回来了"
+    placeholders = "\n".join(str(element.value) for element in at.caption)
+    assert "选好时间段后" in placeholders                     # 正文位置只剩一句占位提示
+    assert not any(element.label == "📊 这份账单的图表" for element in at.expander)
+
+    at.session_state["bill-range"] = ("2026-08-01", "2026-08-31")   # 选好时间段
+    at.run()
+    assert not at.exception, at.exception
+
     charts = len(at.get("vega_lite_chart"))
-    assert charts > 0                                        # 洞察卡 + 账单图表都出图
+    assert charts == 0  # 独立的月度趋势图已删除，报告中的分类饼图继续保留。
     captions = "\n".join(str(element.value) for element in at.caption)
-    assert "事实包" in captions                              # 页面自己说明：数据取自 Turn.facts
+    assert not any('这份账单的图表' in element.label for element in at.expander)
 
     for message in at.session_state["messages"]:             # 抹掉所有回执正文（含全部数字）
         if message["role"] == "assistant":

@@ -4,7 +4,7 @@ from tests.test_card_binding_ui import app, click, fill
 
 
 SHORTCUTS = (
-    '看账单', '转账', '收款人', '管订阅', '管卡', '调整额度',
+    '看账单', '收款人', '管订阅', '管卡', '调整额度',
     '我的理财', '推荐理财', '风险程度', '锁卡', '挂失补卡', '操作记录',
 )
 
@@ -13,7 +13,7 @@ def test_sidebar_shortcuts_use_plain_labels_and_material_icons(monkeypatch, seed
     at = app(monkeypatch, seeded)
     shortcuts = [button for button in at.sidebar.button if (button.key or '').startswith('scene-')]
     assert [button.label for button in shortcuts] == list(SHORTCUTS)
-    assert [button.key for button in shortcuts] == [f'scene-{i}' for i in range(12)]
+    assert [button.key for button in shortcuts] == [f'scene-{i}' for i in range(11)]
     assert all(button.proto.icon.startswith(':material/') and button.proto.icon.endswith(':')
                for button in shortcuts)
     assert not at.sidebar.get('column')
@@ -35,13 +35,13 @@ def test_active_shortcut_preserves_draft_and_history_never_queries(monkeypatch, 
     assert not turn['executed']
     assert raw(seeded, 'SELECT * FROM card') == cards_before
     assert raw(seeded, 'SELECT * FROM agent_card_binding') == []
-    assert at.session_state['active-scene'] == 4
+    assert at.session_state['active-scene'] == 3
     click(at, '绑定银行卡')
     fill(at, '模拟银行卡号', '6222000000000001')
     turns_before = list(at.session_state['turns'])
     messages_before = list(at.session_state['messages'])
     click(at, '操作记录')
-    assert at.session_state['active-scene'] == 11
+    assert at.session_state['active-scene'] == 10
     assert at.session_state['turns'] == turns_before
     assert at.session_state['messages'] == messages_before
     #: 绑卡表单**应当关闭**（2026-10-26 修）。这里原先断言"表单还在、值还在"，是 10-24

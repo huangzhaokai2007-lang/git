@@ -35,7 +35,12 @@ def _selection(widget: str, turn: dict, loader: Callable | None) -> tuple[str | 
 
 def render_reply(text: str, turn: dict, *, key: str, animate: bool,
                  detail_loader: Callable | None = None) -> bool:
-    """Only replace the category table; original messages/facts remain untouched."""
+    """Only replace the category table; original messages/facts remain untouched.
+
+    Comment 10（2026-10-29）：标题改成「收支明细」后，饼图块要**并排两张**——左支出、右收入，
+    样式/图例/合计同口径（右侧底部是「收入合计」）。收入分类来自 `facts["income_groups"]`
+    （工具层聚合好，界面只搬运），仍然只挂**一个**组件实例，两张饼随之同步展开。
+    """
     facts = turn.get('facts') or {}
     groups = facts.get('groups') or []
     if (turn.get('intent') not in ('bill_analysis', 'bill_report') or turn.get('error_code')
@@ -50,13 +55,15 @@ def render_reply(text: str, turn: dict, *, key: str, animate: bool,
     selection = st.session_state.get(widget, {}).get('selected')
     focus = selection if isinstance(selection, dict) else {}
     pie = components.component('spending_pie',
-        html='<section class="bank-pie" aria-label="支出分类占比"></section>',
+        html='<section class="bank-pie" aria-label="收支分类占比"></section>',
         css=_CSS, js=_JS, isolate_styles=False)
     pie(key=widget, default={'selected': None}, on_selected_change=lambda: None,
         data={'groups': groups, 'animation_id': identity, 'period': facts.get('period'),
               'selected': selected, 'detail': detail,
               'focus_target': focus.get('focus_target'), 'focus_id': focus.get('focus_id'),
-              'total': facts.get('total_yuan') or facts.get('out_sum_yuan')})
+              'total': facts.get('total_yuan') or facts.get('out_sum_yuan'),
+              'income_groups': facts.get('income_groups') or [],
+              'income_total': facts.get('in_sum_yuan')})
     if after:
         st.markdown(after)
     return True

@@ -1,5 +1,9 @@
 .bank-pie{color:#d1d4dc;font-family:"Segoe UI","Microsoft YaHei",sans-serif;container-type:inline-size;padding:14px 0 22px}
 .bank-pie-layout{display:grid;grid-template-columns:minmax(210px,280px) minmax(240px,1fr);align-items:center;gap:38px;max-width:850px}
+.bank-pie-pair{display:grid;grid-template-columns:1fr 1fr;gap:26px;max-width:1180px}
+.bank-pie-pair>.bank-pie-layout{grid-template-columns:1fr;justify-items:center;gap:16px;max-width:none}
+.bank-pie-pair .bank-pie-legend{width:100%;max-width:260px}
+.bank-pie-static .bank-pie-legend li{cursor:default}
 .bank-pie-figure{margin:0;width:100%;max-width:280px}
 .bank-pie svg{display:block;width:100%;height:auto;overflow:visible}
 .bank-pie-slice{transition:opacity .2s,filter .2s;outline:none;cursor:pointer}
