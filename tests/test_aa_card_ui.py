@@ -80,8 +80,10 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     all_text = "\n".join(str(element.value) for element in app.markdown)
     assert "含我" in all_text                             # 参与人区块：2 人（含我）
     marks = "\n".join(str(element.value) for element in app.markdown)
-    assert "均摊金额" in marks and "¥ 150.00" in marks      # 大字均摊金额（300 / 2 份）
-    assert "我承担 150.00 元" in marks and "待收" in marks
+    #: 2026-10-31：均摊金额并进「参与人 + 明细表」合并块（不再有独立大字）
+    assert "均摊 ¥150.00" in marks                       # 300 / 2 份
+    #: 合并块里「我（承担）」是一行明细，金额用等宽字体显示为 ¥ 150.00
+    assert "我（承担）" in marks and "待收 ¥150.00" in marks
     #: 「按人设置金额」也收进 expander 了
     assert any("按人设置金额" in str(element.label) for element in app.expander)
     assert any(button.label == "发起群收款" for button in app.button)

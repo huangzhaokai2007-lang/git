@@ -158,7 +158,8 @@ def _align_amount_defaults(people: list[str], plan: dict) -> None:
         return
     for index in range(len(people)):
         st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
-    st.session_state["aa-mine"] = plan["per_yuan"]
+    #: 我那份用工具层算好的 mine_yuan（含零头）—— 否则 3 个人各 163.33 合计只有 489.99
+    st.session_state["aa-mine"] = plan.get("mine_yuan") or plan["per_yuan"]
 
 
 def _toggle(key: str) -> None:
@@ -299,13 +300,34 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         plan = executor.submit(aa_flow.group_plan, labels, float(total or 0)).result()
         #: 2026-10-30（用户要求）：参与人要**醒目** —— 人数徽章 + 名字芯片，
         #: 不再是一行灰色小字。
+        #: 2026-10-31（用户要求）：**参与人与每人应摊表合并成一块**，配色也调过（不再是灰表格）。
+        _align_amount_defaults(people, plan)
+        _per = float(plan["per_yuan"])
+        _values = [_to_yuan(st.session_state[f"aa-amt-{i}"])
+                   if f"aa-amt-{i}" in st.session_state else _per
+                   for i in range(len(people))]
+        _others = sum(_values)
+        _mine = (_to_yuan(st.session_state["aa-mine"])
+                 if "aa-mine" in st.session_state else _per)
         if people:
             chips = "".join(f'<span class="aa-chip">{label}</span>' for label in labels)
+            rows_html = "".join(
+                f'<div class="aa-split-row"><span>{label}</span>'
+                f'<span class="aa-split-amt">¥ {value:,.2f}</span></div>'
+                for label, value in zip(labels, _values))
+            rows_html += ('<div class="aa-split-row me"><span>我（承担）</span>'
+                          f'<span class="aa-split-amt">¥ {_mine:,.2f}</span></div>')
+            rows_html += ('<div class="aa-split-row total"><span>合计</span>'
+                          f'<span class="aa-split-amt">¥ {_others + _mine:,.2f}</span></div>')
             st.markdown(
-                f'<div class="aa-people"><div class="aa-people-head">'
+                f'<div class="aa-people aa-merged"><div class="aa-people-head">'
                 f'<span class="aa-people-label">参与人</span>'
                 f'<span class="aa-people-count">{plan["count"]} 人（含我）</span></div>'
-                f'<div class="aa-chips">{chips}</div></div>', unsafe_allow_html=True)
+                f'<div class="aa-chips">{chips}</div>'
+                f'<div class="aa-split">{rows_html}</div>'
+                f'<div class="aa-split-foot"><span>待收 ¥{_others:,.2f}</span>'
+                f'<span>均摊 ¥{plan["per_yuan"]}</span></div></div>',
+                unsafe_allow_html=True)
         else:
             st.markdown('<div class="aa-people"><div class="aa-people-head">'
                         '<span class="aa-people-label">参与人</span></div>'
@@ -359,42 +381,6 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not people:
             st.caption("选好参与人后这里会显示均摊金额。")
             return
-        _align_amount_defaults(people, plan)          # 先把默认值对齐，后面才读得对
-        #: 2026-10-31（用户要求）：**有人被单独设过金额时，大字换成"每人应摊明细表"** ——
-        #: 改完能一眼看出谁多少、合计多少；全员一样时仍用原来的大字。
-        import premium_css
-
-        _per = float(plan["per_yuan"])
-        _labels = [catalog.get(pid, {}).get("label") or pid for pid in people]
-        #: 输入框还没初始化（刚加入参与人那一轮）→ 一律按均摊值看待，别急着切成表格
-        _values = [_to_yuan(st.session_state[f"aa-amt-{i}"])
-                   if f"aa-amt-{i}" in st.session_state else _per
-                   for i in range(len(people))]
-        _others = sum(_values)
-        _mine = (_to_yuan(st.session_state["aa-mine"])
-                 if "aa-mine" in st.session_state else _per)
-        custom = (any(abs(value - _per) > 0.005 for value in _values)
-                  or (_mine and abs(_mine - _per) > 0.005))
-        if custom:
-            table = ["| 收款人 | 应收（元） |", "| --- | --- |"]
-            table += [f"| {label} | {value:,.2f} |" for label, value in zip(_labels, _values)]
-            table.append(f"| **我（承担）** | {_mine:,.2f} |")
-            table.append(f"| **合计** | {_others + _mine:,.2f} |")
-            st.markdown("\n".join(table))
-            st.caption(f"待收 {_others:,.2f} 元 · 我承担 {_mine:,.2f} 元")
-        else:
-            mine_show = f"{_mine:.2f}" if _mine else plan['mine_yuan']
-            collect_show = f"{_others:.2f}" if _others else plan['collect_yuan']
-            amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
-            st.markdown(
-                f"<div style='text-align:center;margin:.2rem 0 .1rem'>"
-                f"<span style='color:#9aa0ac;font-size:.8rem'>均摊金额（含我）</span><br>"
-                f"<span style='font-size:2rem;font-weight:650'>{amount_html}</span>"
-                f"<div style='color:#9aa0ac;font-size:.8rem;margin-top:.15rem'>"
-                f"我承担 {mine_show} 元 · 待收 <b style='color:#d1d4dc'>"
-                f"{collect_show} 元</b></div></div>",
-                unsafe_allow_html=True)
-
         amounts: dict[str, str] = {}
         with st.expander("✏️ 按人设置金额（可选）", expanded=False):
             st.caption("默认是当前均摊值；改谁就动谁，**总额会跟着自动变**（总额 = 其他人合计 + 我承担）。")

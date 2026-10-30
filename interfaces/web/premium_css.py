@@ -189,6 +189,23 @@ AA_PEOPLE_CSS = """
 .aa-chip { background: #1c1d21; border: 1px solid #2c2d33; border-radius: 999px;
   padding: 2px 10px; font-size: .9rem; color: #E6E8EE; }
 .aa-empty { color: #9aa0ac; font-size: .82rem; margin-top: .3rem; }
+/* 2026-10-31（用户要求）：参与人与每人应摊表合并成一块，并加一点色彩区分 */
+.aa-merged { background: linear-gradient(180deg, rgba(102,103,201,.13), rgba(102,103,201,.05));
+  border: 1px solid rgba(122,120,220,.35); }
+.aa-split { margin-top: .45rem; border-top: 1px dashed rgba(122,120,220,.28); padding-top: .35rem; }
+.aa-split-row { display: flex; align-items: baseline; justify-content: space-between;
+  gap: .6rem; padding: .22rem .1rem; font-size: .92rem; color: #d7dae2;
+  border-bottom: 1px solid rgba(255,255,255,.04); }
+.aa-split-row:last-child { border-bottom: 0; }
+.aa-split-row .aa-split-amt { color: #b7b1ff; font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .95rem; }
+.aa-split-row.me { color: #f0d9a8; }
+.aa-split-row.me .aa-split-amt { color: #f2b8a0; }
+.aa-split-row.total { font-weight: 650; color: #eceef2;
+  border-top: 1px solid rgba(122,120,220,.35); margin-top: .15rem; }
+.aa-split-row.total .aa-split-amt { color: #ffd9a0; }
+.aa-split-foot { display: flex; justify-content: space-between; gap: .5rem;
+  margin-top: .3rem; color: #9aa0ac; font-size: .8rem; }
 """
 
 CSS = f"<style>{CARD_CSS}{TABLE_CSS}{NUM_CSS}{WIDGET_CSS}{PAYEE_CSS}{PAYEE_ROW_CSS}{AA_PEOPLE_CSS}{REDUCED_MOTION_CSS}</style>"

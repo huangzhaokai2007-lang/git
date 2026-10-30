@@ -64,8 +64,9 @@ def test_weight_split_fills_per_person_amounts(monkeypatch: pytest.MonkeyPatch) 
     assert app.number_input[0].value == 1000.0
 
     marks = "\n".join(str(element.value) for element in app.markdown)
-    assert "| 收款人 | 应收（元） |" in marks, "按人设置后应显示明细表"
-    assert "**合计** | 1,000.00" in marks
+    #: 2026-10-31：明细并进「参与人」块（HTML 行），不再用 markdown 表格
+    assert "aa-split-row" in marks, "按人设置后应显示每人应摊明细"
+    assert "¥ 1,000.00" in marks, "合计应显示 1,000.00"
 
 
 def test_even_split_restores_equal_shares_without_changing_total(
