@@ -578,5 +578,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
                 st.rerun()
         else:
             _create_panel(executor, session_id)
-    for item in executor.submit(aa_flow.active).result():
-        _status_card(executor, session_id, item)
+    #: 2026-10-31（用户要求）：正在**新增**群收款时，下面不再铺历史群收款状态卡 ——
+    #: 这一屏只服务新起一笔，免得旧单子把视线拉走（发起/确认后历史会自己回来）。
+    creating = bool(st.session_state.get("aa-create-open")) and confirmation is None
+    if not creating:
+        for item in executor.submit(aa_flow.active).result():
+            _status_card(executor, session_id, item)
