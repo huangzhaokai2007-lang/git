@@ -112,7 +112,8 @@ def _kline_spec_cached(signature: tuple):
     #: 日 K 一根只有几个像素，柱体要细；月 K 可以粗一些。
     body = base.mark_bar(size=3 if daily else 7).encode(
         y="o:Q", y2="c:Q",
-        color=alt.condition("datum.c >= datum.o", alt.value("#22c55e"), alt.value("#ef4444")),
+        #: **A 股口径：红涨绿跌**（用户 2026-10-30 明确要求；原来按国际惯例绿涨红跌）。
+        color=alt.condition("datum.c >= datum.o", alt.value("#ef4444"), alt.value("#22c55e")),
         tooltip=[alt.Tooltip("date:T", format="%Y-%m-%d" if daily else "%Y-%m", title="日期"),
                  alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
                  alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
@@ -124,7 +125,7 @@ def _kline_spec_cached(signature: tuple):
 
 
 def _kline(candles: list[Mapping[str, Any]]) -> None:
-    """月 K 图：阳线绿、阴线红，滚轮缩放 + 拖拽平移。
+    """K 线图：**红涨绿跌**（A 股口径），滚轮缩放 + 拖拽平移。
 
     `candles` 来自 facts（整数基点，10000 = 净值 1.0000），这里只除以 100 变成「元」。
     用 Altair 而不是 plotly：altair 是 Streamlit 自带依赖，不新增第三方库。
@@ -206,8 +207,8 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
         #: 区间文字保留：K 线看的是走势，这两个数字说清「最坏 / 最好能到什么程度」。
         st.markdown(
             "<div style='display:flex;justify-content:space-between;font-size:.8rem;'>"
-            f"<span style='color:#ef4444;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
-            f"<span style='color:#22c55e;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
+            f"<span style='color:#22c55e;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
+            f"<span style='color:#ef4444;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
             "</div>", unsafe_allow_html=True)
 
         amount = st.number_input(
