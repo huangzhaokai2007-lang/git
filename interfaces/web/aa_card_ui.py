@@ -178,13 +178,17 @@ def _confirm_panel(executor: ThreadPoolExecutor, session_id: str, confirmation) 
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款 · 确认这一笔",
                              "看一眼再确认；确认后才会真的发出去", tone="warn")
-        rows = [("金额（元）", f"{getattr(confirmation, 'amount_cents', 0) / 100:,.2f}"),
-                ("收款人", str(filled.get("target_name") or "—")),
-                ("每人", f"{filled.get('per_person_amount_yuan', '—')} 元（含我一份）"),
-                ("我承担", f"{filled.get('initiator_share_yuan', '—')} 元"),
-                ("待收", f"{filled.get('collect_yuan', '—')} 元")]
-        for label, value in rows:
-            st.markdown(f"**{label}**　{value}")
+        st.markdown(f"**金额（元）**　{getattr(confirmation, 'amount_cents', 0) / 100:,.2f}")
+        st.markdown(f"**收款人**　{filled.get('target_name') or '—'}")
+        #: 2026-10-31（用户要求）：**逐人列出每人该承担多少**，不再挤成一句「每人 —」。
+        items = list(filled.get("per_person_items") or [])
+        if items:
+            table = ["| 收款人 | 应收（元） |", "| --- | --- |"]
+            table += [f"| {item.get('name') or '—'} | {item.get('yuan') or '0.00'} |"
+                      for item in items]
+            st.markdown("\n".join(table))
+        st.markdown(f"**我承担**　{filled.get('initiator_share_yuan', '—')} 元")
+        st.markdown(f"**待收**　{filled.get('collect_yuan', '—')} 元")
         left, middle, right = st.columns(3, vertical_alignment="center")
         #: 2026-10-29 修（用户实测「点击确认后直接卡 bug」）：这里原来调的是**不存在的**
         #: `write_flow.confirm` / `write_flow.cancel` → AttributeError。

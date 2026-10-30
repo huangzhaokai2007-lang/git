@@ -187,6 +187,30 @@ def _prepare_aa(filled: dict) -> Prepared:
             "collect_yuan": f"{plan['collect_cents'] / 100:.2f}",
             "per_person_cents": [plan["per_cents"]] * len(payees),
         })
+    else:
+        #: 2026-10-31 修（用户实测卡面全是「—」）：按人金额 / 按份数均摊时，
+        #: 每人应缴、我承担、待收 也得由工具层的**同一份事实**给出来，卡面不能空。
+        per = [int(value) for value in (filled.get("per_person_cents") or [])]
+        if per:
+            shares = sum(per)
+            mine = int(filled["amount_cents"]) - shares
+            facts.update({
+                "per_person_cents": per,
+                "collect_cents": shares,
+                "collect_yuan": f"{shares / 100:.2f}",
+                "my_share_cents": mine,
+                "initiator_share": mine,
+                "initiator_share_yuan": f"{mine / 100:.2f}",
+                "per_person_amount_yuan": "、".join(f"{value / 100:.2f}" for value in per),
+                "per_person_items": [
+                    {"name": name, "cents": value, "yuan": f"{value / 100:.2f}"}
+                    for name, value in zip(names, per)],
+            })
+    if "per_person_items" not in facts:
+        #: 一键均摊：每人相同，也给出逐人明细（卡面统一按"逐人列出"渲染）
+        unit = int(facts.get("per_person_amount") or 0)
+        facts["per_person_items"] = [{"name": name, "cents": unit, "yuan": f"{unit / 100:.2f}"}
+                                     for name in names]
     facts["target_name"] = filled["aa_target"]
     #: 2026-10-24（人类规格「群收款总额同样受限额约束」）：超单笔上限 / 超今日剩余 → 直接拒。
     single_max = facts.get("limits_single_max")
