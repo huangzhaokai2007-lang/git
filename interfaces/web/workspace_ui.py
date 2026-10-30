@@ -271,8 +271,12 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
         scene_ui.render(executor, session, ask, show_scope=False)
     if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent')):
         slot_form_ui.render(executor, session)
-    if not inline_confirmation_rendered and not (
-            scene in ('aa_list', 'aa_collect') and st.session_state.get('bound-aa-query')):
+    #: 2026-10-31 修：只有**群收款本身的**确认卡由群收款卡自己画（三卡合一）；
+    #: 「登记已付」等其他在途确认仍然走通用确认卡 —— 否则登记已付没有确认按钮，流程卡死。
+    _pending_conf = (executor.submit(_confirm_card.current, session).result()
+                     if executor else None)
+    _aa_owns = (getattr(_pending_conf, 'intent', '') == 'aa_collect')
+    if not inline_confirmation_rendered and not _aa_owns:
         confirmation()
     #: 2026-10-30：修改面板已作为**确认卡内部抽屉**渲染（见 components.confirm_card），
     #: 这里不再单独画，避免页面上出现两块一样的编辑区。

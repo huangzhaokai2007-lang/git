@@ -435,6 +435,24 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                    "（按钮）发起群收款：" + "、".join(people))
 
 
+def _drain_paid_queue(executor: ThreadPoolExecutor, session_id: str) -> None:
+    """把排队中的「登记已付」一个一个接上（当前没有在途确认卡时才接下一个）。"""
+    from agent import confirm_card as _cc
+
+    queue = list(st.session_state.get("aa-paid-queue") or [])
+    if not queue:
+        return
+    if executor.submit(_cc.current, session_id).result() is not None:
+        return                                   # 还有确认卡没处理，等用户
+    next_item = queue.pop(0)
+    st.session_state["aa-paid-queue"] = queue
+    step = executor.submit(write_flow.start, "aa_mark_paid",
+                           {"request_id": next_item["request_id"],
+                            "payee_id": next_item["payee_id"]}, session_id).result()
+    _record(step, f"（队列）登记 {next_item['payee_id']} 已付")
+    st.rerun()
+
+
 def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> None:
     """付款状态卡：谁已付 / 谁没付 + 登记已付 + 撤销。"""
     request_id = str(item["request_id"])
@@ -448,22 +466,48 @@ def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> N
             st.markdown(f"{'✅' if done else '⏳'} **{share['payee_name']}** · "
                         f"{share['amount_yuan']} 元 · {'已付' if done else '未付'}")
         pending = [share for share in (item.get("shares") or []) if share["status"] != "paid"]
-        left, right = st.columns([3, 1], vertical_alignment="center")
+        #: 2026-10-31（用户要求）：登记已付改成**勾选式** —— 点按钮放出未付的人，
+        #: 勾谁付了（可多选）+ 确认/取消，不再一个一个地下拉选。
+        open_key = f"aa-paid-open-{request_id}"
+        picked_key = f"aa-paid-pick-{request_id}"
+        col_pay, col_cancel = st.columns(2, vertical_alignment="center")
         if pending:
-            names = {f"{share['payee_name']}（{share['amount_yuan']} 元）": share["payee_id"]
-                     for share in pending}
-            picked = left.selectbox("登记谁已付", list(names), key=f"aa-who-{request_id}",
-                                    label_visibility="collapsed")
-            if right.button("登记已付", key=f"aa-paid-{request_id}", type="primary",
-                            width="stretch"):
-                _start(executor, session_id, "aa_mark_paid",
-                       {"request_id": request_id, "payee_id": names[picked]},
-                       f"（按钮）登记 {picked} 已付")
+            label = "✏️ 收起登记" if st.session_state.get(open_key) else "登记已付"
+            if col_pay.button(label, key=f"aa-paid-{request_id}", type="primary",
+                              width="stretch"):
+                st.session_state[open_key] = not st.session_state.get(open_key)
+                st.session_state[picked_key] = []
+                st.rerun()
         else:
-            left.caption("这笔群收款已全部付清 ✅")
-        if right.button("撤销", key=f"aa-cancel-{request_id}", width="stretch"):
+            col_pay.caption("这笔群收款已全部付清 ✅")
+        if col_cancel.button("撤销", key=f"aa-cancel-{request_id}", width="stretch"):
             _start(executor, session_id, "aa_cancel", {"request_id": request_id},
                    f"（按钮）撤销群收款 {item['title']}")
+
+        if pending and st.session_state.get(open_key):
+            options = {f"{share['payee_name']}（{share['amount_yuan']} 元）": share["payee_id"]
+                       for share in pending}
+            picked = st.multiselect("勾选已经付给你的人", list(options),
+                                    key=picked_key,
+                                    placeholder="勾选已经付了的人")
+            col_ok, col_no = st.columns(2)
+            if col_ok.button("确认登记", key=f"aa-paid-ok-{request_id}", type="primary",
+                             width="stretch", disabled=not picked):
+                #: 工具层一次登记一个人（各自走确认卡）→ 勾了多位就排队，
+                #: 当前这个先发起，其余等确认完自动接上（见 `_drain_paid_queue`）。
+                rest = [{"request_id": request_id, "payee_id": options[who]}
+                        for who in picked[1:]]
+                st.session_state["aa-paid-queue"] = rest
+                st.session_state[open_key] = False
+                #: 勾选框是**已实例化**的 widget，这里不能直接清 → 挂标记，下一轮开头清
+                st.session_state["aa-paid-clear"] = True
+                _start(executor, session_id, "aa_mark_paid",
+                       {"request_id": request_id, "payee_id": options[picked[0]]},
+                       f"（按钮）登记 {picked[0]} 已付")
+            if col_no.button("取消", key=f"aa-paid-no-{request_id}", width="stretch"):
+                st.session_state[open_key] = False
+                st.session_state["aa-paid-clear"] = True
+                st.rerun()
 
 
 #: 群收款办完后要清掉的表单状态（含 widget key，只能下一轮开头清）
@@ -505,6 +549,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     _apply_pending_reset()
     if st.session_state.pop("aa-reset-form-pending", False):
         _reset_form()                     # 新的一句「我要 aa 收款」→ 表单归零
+    if st.session_state.pop("aa-paid-clear", False):     # 勾选式登记：下一轮清掉勾选
+        for key in [k for k in list(st.session_state) if str(k).startswith("aa-paid-pick-")]:
+            st.session_state.pop(key, None)
+    _drain_paid_queue(executor, session_id)
     confirmation = executor.submit(confirm_card.current, session_id).result()
     if confirmation is not None and getattr(confirmation, "intent", "") == "aa_collect":
         st.session_state["aa-create-open"] = False       # 进了确认态就收起发起表单
