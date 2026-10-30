@@ -91,7 +91,10 @@ def _kline_spec_cached(signature: tuple):
                for p, o, h, low, c in signature]
     #: 周期可能是 `YYYY-MM`（月 K）或 `YYYY-MM-DD`（日 K），补齐成完整日期再解析。
     dates = [p if len(p) == 10 else f"{p}-01" for p in (row["period"] for row in candles)]
-    daily = len(signature[0][0]) == 10
+    #: 周期是不是具体日期（日/周是 `YYYY-MM-DD`，月是 `YYYY-MM`）。
+    #: 注意：**不能用它决定横轴格式** —— 周 K 也是具体日期，按它判断会把周 K 也标成 `%m-%d`，
+    #: 16 年跨度下全是「03-30」没有年份（用户 2026-10-30 报的就是这个）。
+    is_date = len(signature[0][0]) == 10
     frame = pd.DataFrame({
         "date": pd.to_datetime(dates, format="%Y-%m-%d"),
         "o": [int(row["open"]) / 100 for row in candles],
@@ -103,18 +106,20 @@ def _kline_spec_cached(signature: tuple):
     #: 点数不足窗口时前几根是 NaN，Altair 自动跳过 —— 不用特殊处理。
     frame["ma5"] = frame["c"].rolling(5).mean()
     frame["ma20"] = frame["c"].rolling(20).mean()
+    #: 横轴**不写死 format**，交给 Vega 按刻度间隔自适应：
+    #: 16 年跨度显示年份、放大到几个月自动变成月日。写死 `%m-%d` 会丢年份（用户报的 bug），
+    #: 写死 `%Y` 又会让放大后每一格都显示同一个年份 —— 两种都不行。
     base = alt.Chart(frame).encode(
         x=alt.X("date:T", title=None,
-                axis=alt.Axis(format="%m-%d" if daily else "%Y-%m",
-                              labelAngle=-45, tickCount=6)))
+                axis=alt.Axis(labelAngle=-45, tickCount=6)))
     wick = base.mark_rule(color="#94a3b8", strokeWidth=1).encode(
         y=alt.Y("l:Q", title="净值", scale=alt.Scale(zero=False)), y2="h:Q")
     #: 日 K 一根只有几个像素，柱体要细；月 K 可以粗一些。
-    body = base.mark_bar(size=3 if daily else 7).encode(
+    body = base.mark_bar(size=3 if is_date else 7).encode(
         y="o:Q", y2="c:Q",
         #: **A 股口径：红涨绿跌**（用户 2026-10-30 明确要求；原来按国际惯例绿涨红跌）。
         color=alt.condition("datum.c >= datum.o", alt.value("#ef4444"), alt.value("#22c55e")),
-        tooltip=[alt.Tooltip("date:T", format="%Y-%m-%d" if daily else "%Y-%m", title="日期"),
+        tooltip=[alt.Tooltip("date:T", format="%Y-%m-%d" if is_date else "%Y-%m", title="日期"),
                  alt.Tooltip("o:Q", title="开"), alt.Tooltip("h:Q", title="高"),
                  alt.Tooltip("l:Q", title="低"), alt.Tooltip("c:Q", title="收")])
     #: 均线两条：MA5（橙）看短期、MA20（蓝）看中期。比单看裸 K 更容易读出趋势。
