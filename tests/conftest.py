@@ -304,15 +304,25 @@ def set_today_flows(path: Path, day: str, rows: list[tuple[str, int]]) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _reset_pending_slots():
-    """每个用例前清空「缺槽续接」登记（`agent/pending_slots` 是模块级全局）。
+def _reset_agent_globals():
+    """每个用例前后清空 agent 层的**模块级会话状态**。
 
-    **为什么需要**：缺槽追问会登记 `(intent, slots, missing)`，供下一句短答续接。
-    测试里多个用例共用一个 session 名，上一个用例的登记会泄漏到下一个用例，
-    表现为「明明没说话却被合并了槽位」（实测：两条 clarify 用例因此变红）。
+    三个全局都得清，少一个就会互相污染：
+
+    - `pending_slots`：缺槽续接登记。不清的话「明明没说话却被合并了槽位」
+      （实测：两条 clarify 用例因此变红）；
+    - `session_memory._RECENT`：最近几轮对话。不清的话上一个用例的上下文会进入
+      下一个用例的分类提示词（分类器会把它当 history 用）；
+    - `scene_context`：当前场景。不清的话下一个用例可能直接复用上一个的场景。
+
+    三者由 `session_memory.reset(None)` 一次清完（它内部就是转调另外两个）。
+
+    **注意**：`test_web_payee_*` 那两条仍有约 1/3 概率在全量跑时红、单独跑必过
+    （表现为 `payee_list` 被判成 `out_of_scope`）。本隔离**没有**修好它 ——
+    根因未定位，已排除的假设见 PR 描述。
     """
-    from agent import pending_slots
+    from agent import session_memory
 
-    pending_slots.clear()
+    session_memory.reset()
     yield
-    pending_slots.clear()
+    session_memory.reset()
