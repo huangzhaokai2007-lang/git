@@ -333,6 +333,10 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
         pending_slots.remember(session_id, intent, dict(slots), list(shaped.missing))
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
+    #: 2026-10-30（用户实测）：走到这里说明**不再缺槽**（要出卡/要执行了），
+    #: 把之前的补槽记录清掉 —— 否则「还差这几项」表单会在随后几轮一直挂着
+    #: （选完解析卡还在、业务都完成了还在）。
+    pending_slots.clear(session_id)
     filled = shaped.filled
     if confirm_card.is_locked(session_id):
         return Step(states=["PRECHECK"], intent=intent, result="rejected",

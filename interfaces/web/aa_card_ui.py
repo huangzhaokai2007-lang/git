@@ -147,8 +147,16 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     preset = _preset(executor, session_id)
     if (preset["names"] and not st.session_state.get("aa-people")
             and not st.session_state.get("aa-people-touched")):
-        st.session_state["aa-people"] = list(preset["names"])     # 直接带上已解析的人
-        st.session_state["aa-picked"] = list(preset["names"])
+        #: 预填：把上一句解析出的**姓名**映射成 id（同名就不猜，留给用户自己选）
+        catalog_now = executor.submit(aa_flow.candidates).result()
+        preset_ids = []
+        for name in preset["names"]:
+            matches = [item["id"] for item in catalog_now if item["name"] == name]
+            if len(matches) == 1:
+                preset_ids.append(matches[0])
+        if preset_ids:
+            st.session_state["aa-people"] = preset_ids
+            st.session_state["aa-picked"] = preset_ids
     if preset["total"] and not st.session_state.get("aa-total"):
         st.session_state["aa-total"] = preset["total"]
     if preset["title"] and not st.session_state.get("aa-title"):
@@ -165,12 +173,14 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                                        format="%.2f")
         title = title_col.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
 
-        people = list(st.session_state.get("aa-people") or [])
-        plan = executor.submit(aa_flow.group_plan, people, float(total or 0)).result()
+        catalog = {item["id"]: item for item in executor.submit(aa_flow.candidates).result()}
+        people = [pid for pid in (st.session_state.get("aa-people") or [])]
+        labels = [catalog.get(pid, {}).get("label") or str(pid) for pid in people]
+        plan = executor.submit(aa_flow.group_plan, labels, float(total or 0)).result()
         #: 2026-10-30（用户要求）：参与人要**醒目** —— 人数徽章 + 名字芯片，
         #: 不再是一行灰色小字。
         if people:
-            chips = "".join(f'<span class="aa-chip">{name}</span>' for name in people)
+            chips = "".join(f'<span class="aa-chip">{label}</span>' for label in labels)
             st.markdown(
                 f'<div class="aa-people"><div class="aa-people-head">'
                 f'<span class="aa-people-label">参与人</span>'
@@ -185,23 +195,23 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         #: 参与人的增删都收进这个 expander（不再占主视野）
         with st.expander("✏️ 修改参与人", expanded=False):
             if people:
-                for index, name in enumerate(people):
+                for index, pid in enumerate(people):
                     row_left, row_right = st.columns([5, 1], vertical_alignment="center")
-                    row_left.markdown(f"**{name}**")
-                    if row_right.button("删除", key=f"aa-rm-{index}-{name}", width="stretch"):
-                        _remove_person(name)
+                    row_left.markdown(f"**{catalog.get(pid, {}).get('label') or pid}**")
+                    if row_right.button("删除", key=f"aa-rm-{index}-{pid}", width="stretch"):
+                        _remove_person(pid)
                         st.rerun()
             else:
                 st.caption("还没有参与人 —— 从下面挑，或新增一个不在名单里的人。")
-            names = executor.submit(aa_flow.candidates).result()
-            options = [n for n in names if n not in people]
+            options = [pid for pid in catalog if pid not in people]
             picked = st.multiselect("添加参与人（可搜索、可多选）", options, key="aa-picked",
+                                    format_func=lambda pid: catalog.get(pid, {}).get("label") or pid,
                                     placeholder="选择要添加的人")
             col_add, col_all = st.columns(2)
             col_add.button("添加所选", key="aa-add-sel", width="stretch",
                            disabled=not picked, on_click=_add_selected, args=(picked,))
-            col_all.button("全选（把候选都加进来）", key="aa-pick-all", width="stretch",
-                           on_click=_remember_people, args=(list(names),))
+            col_all.button("全选（把候选都加进来）", key="aa-add-all", width="stretch",
+                           on_click=_remember_people, args=(list(catalog),))
             with st.expander("＋ 新增收款人（不在列表里的人）", expanded=False):
                 new_name = st.text_input("姓名", key="aa-new-name")
                 new_phone = st.text_input("手机号", key="aa-new-phone", placeholder="138****0001")
@@ -210,9 +220,12 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                     turn = executor.submit(payee_flow.submit_payee, new_name.strip(),
                                            new_phone.strip(), session_id=session_id).result()
                     if getattr(turn, "executed", False) or "已添加" in (turn.reply or ""):
+                        fresh = executor.submit(aa_flow.candidates).result()
+                        new_id = next((item["id"] for item in fresh
+                                       if item["name"] == new_name.strip()), None)
                         merged = list(st.session_state.get("aa-people") or [])
-                        if new_name.strip() not in merged:
-                            merged.append(new_name.strip())
+                        if new_id and new_id not in merged:
+                            merged.append(new_id)
                         st.session_state["aa-people"] = merged
                     st.rerun()
 
@@ -247,7 +260,7 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
                      disabled=float(total or 0) <= 0):
-            slots = {"payee_ids": people, "amount": plan["total_yuan"]}
+            slots = {"payee_ids": people, "amount": plan["total_yuan"]}   # people 已是 payee_id
             if title.strip():
                 slots["title"] = title.strip()
             #: 2026-10-30 修：默认值就是均摊值，**不要**当"按人金额"发下去 ——
@@ -327,12 +340,15 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         item = executor.submit(pending_slots.peek, session_id).result() or {}
         if item.get("intent") == "aa_collect":
             st.session_state["aa-create-open"] = True     # 正在补槽 → 直接展开
-        if st.button("＋ 新增群收款" if not st.session_state.get("aa-create-open")
-                     else "收起新增群收款",
-                     key="aa-create-toggle", type="primary" if not st.session_state.get("aa-create-open")
-                     else "secondary", width="stretch"):
-            _toggle("aa-create-open")
-        if st.session_state.get("aa-create-open"):
+        #: 2026-10-30（用户：按钮写「新增」但表单是开着的）：按钮文案与面板**同一个变量**，
+        #: 切换后立刻 rerun，避免同一轮里文案和面板对不上。
+        open_now = bool(st.session_state.get("aa-create-open"))
+        if st.button("收起新增群收款" if open_now else "＋ 新增群收款",
+                     key="aa-create-toggle",
+                     type="secondary" if open_now else "primary", width="stretch"):
+            st.session_state["aa-create-open"] = not open_now
+            st.rerun()
+        if open_now:
             _create_panel(executor, session_id)
     for item in executor.submit(aa_flow.active).result():
         _status_card(executor, session_id, item)

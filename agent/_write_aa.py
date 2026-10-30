@@ -97,6 +97,14 @@ def _shape_aa(slots: Mapping) -> ShapeResult:
     clarify, unresolved = "", False
     candidates: list[dict] = []                     # 同名候选 → 交给解析卡
     for query in _as_list(filled.get("payee_ids")):
+        raw = str(query).strip()
+        #: 2026-10-30：卡面传的是 **payee_id**（同名两位也能区分）；按 id 直接取画像，
+        #: 不再拿名字走一遍歧义解析。
+        by_id = payee_resolve.profile_of(raw) if raw.startswith("payee_") else None
+        if by_id:
+            picked.setdefault(raw, str(by_id.get("name") or raw))
+            aliases.setdefault(raw, raw)
+            continue
         person, code, facts = payee_resolve.resolve_or_explain(normalize_query(query))
         if code:                                        # 黑名单：整笔 AA 直接拒（不当候选）
             return ShapeResult(filled=filled, error_code=code, message=str(facts.get("message") or ""))

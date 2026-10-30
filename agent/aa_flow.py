@@ -21,15 +21,30 @@ def active() -> list[dict]:
     return requests("active")
 
 
-def candidates() -> list[str]:
-    """可选参与人（排除黑名单；黑名单不能收款，口径见人类原文）。"""
+def candidates() -> list[dict]:
+    """可选参与人：`[{id, name, label}]`（排除黑名单）。
+
+    2026-10-30（用户实测「点完其中一个李四后另外一个李四不见了」）：原来返回**姓名列表**，
+    卡面按姓名去重，于是同名两位只能选到一个。现在带 id，标签在有同名时补脱敏手机号
+    （`李四（139****1001）`），选谁都不含糊。
+    """
     from tools import payee as _payee          # 延迟 import：避免顶层循环
 
     listed = _payee.list_payees()
     if not listed.ok:
         return []
-    return [str(item["name"]) for item in (listed.facts or {}).get("items", [])
-            if not item.get("blacklist")]
+    people = [item for item in (listed.facts or {}).get("items", [])
+              if not item.get("blacklist")]
+    counts: dict[str, int] = {}
+    for item in people:
+        counts[str(item["name"])] = counts.get(str(item["name"]), 0) + 1
+    result = []
+    for item in people:
+        name = str(item["name"])
+        phone = str(item.get("masked_phone") or "")
+        label = f"{name}（{phone}）" if counts[name] > 1 and phone else name
+        result.append({"id": str(item["payee_id"]), "name": name, "label": label})
+    return result
 
 
 def group_plan(names: list[str], total_yuan: float) -> dict:

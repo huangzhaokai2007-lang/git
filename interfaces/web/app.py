@@ -224,8 +224,13 @@ def _render_confirm(*, inline: bool = False) -> None:
             st.rerun()
         return
     #: 2026-10-30（用户要求）：修改面板做成**确认卡内部抽屉**（点「✏️ 修改」在这张卡里展开）
+    #: 只有"有可编辑字段"的确认卡才给「修改」（黑名单确认卡之类点了也没用）
+    from agent import card_draft
+
+    _draft = _agent_executor().submit(card_draft.draft_of, st.session_state["session_id"]).result()
+    _editable = bool(_draft is not None and getattr(_draft, "fields", None))
     action = ui.confirm_card(
-        confirmation, compact=inline,
+        confirmation, compact=inline, editable=_editable,
         edit_panel=lambda: card_edit_ui.render(_agent_executor(), st.session_state["session_id"]))
     if action == "confirm":
         _confirm_submit("确认", inline=inline)

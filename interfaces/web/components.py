@@ -236,7 +236,8 @@ def _evidence(confirmation: Any) -> None:
 
 
 def confirm_card(confirmation: Any, *, compact: bool = False,
-                 edit_panel: Callable[[], None] | None = None) -> str | None:
+                 edit_panel: Callable[[], None] | None = None,
+                 editable: bool = True) -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     if compact:
         st.markdown('**核对修改**')
@@ -251,11 +252,16 @@ def confirm_card(confirmation: Any, *, compact: bool = False,
             return 'confirm'
         if middle.button('✖ 取消', key='confirm-cancel', width='stretch'):
             return 'cancel'
-        opened = bool(st.session_state.get('card-edit-open'))
-        if right.button('✏️ 收起修改' if opened else '✏️ 修改', key='confirm-modify',
-                        width='stretch'):
-            st.session_state['card-edit-open'] = not opened
-            st.rerun()
+        if editable:
+            opened = bool(st.session_state.get('card-edit-open'))
+            if right.button('✏️ 收起修改' if opened else '✏️ 修改', key='confirm-modify',
+                            width='stretch'):
+                st.session_state['card-edit-open'] = not opened
+                st.rerun()
+            #: 2026-10-30 修：紧凑卡（收款人卡内联转账）也要能把抽屉拉出来，
+            #: 之前只在标准卡里调了 edit_panel，点「修改」看起来没反应。
+            if opened and edit_panel is not None:
+                edit_panel()
         return None
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
@@ -289,15 +295,17 @@ def confirm_card(confirmation: Any, *, compact: bool = False,
             return "confirm"
         if middle.button("✖ 取消", key="confirm-cancel", width="stretch"):
             return "cancel"
-        opened = bool(st.session_state.get("card-edit-open"))
-        if right.button("✏️ 收起修改" if opened else "✏️ 修改", key="confirm-modify",
-                        width="stretch"):
-            st.session_state["card-edit-open"] = not opened
-            st.rerun()
-        #: 2026-10-30（用户要求）：修改面板做成**卡内抽屉** —— 就在这张卡里往下展开，
-        #: 不再是页面上另起一块（用户："要有个拉开的效果"）。
-        if opened and edit_panel is not None:
-            edit_panel()
+        #: 2026-10-30（用户要求）：**只有能改的卡**才给「修改」（黑名单确认卡这类没有可改字段，
+        #: 按钮点了也没用，干脆不显示）。
+        if editable:
+            opened = bool(st.session_state.get("card-edit-open"))
+            if right.button("✏️ 收起修改" if opened else "✏️ 修改", key="confirm-modify",
+                            width="stretch"):
+                st.session_state["card-edit-open"] = not opened
+                st.rerun()
+            #: 修改面板做成**卡内抽屉** —— 就在这张卡里往下展开（用户："要有个拉开的效果"）。
+            if opened and edit_panel is not None:
+                edit_panel()
     return None
 
 
