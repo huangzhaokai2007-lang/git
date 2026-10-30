@@ -59,6 +59,29 @@ def _say(executor: ThreadPoolExecutor, session_id: str, text: str, summary: str)
     st.rerun()
 
 
+def _normalize_candidates(raw: list) -> dict[str, dict]:
+    """候选 → `{id: {id, name, label}}`。**两种形状都接受**：
+
+    - 新形状：`{"id", "name", "label"}`；
+    - 老形状：纯字符串（姓名）。
+
+    兜底是为了不让一次模块缓存/版本错配把整页搞红（实测红过一次：
+    `TypeError: string indices must be integers`）。
+    """
+    catalog: dict[str, dict] = {}
+    for index, item in enumerate(raw or []):
+        if isinstance(item, dict):
+            payee_id = str(item.get("id") or item.get("payee_id") or f"unknown-{index}")
+            name = str(item.get("name") or payee_id)
+            label = str(item.get("label") or name)
+        else:
+            name = str(item)
+            payee_id = f"name-{index}-{name}"
+            label = name
+        catalog[payee_id] = {"id": payee_id, "name": name, "label": label}
+    return catalog
+
+
 def _toggle(key: str) -> None:
     st.session_state[key] = not st.session_state.get(key, False)
 
@@ -148,7 +171,7 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     if (preset["names"] and not st.session_state.get("aa-people")
             and not st.session_state.get("aa-people-touched")):
         #: 预填：把上一句解析出的**姓名**映射成 id（同名就不猜，留给用户自己选）
-        catalog_now = executor.submit(aa_flow.candidates).result()
+        catalog_now = list(_normalize_candidates(executor.submit(aa_flow.candidates).result()).values())
         preset_ids = []
         for name in preset["names"]:
             matches = [item["id"] for item in catalog_now if item["name"] == name]
@@ -173,7 +196,7 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                                        format="%.2f")
         title = title_col.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
 
-        catalog = {item["id"]: item for item in executor.submit(aa_flow.candidates).result()}
+        catalog = _normalize_candidates(executor.submit(aa_flow.candidates).result())
         people = [pid for pid in (st.session_state.get("aa-people") or [])]
         labels = [catalog.get(pid, {}).get("label") or str(pid) for pid in people]
         plan = executor.submit(aa_flow.group_plan, labels, float(total or 0)).result()
@@ -220,7 +243,8 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                     turn = executor.submit(payee_flow.submit_payee, new_name.strip(),
                                            new_phone.strip(), session_id=session_id).result()
                     if getattr(turn, "executed", False) or "已添加" in (turn.reply or ""):
-                        fresh = executor.submit(aa_flow.candidates).result()
+                        fresh = _normalize_candidates(
+                            executor.submit(aa_flow.candidates).result()).values()
                         new_id = next((item["id"] for item in fresh
                                        if item["name"] == new_name.strip()), None)
                         merged = list(st.session_state.get("aa-people") or [])
