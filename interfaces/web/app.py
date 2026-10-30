@@ -131,6 +131,13 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": display or text, "turn": dump})
     state["clarify_round"] = state["clarify_round"] + 1 if "CLARIFY" in turn.states else 0
     state["pending_id"] = turn.pending_id
+    #: 2026-10-30（用户反馈「胡乱出现收款人解析」）：解析卡只在**它那次意图**下有效。
+    #: 新的一轮换了别的事，就把过期解析卡清掉（它原本有 5 分钟 TTL，会一直挂在屏上）。
+    from agent import payee_picker as _picker
+
+    _pending = _picker.pending(st.session_state["session_id"])
+    if _pending and _pending.get("intent") != turn.intent:
+        _picker.clear(st.session_state["session_id"])
     state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
     #: 2026-10-28：发起群收款（含缺槽追问）时也画卡面 —— 总额/选人/按人金额都在卡上填，
