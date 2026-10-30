@@ -81,6 +81,25 @@ def _normalize_candidates(raw: list) -> dict[str, dict]:
     return catalog
 
 
+def _to_yuan(value: object) -> float:
+    """把用户输入的金额文本转成元（认不出就当 0）。"""
+    try:
+        return float(str(value or "").replace(",", "").strip() or 0)
+    except ValueError:
+        return 0.0
+
+
+def _sync_total() -> None:
+    """任一按人金额（含「我承担」）改动 → 总额自动重算：`Σ其他人 + 我承担`。
+
+    在 `on_change` 里调用（回调先于脚本重跑执行，所以能安全改 `aa-total` 这个控件状态）。
+    """
+    others = sum(_to_yuan(value) for key, value in list(st.session_state.items())
+                 if str(key).startswith("aa-amt-"))
+    mine = _to_yuan(st.session_state.get("aa-mine"))
+    st.session_state["aa-total"] = round(others + mine, 2)
+
+
 def _toggle(key: str) -> None:
     st.session_state[key] = not st.session_state.get(key, False)
 
@@ -265,30 +284,41 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         #: 均摊大区块：大字金额 + 我承担/待收 一行（金额一变就有渐变脉冲）
         import premium_css
 
+        #: 2026-10-31：按人金额可改（含"我承担"）→ 这里显示的"我承担/待收"要跟**输入框**，
+        #: 不能再用均摊建议值，否则会出现"改了金额但份额没变"的错觉（用户实测）。
+        _others = sum(_to_yuan(st.session_state.get(f"aa-amt-{i}"))
+                      for i in range(len(people)))
+        _mine = _to_yuan(st.session_state.get("aa-mine"))
+        mine_show = f"{_mine:.2f}" if _mine else plan['mine_yuan']
+        collect_show = f"{_others:.2f}" if _others else plan['collect_yuan']
         amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
         st.markdown(
             f"<div style='text-align:center;margin:.2rem 0 .1rem'>"
             f"<span style='color:#9aa0ac;font-size:.8rem'>均摊金额（含我）</span><br>"
             f"<span style='font-size:2rem;font-weight:650'>{amount_html}</span>"
             f"<div style='color:#9aa0ac;font-size:.8rem;margin-top:.15rem'>"
-            f"我承担 {plan['mine_yuan']} 元 · 待收 <b style='color:#d1d4dc'>"
-            f"{plan['collect_yuan']} 元</b></div></div>",
+            f"我承担 {mine_show} 元 · 待收 <b style='color:#d1d4dc'>"
+            f"{collect_show} 元</b></div></div>",
             unsafe_allow_html=True)
 
         amounts: dict[str, str] = {}
         with st.expander("✏️ 按人设置金额（可选）", expanded=False):
-            st.caption("默认就是**当前均摊值**，只改需要不同的那几位；你自己那份由总额自动扣。")
-            #: 2026-10-30 修：key 一旦进 session，`value=` 就失效 → 上一轮存下的 0.00 会一直沿用，
-            #: 最后提交「王五 0.00」被判"金额看不懂"（用户实测）。用签名变化把初值刷成当前均摊值。
-            signature = f"{plan['total_yuan']}:{plan['count']}"
+            st.caption("默认是当前均摊值；改谁就动谁，**总额会跟着自动变**（总额 = 其他人合计 + 我承担）。")
+            #: 2026-03-31：签名只跟**参与人**走 —— 改总额不该把用户已填的金额冲掉。
+            signature = "|".join(people)
             if st.session_state.get("aa-amount-signature") != signature:
                 st.session_state["aa-amount-signature"] = signature
                 for index in range(len(people)):
                     st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
+                st.session_state["aa-mine"] = plan["per_yuan"]
             for index, pid in enumerate(people):
-                #: 标签用人话（`李四（139****1001）`），键仍用 payee_id（同名不会串）
+                #: 标签用人话（李四（139****1001）），键仍用 payee_id（同名不会串）
                 label = catalog.get(pid, {}).get("label") or pid
-                amounts[pid] = st.text_input(f"{label} 应收（元）", key=f"aa-amt-{index}")
+                amounts[pid] = st.text_input(f"{label} 应收（元）", key=f"aa-amt-{index}",
+                                             on_change=_sync_total)
+            #: 2026-10-31（用户要求）：按人编辑里**加上"我"** —— 否则改完其他人金额，
+            #: 我那份还是老值，看起来像"均摊份额没变化"。改动会经 _sync_total 反推总额。
+            mine_value = st.text_input("我承担（元）", key="aa-mine", on_change=_sync_total)
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
                      disabled=float(total or 0) <= 0):
