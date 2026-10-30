@@ -414,7 +414,12 @@ def classify(text: str, history: list[str] | None = None) -> IntentOut:
             check_structure(result)
             return normalize_output(result)
         except (llm.LLMUnavailable, ValidationError, ClassifierOutputError) as exc:
-            logger.warning("分类第 %s/2 次失败：%s", attempt, type(exc).__name__)
+            #: 只打类型不够 —— 排查「偶发被判成 out_of_scope」时最需要的是
+            #: **带了多少 history、原话长什么样、异常说了什么**。
+            #: 2026-10-30 两条 payee 用例全量跑时约 1/3 概率红，就是靠这条日志才有的查。
+            logger.warning("分类第 %s/2 次失败：%s（history=%d 条，text=%r，原因：%s）",
+                           attempt, type(exc).__name__, len(history or []),
+                           str(text)[:40], str(exc)[:120])
     return fallback_out_of_scope()
 
 
