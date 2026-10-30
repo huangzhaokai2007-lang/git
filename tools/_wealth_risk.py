@@ -220,6 +220,31 @@ def _product_candles(product_id: str, max_gain: float, max_loss: float) -> list[
              "low": row[3], "close": row[4]} for row in months[-CANDLE_MONTHS:]]
 
 
+def _per_10k_year(expected_yield: float) -> str:
+    """每万元年收益（元，整数）＝ 年化 × 100。
+
+    **为什么放工具层**：铁律 2 —— 界面不许自己乘。用户看到「8.20%」没有体感，
+    给一个「每万元一年约 820 元」的标尺才直观；金额换算是用户自己的事。
+    """
+    return f"{round(expected_yield * 100):,}"
+
+
+def _current_pct(candles: list[dict]) -> str:
+    """**近 12 个月**净值变化（带符号百分数，如 `+8.20`）。
+
+    为什么要限定 12 个月：卡片上的 `max_gain_pct` / `max_loss_pct` 是**年度**口径，
+    而月 K 从 2010 起 —— 直接拿首根算会得到「+1426%」，和区间不在一个尺度上，
+    画到同一条刻度条里必然爆表。取最近 12 根月 K 才可比。
+    """
+    if len(candles) < 2:
+        return "+0.00"
+    base = candles[-min(12, len(candles))].get("open")
+    last = candles[-1].get("close")
+    if not base or not last:
+        return "+0.00"
+    return _range_text((last - base) / base * 100)
+
+
 def _range_text(pct: float) -> str:
     """百分比数值 → 带符号的两位小数字符串（如 `+38.50` / `-30.00` / `0.00`）。
 
@@ -519,6 +544,10 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
     bounds = {row["id"]: (row["expected_yield"] + swings[row["id"]], -swings[row["id"]])
               for row in products}
     data = {"items": [item.model_dump(by_alias=True) for item in items]}
+    #: 月 K 每只只生成一次：facts 里的 `candles` 和 `current_pct` 共用同一份，
+    #: 免得同一只产品走两遍随机游走（那会让「当前净值」和图上最后一根对不上）。
+    candles_map = {item.product_id: _product_candles(item.product_id, *bounds[item.product_id])
+                   for item in items}
     facts = {"risk_level": level, "risk_label": risk_label(level),
              "ceiling_rank": ceiling, "item_count": len(items),
              "horizon_days": horizon_days, "amount": amount,
@@ -528,13 +557,18 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),
                         #: 月 K（模拟）：只随推荐下发 —— 全部产品目录（T22）不带，避免 payload 翻几倍。
-                        "candles": _product_candles(item.product_id, *bounds[item.product_id]),
+                        "candles": candles_map[item.product_id],
                         #: 买得起吗 —— 由工具层判定（铁律 1：编排层与界面不做业务算术）。
                         "affordable": (available is None or
                                        next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id) <= available),
                         "max_gain_pct": _range_text(bounds[item.product_id][0]),
                         "max_loss_pct": _range_text(bounds[item.product_id][1]),
+                        #: 每万元年收益 + 当前净值位置：界面只做排版，不做乘法（铁律 2）。
+                        "per_10k_year_yuan": _per_10k_year(
+                            next(row["expected_yield"] for row in products
+                                 if row["id"] == item.product_id)),
+                        "current_pct": _current_pct(candles_map[item.product_id]),
                         #: 期限的月/年整数形态：渲染层会把 180 天说成「6 个月」、730 天说成「2 年」，
                         #: 那两个数字必须能在 facts 里找到，否则数字校验器判成幻觉。
                         "term_months": int(item.term) // 30,

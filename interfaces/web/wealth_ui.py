@@ -126,7 +126,7 @@ def _kline_spec_cached(signature: tuple):
     ma5 = base.mark_line(color="#f59e0b", strokeWidth=1.4).encode(y="ma5:Q")
     ma20 = base.mark_line(color="#3b82f6", strokeWidth=1.4).encode(y="ma20:Q")
     #: `interactive()` = 滚轮缩放 + 拖拽平移；用户明确要求「可以放大」。
-    return (wick + body + ma5 + ma20).properties(height=200).interactive()
+    return (wick + body + ma5 + ma20).properties(height=260).interactive()
 
 
 def _kline(candles: list[Mapping[str, Any]]) -> None:
@@ -175,13 +175,22 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
     with st.container(border=True):
         st.markdown(f"**{item.get('name')}**")
         #: 聊天气泡的全局样式会隐藏 st.caption；关键产品信息必须用普通 Markdown。
-        #: 起购额必须露出来 —— 否则用户点「订购」才知道买不起（演示实测）。
-        #: 类型标签（如「结构化」「货币型」）：货架上有 25 只产品，不给类型标签
-        #: 用户只能从名字猜它是什么 —— 结构化产品尤其看不出来（名字里没有"结构化"三个字）。
-        st.markdown(f"{item.get('risk_label') or '风险等级待核实'} · "
-                    f"{item.get('kind_label') or '未分类'} · "
-                    f"预期年化 {item.get('yield')} · 期限 {item.get('term')} 天 · "
-                    f"起购 {item.get('min_amount_yuan')} 元")
+        #: **年化做主视觉**（1.55rem 加粗）—— 理财卡第一眼要看的就是它；
+        #: 原来五段挤一行、同字号，用户得读完整行才知道收益多少，窄屏还会折得难看。
+        #: 风险等级做成中性描边徽章：**不用红绿**，否则和「红涨绿跌」打架。
+        st.markdown(
+            "<div style='display:flex;align-items:baseline;gap:.45rem;margin:.1rem 0 .15rem;'>"
+            f"<span style='font-size:1.55rem;font-weight:700;line-height:1;'>"
+            f"{html.escape(str(item.get('yield')))}</span>"
+            "<span style='font-size:.75rem;color:#94a3b8;'>预期年化</span></div>"
+            "<div style='font-size:.8rem;color:#94a3b8;'>"
+            "<span style='display:inline-block;padding:.02rem .4rem;margin-right:.4rem;"
+            "border:1px solid rgba(148,163,184,.55);border-radius:999px;font-size:.72rem;'>"
+            f"{html.escape(str(item.get('risk_label') or '风险待核实'))}</span>"
+            f"{html.escape(str(item.get('kind_label') or '未分类'))} · "
+            f"{html.escape(str(item.get('term')))} 天 · "
+            f"起购 {html.escape(str(item.get('min_amount_yuan')))} 元</div>",
+            unsafe_allow_html=True)
 
         _structure(item)
         #: **周期切换**（用户要求：图表上方一排按钮，点哪个看哪个）：
@@ -209,16 +218,40 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             "<span style='color:#f59e0b;'>━</span> MA5 "
             "<span style='color:#3b82f6;'>━</span> MA20 · 滚轮缩放 · 拖拽平移</div>",
             unsafe_allow_html=True)
-        #: 区间文字保留：K 线看的是走势，这两个数字说清「最坏 / 最好能到什么程度」。
+        #: **区间刻度条**：把「下沿 / 近一年 / 上沿」画在同一条上 —— 光给两个端点数字，
+        #: 用户不知道当前站在哪。三个数都来自 facts（年度口径，见 `_current_pct` 的注释），
+        #: 这里只把百分数映射成像素（和 K 线把价格映射成纵坐标是一回事，不做业务换算）。
+        lo = _num(str(item.get("max_loss_pct", "0")).replace("+", ""))
+        hi = _num(str(item.get("max_gain_pct", "0")).replace("+", ""))
+        cur = _num(str(item.get("current_pct", "+0")).replace("+", ""))
+        pos = 0.0 if hi <= lo else max(0.0, min(1.0, (cur - lo) / (hi - lo))) * 100
+        label_pos = max(12.0, min(88.0, pos))
         st.markdown(
-            "<div style='display:flex;justify-content:space-between;font-size:.8rem;'>"
-            f"<span style='color:#22c55e;'>▼ 参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</span>"
-            f"<span style='color:#ef4444;'>▲ 参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</span>"
+            "<div style='position:relative;height:30px;margin:.45rem 0 .1rem;'>"
+            "<div style='position:absolute;left:0;right:0;top:5px;height:8px;border-radius:4px;"
+            "background:linear-gradient(90deg,rgba(34,197,94,.45),rgba(148,163,184,.25),rgba(239,68,68,.45));'></div>"
+            f"<div style='position:absolute;left:{pos:.1f}%;top:1px;width:2px;height:16px;"
+            "background:#64748b;transform:translateX(-1px);'></div>"
+            f"<div style='position:absolute;left:{label_pos:.1f}%;top:17px;transform:translateX(-50%);"
+            "font-size:.7rem;color:#64748b;white-space:nowrap;'>"
+            f"近一年 {html.escape(str(item.get('current_pct')))}%</div>"
+            f"<div style='position:absolute;left:0;top:17px;font-size:.7rem;color:#94a3b8;'>"
+            f"参考下沿 {html.escape(str(item.get('max_loss_pct')))}%</div>"
+            f"<div style='position:absolute;right:0;top:17px;font-size:.7rem;color:#94a3b8;'>"
+            f"参考上沿 {html.escape(str(item.get('max_gain_pct')))}%</div>"
             "</div>", unsafe_allow_html=True)
 
         amount = st.number_input(
             "金额（元）", min_value=floor, value=floor, step=100,
             key=f"{key_prefix}-amt-{pid}", label_visibility="collapsed", disabled=readonly)
+        #: 收益标尺：**每万元年收益**（工具层算好的，界面只排版）——
+        #: 光给「8.20%」用户没体感，给个「一万块一年约 820 元」才直观。
+        if item.get("per_10k_year_yuan"):
+            st.markdown(
+                f"<div style='font-size:.72rem;color:#94a3b8;margin:-.45rem 0 .35rem;'>"
+                f"每万元年收益约 {html.escape(str(item['per_10k_year_yuan']))} 元（模拟）</div>",
+                unsafe_allow_html=True)
+
         #: 买不起就别给可点的按钮：`affordable` 由工具层按「起购额 ≤ 储蓄余额」判定。
         #: 老 facts 没有这个键时按"可买"处理，保持向后兼容。
         if item.get("affordable") is False:
@@ -264,7 +297,7 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     expanded = bool(st.session_state.get(expanded_key))
     shown = items if expanded else items[:_PREVIEW_COUNT]
     for category, group in wealth_groups(shown):
-        st.markdown(f'**{category_label(category)}**')
+        st.markdown(f'#### {category_label(category)}')
         for start in range(0, len(group), _COLUMNS):
             cols = st.columns(_COLUMNS)
             for col, item in zip(cols, group[start:start + _COLUMNS]):
