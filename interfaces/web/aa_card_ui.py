@@ -157,6 +157,7 @@ def _add_selected(picked: list[str]) -> None:
     st.session_state["aa-people"] = current + [n for n in picked if n not in current]
     st.session_state["aa-people-touched"] = True
     st.session_state["aa-picked"] = []                      # 回调里清，下次渲染前生效
+    st.session_state["aa-people-open"] = False              # 2026-10-31：加完就收起这块
 
 
 def _remove_person(name: str) -> None:
@@ -164,6 +165,11 @@ def _remove_person(name: str) -> None:
     st.session_state["aa-people"] = [p for p in (st.session_state.get("aa-people") or [])
                                      if p != name]
     st.session_state["aa-people-touched"] = True
+
+
+def _collapse_people() -> None:
+    """把「修改参与人」收起（用户 2026-10-31：点完添加所选这块该自己收起来）。"""
+    st.session_state["aa-people-open"] = False
 
 
 def _select_all() -> None:
@@ -285,8 +291,14 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                         '<div class="aa-empty">还没有参与人 —— 点下面「✏️ 修改参与人」添加</div>'
                         '</div>', unsafe_allow_html=True)
 
-        #: 参与人的增删都收进这个 expander（不再占主视野）
-        with st.expander("✏️ 修改参与人", expanded=False):
+        #: 参与人的增删收进这块（不再占主视野）；2026-10-31 用户要求：
+        #: 「点添加所选之后这块可以收起」→ 用按钮控制展开态（expander 的状态改不动）。
+        _people_open = bool(st.session_state.get("aa-people-open"))
+        if st.button("✏️ 收起修改参与人" if _people_open else "✏️ 修改参与人",
+                     key="aa-people-toggle", width="stretch"):
+            st.session_state["aa-people-open"] = not _people_open
+            st.rerun()
+        if _people_open:
             if people:
                 for index, pid in enumerate(people):
                     row_left, row_right = st.columns([5, 1], vertical_alignment="center")

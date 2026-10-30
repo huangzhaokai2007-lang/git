@@ -38,6 +38,7 @@ def test_confirm_card_lists_each_person_share(monkeypatch: pytest.MonkeyPatch) -
     app.run()
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(1280.0)
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
     app.multiselect[0].set_value(list(app.multiselect[0].options)[:2]).run()
     next(button for button in app.button if button.label == "添加所选").click().run()
 

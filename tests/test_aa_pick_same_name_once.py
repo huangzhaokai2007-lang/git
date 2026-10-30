@@ -45,6 +45,7 @@ def test_card_candidates_include_both_same_name_people(monkeypatch: pytest.Monke
     app.chat_input[0].set_value("发起群收款").run()
     assert not app.exception, app.exception
     app.number_input[0].set_value(300.0)
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
 
     labels = list(app.multiselect[0].options)
     li_si = [label for label in labels if "李四" in label]

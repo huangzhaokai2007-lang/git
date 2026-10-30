@@ -38,6 +38,7 @@ def test_per_person_amounts_take_effect_and_labels_are_names(
     app.run()
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
     options = list(app.multiselect[0].options)
     app.multiselect[0].set_value(options[:2]).run()
     next(button for button in app.button if button.label == "添加所选").click().run()
