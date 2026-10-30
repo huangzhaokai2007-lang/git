@@ -29,8 +29,15 @@ def _record(step: write_flow.Step, summary: str) -> None:
 
 def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
            slots: dict, display: str) -> None:
+    from agent import pending_slots
+
     confirm_card.clear(session_id)
-    _record(executor.submit(write_flow.start, intent, slots, session_id).result(), display)
+    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    #: 2026-10-30 修（用户实测「成功发起后卡面不消失」）：出确认卡 / 已发起 → 清掉补槽记录，
+    #: 否则下一轮 `pending_slots` 里那条 aa_collect 会把发起表单**又自动展开**并回填旧值。
+    if not getattr(step, "missing", None):
+        pending_slots.clear(session_id)
+    _record(step, display)
     st.rerun()
 
 
@@ -43,7 +50,11 @@ def _say(executor: ThreadPoolExecutor, session_id: str, text: str, summary: str)
     state["messages"].append({"role": "assistant", "text": turn.reply, "turn": None})
     state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
     if getattr(turn, "executed", False):
-        #: 办完了 → 下一轮开头把「新增群收款」表单整个清掉（不留上次的残余）
+        #: 办完了 → 下一轮开头把「新增群收款」表单整个清掉（不留上次的残余），
+        #: 同时清掉补槽记录 —— 否则下轮会被它重新展开（用户实测的"卡面不消失"）。
+        from agent import pending_slots
+
+        pending_slots.clear(session_id)
         state["aa-reset-pending"] = True
     st.rerun()
 
