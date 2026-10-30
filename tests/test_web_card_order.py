@@ -53,6 +53,13 @@ def test_only_the_panel_matching_the_last_turn_is_rendered(monkeypatch) -> None:
                 assert calls.index(expected) < calls.index('confirm')
 
 
+def test_add_payee_shows_the_form_without_the_list() -> None:
+    """说「新增收款人」时只出添加表单，下面不再跟着列收款人列表（用户 2026-10-30）。"""
+    assert panel_router.INTENT_PANEL['payee_add'] is None
+    assert panel_router.active_panel(intent='payee_add', has_confirmation=False,
+                                     picker_pending=False) is None
+
+
 def test_router_lets_the_picker_and_confirmation_win() -> None:
     """解析卡待选 / 在途确认时，业务卡让位（这是"乱出现"的主要来源）。"""
     assert panel_router.active_panel(intent='payee_list', has_confirmation=False,

@@ -23,7 +23,11 @@ INTENT_PANEL = {
     "payee_list": "payee", "payee_whitelist": "payee", "payee_whitelist_edit": "payee",
     "payee_whitelist_remove": "payee", "payee_blacklist": "payee",
     "payee_unblacklist": "payee", "payee_delete": "payee", "payee_note": "payee",
-    "payee_tags": "payee", "payee_card_no": "payee", "payee_add": "payee",
+    "payee_tags": "payee", "payee_card_no": "payee",
+    #: 2026-10-30（用户要求）：说「新增收款人」时只显示**添加表单**，
+    #: 下面的收款人列表不再跟着列出来（两条信息重复，页面也太长）。
+    #: 加完再问「我的收款人有哪些」就会重新出列表。
+    "payee_add": None,
     "scheduled_list": "schedule", "transfer_scheduled": "schedule",
     "scheduled_modify": "schedule", "scheduled_cancel": "schedule",
     "scheduled_run": "schedule",
