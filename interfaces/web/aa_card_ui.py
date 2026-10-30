@@ -465,6 +465,20 @@ _FORM_KEYS = ("aa-create-open", "aa-people", "aa-people-touched", "aa-picked",
               "aa-total", "aa-title", "aa-pick-open", "aa-split-open")
 
 
+def _reset_form() -> None:
+    """把「新增群收款」表单清空（用户 2026-10-31：重新发起时金额还留着上一次的 390）。
+
+    点「＋ 新增群收款」= 明确要**新起一笔**，所以金额/备注/参与人/按人金额一律归零；
+    上一笔还没填完就切走的情况也走这里，避免旧数字串到下一笔。
+    """
+    for key in list(st.session_state):
+        name = str(key)
+        if name in _FORM_KEYS or name.startswith(("aa-amt-", "aa-weight-", "aa-amount-")):
+            st.session_state.pop(key, None)
+    for key in ("aa-mine", "aa-total", "aa-title"):
+        st.session_state.pop(key, None)
+
+
 def _apply_pending_reset() -> None:
     """延后清理：上一轮结束时挂了 `aa-reset-pending` → 这一轮开头把表单清干净。
 
@@ -473,8 +487,7 @@ def _apply_pending_reset() -> None:
     """
     if not st.session_state.pop("aa-reset-pending", False):
         return
-    for key in _FORM_KEYS:
-        st.session_state.pop(key, None)
+    _reset_form()
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
@@ -484,6 +497,8 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     先给一个「＋ 新增群收款」按钮，点了才拉开；已经在补槽（例如刚说"向王五群收款"缺金额）时自动展开。
     """
     _apply_pending_reset()
+    if st.session_state.pop("aa-reset-form-pending", False):
+        _reset_form()                     # 新的一句「我要 aa 收款」→ 表单归零
     confirmation = executor.submit(confirm_card.current, session_id).result()
     if confirmation is not None and getattr(confirmation, "intent", "") == "aa_collect":
         st.session_state["aa-create-open"] = False       # 进了确认态就收起发起表单
@@ -502,6 +517,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not open_now:
             if st.button("＋ 新增群收款", key="aa-create-toggle", type="primary",
                          width="stretch"):
+                _reset_form()                     # 新起一笔 → 金额/备注/参与人全部归零
                 st.session_state["aa-create-open"] = True
                 st.rerun()
         else:

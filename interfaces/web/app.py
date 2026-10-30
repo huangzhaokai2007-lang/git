@@ -138,6 +138,12 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
     _pending = _picker.pending(st.session_state["session_id"])
     if _pending and _pending.get("intent") != turn.intent:
         _picker.clear(st.session_state["session_id"])
+    #: 2026-10-31（用户：重新发起群收款时金额还留着上次的 390）：新的一句「我要 aa 收款」
+    #: 属于**新起一笔** → 让卡面在下一轮开头把表单清空（不能在按钮/回调里直接清，
+    #: 那会跟已实例化的输入框打架）。
+    if (turn.intent == "aa_collect" and "CLASSIFY" in (turn.states or [])
+            and not {"CONFIRM_CARD", "EXECUTE"} & set(turn.states or [])):
+        state["aa-reset-form-pending"] = True
     state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
     #: 2026-10-28：发起群收款（含缺槽追问）时也画卡面 —— 总额/选人/按人金额都在卡上填，
