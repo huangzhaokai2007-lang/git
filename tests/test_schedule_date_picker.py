@@ -1,9 +1,6 @@
-"""改预约时间：日历 + 时刻选择器（用户 2026-10-29 要求）。
+"""改预约时间：日历 + 时刻选择器（2026-10-30 起改为**行内展开**）。
 
-原来是单个文本框（要手敲 `2026-11-05 09:00`，容易输错月/日）。现在：
-- 日期用 `st.date_input`（点开是日历，年月日分开选，非法日期选不出来）；
-- 时刻用 `st.time_input`；
-- **必须晚于此刻**，否则「改到这个时间」按钮是灰的。
+原来是页面底部一块独立表单；现在每行有「修改」按钮，点开才在该行下面拉开编辑区。
 """
 
 from __future__ import annotations
@@ -24,7 +21,7 @@ import demo                                                       # noqa: E402
 
 
 def _pending_schedule() -> None:
-    """往临时库里插一条**待执行**预约（改时间卡只在有预约时渲染）。"""
+    """往临时库里插一条**待执行**预约（预约卡只在有预约时渲染）。"""
     import sqlite3
 
     conn = sqlite3.connect(str(demo.build_temp_db()))
@@ -54,27 +51,32 @@ def _app(monkeypatch: pytest.MonkeyPatch) -> AppTest:
     return app
 
 
-def test_reschedule_uses_date_and_time_widgets(monkeypatch: pytest.MonkeyPatch) -> None:
-    """表单里是「新日期」（日历）+「新时刻」，不是原来的单行文本框。"""
+def test_edit_is_inline_and_uses_calendar(monkeypatch: pytest.MonkeyPatch) -> None:
+    """点行内「修改」→ 该行下面出现「新日期」（日历）+「新时刻」，且没有旧文本框。"""
     app = _app(monkeypatch)
     app.chat_input[0].set_value("我的预约有哪些").run()
     assert not app.exception, app.exception
-    assert [box.label for box in app.date_input][:1] == ["新日期"]
-    assert [box.label for box in app.time_input][:1] == ["新时刻"]
+    assert "新日期" not in [box.label for box in app.date_input]      # 默认收起
+
+    next(button for button in app.button if button.label == "修改").click().run()
+    assert not app.exception, app.exception
+    assert [box.label for box in app.date_input] == ["新日期"]
+    assert [box.label for box in app.time_input] == ["新时刻"]
     assert "新时间" not in [box.label for box in app.text_input]
+    assert not any(button.label == "新日期" for button in app.button)
 
 
 def test_calendar_cannot_pick_the_past(monkeypatch: pytest.MonkeyPatch) -> None:
-    """日历的下限是**今天**（选不到过去日期），默认给明天 09:00 → 按钮可用。"""
+    """日历下限是今天；默认给明天 → 「保存新时间」可用。"""
     import datetime
 
     app = _app(monkeypatch)
     app.chat_input[0].set_value("我的预约有哪些").run()
+    next(button for button in app.button if button.label == "修改").click().run()
     assert not app.exception, app.exception
     widget = app.date_input[0]
     assert widget.min == datetime.date.today(), "日历下限必须是今天"
-    assert widget.value > datetime.date.today() or widget.value == widget.min
-    assert next(b for b in app.button if b.label == "改到这个时间").disabled is False
+    assert next(button for button in app.button if button.label == "保存新时间").disabled is False
 
 
 def test_is_too_early_boundaries() -> None:
@@ -92,3 +94,12 @@ def test_is_too_early_boundaries() -> None:
     assert module.is_too_early(datetime.date(2026, 10, 29), datetime.time(18, 0), now) is True
     assert module.is_too_early(datetime.date(2026, 10, 29), datetime.time(18, 1), now) is False
     assert module.is_too_early(datetime.date(2026, 12, 11), datetime.time(0, 0), now) is False
+
+
+def test_filter_and_recurring_badge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """顶部筛选胶囊存在；卡头点明「循环 N 笔」（循环要一眼看得见）。"""
+    app = _app(monkeypatch)
+    app.chat_input[0].set_value("我的预约有哪些").run()
+    assert not app.exception, app.exception
+    marks = "\n".join(str(element.value) for element in app.markdown)
+    assert "循环" in marks, marks[:200]          # 卡头「其中循环 N 笔」+ 行内徽章

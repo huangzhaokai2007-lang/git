@@ -143,7 +143,7 @@ def test_orchestration_monthly_schedule(wired, monkeypatch) -> None:
     _fake(monkeypatch, {"payee": "房东", "amount": "100", "schedule": "2026-10-31 09:00",
                         "repeat": "每个月月末"})
     card = orchestrator.handle("每个月月末给房东转 100 元", session_id=SESSION)
-    assert "CONFIRM_CARD" in card.states and "循环" in card.reply and "每月循环" in card.reply
+    assert "CONFIRM_CARD" in card.states and "循环" in card.reply and "循环方式" in card.reply and "每月" in card.reply
     done = orchestrator.handle("确认", session_id=SESSION)
     assert done.executed is True and "每月循环" in done.reply
     row = raw(wired, "SELECT repeat_cycle FROM scheduled_transfer WHERE status = 'pending'")[0]

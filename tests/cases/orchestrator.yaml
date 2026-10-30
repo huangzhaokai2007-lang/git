@@ -68,10 +68,10 @@
 - id: trf-003
   input: "给张小美转 600 元"
   slots: {payee: 张小美, amount: "600.00"}
-  # 口径：§5 L2 的「金额 >500元」在「单笔上限 500 元」硬约束下不可达（卡 07 已报备），
-  # 故本条断言的是硬约束生效：预览即 OVER_LIMIT、不执行、不进确认卡。
-  expect: {intent: transfer_single, tool_calls: [preview_transfer], tier: null, executed: false,
-           must_contain: ["OVER_LIMIT"]}
+  #: 2026-10-30：单笔上限提到 2000 元 → 600 元不再被硬约束挡住，
+  #: 改按「金额 > 500 → L2」出确认卡（§5 这条档位规则从此**真的可达**了）。
+  expect: {intent: transfer_single, tool_calls: [preview_transfer], tier: L2, executed: false,
+           must_contain: ["转账确认卡"]}
 - id: trf-004
   input: "给李四转 100 元"
   slots: {payee: 李四, amount: "100.00"}

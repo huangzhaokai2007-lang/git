@@ -272,16 +272,16 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
     而 F16 验收第 2 条正是不许把预约当即时。
     """
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
-    cycle = {"monthly": "每月循环（首期后按月续期，月末自动对齐）",
-             "weekly": "每周循环（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
-    if cycle and filled.get("repeat_until"):               # 人类规格「周期结束条件」
-        cycle = f"{cycle}，循环至 {filled['repeat_until']}"
+    cycle = {"monthly": "每月（首期后按月续期，月末自动对齐）",
+             "weekly": "每周（首期后按周续期）"}.get(str(filled.get("repeat_cycle") or ""), "")
     rows = [("收款人", f"{facts['payee_name']}（{masked}）"),
             ("金额", f"{facts['amount_yuan']} 元"),
             ("预约时间", str(facts["schedule"]).replace("T", " ")),
             ("执行说明", "到预约时间后才扣款，此前不会动钱")]
-    if cycle:                                                              # 循环预约：多一行讲清续期口径
-        rows.insert(3, ("循环", cycle))
+    if cycle:                                              # 循环预约：方式与结束分两行，更醒目
+        rows.insert(3, ("循环方式", cycle))
+        if filled.get("repeat_until"):
+            rows.insert(4, ("循环结束", f"{filled['repeat_until']}（之后不再续期）"))
     return confirm_card.CardInput(
         title="定时转账确认卡", intent_cn="定时转账", rows=rows,
         tier=tier, requires_otp=requires_otp,

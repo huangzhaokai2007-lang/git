@@ -31,6 +31,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """渲染可编辑面板：有在途确认卡且该意图有编辑字段时才出现。"""
     draft = executor.submit(card_draft.draft_of, session_id).result()
     if draft is None or draft.status != "confirm":
+        st.session_state["card-edit-open"] = False      # 卡没了就复位，别留个空展开态
+        return
+    #: 2026-10-30（用户要求）：默认**收起**，点确认卡上的「✏️ 修改」才拉出来。
+    if not st.session_state.get("card-edit-open"):
         return
     #: 2026-10-28（用户要求）：这张「每人收款金额」卡**不再出现** ——
     #: 群收款已由卡面的「按人设置金额」负责，页面上不要出现两块同样的表单。

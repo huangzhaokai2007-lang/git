@@ -58,10 +58,9 @@ def test_confirm_button_disabled_until_people_picked(monkeypatch: pytest.MonkeyP
     app.chat_input[0].set_value("发起群收款").run()
     assert not app.exception, app.exception
     labels = [box.label for box in app.number_input]
-    assert any("群收款总金额" in label for label in labels)
-    assert any(button.label.startswith("修改参与人") for button in app.button)
-    next(button for button in app.button if button.label.startswith("修改参与人")).click().run()
-    #: 2026-10-29：「选择参与人」→「修改参与人」；没挑人时「添加所选」不可按
+    assert any("总金额（元）" in label for label in labels)
+    #: 2026-10-30：参与人编辑收进 expander（面板里挑人）；没挑人时「添加所选」不可按
+    assert any("修改参与人" in str(element.label) for element in app.expander)
     add = next(button for button in app.button if button.label == "添加所选")
     assert add.disabled is True, "没挑人时「添加所选」必须不可按"
     captions = "\n".join(str(element.value) for element in app.caption)
@@ -73,17 +72,17 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     app = _app(monkeypatch)
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
-    next(button for button in app.button if button.label.startswith("修改参与人")).click().run()
     app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，添加按钮才会解禁
     next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
     captions = "\n".join(str(element.value) for element in app.caption)
-    assert "含我" in captions and "我承担" in captions and "待收" in captions
+    assert "含我" in captions                             # 参与人摘要：2 人（含我）
     marks = "\n".join(str(element.value) for element in app.markdown)
     assert "均摊金额" in marks and "¥ 150.00" in marks      # 大字均摊金额（300 / 2 份）
-    labels = [button.label for button in app.button]
-    assert any(label.startswith("按人设置金额") for label in labels)
-    assert "发起群收款" in labels
+    assert "我承担 150.00 元" in marks and "待收" in marks
+    #: 「按人设置金额」也收进 expander 了
+    assert any("按人设置金额" in str(element.label) for element in app.expander)
+    assert any(button.label == "发起群收款" for button in app.button)
 
 
 def test_aa_card_has_no_policy_lines(seeded, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,7 +190,6 @@ def test_new_person_adder_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
     app.run()
     app.chat_input[0].set_value("向王五群收款").run()
     assert not app.exception, app.exception
-    next(b for b in app.button if b.label.startswith("修改参与人")).click().run()
     assert not app.exception, app.exception
     expanders = [str(element.label) for element in app.expander]
     assert any("新增收款人" in label for label in expanders)
@@ -216,7 +214,6 @@ def test_remove_participant(monkeypatch: pytest.MonkeyPatch) -> None:
     app.run()
     app.chat_input[0].set_value("我和王五群收款").run()
     assert not app.exception, app.exception
-    next(b for b in app.button if b.label.startswith("修改参与人")).click().run()
     assert not app.exception, app.exception
     delete = next(b for b in app.button if b.label == "删除")
     delete.click().run()
@@ -242,12 +239,12 @@ def test_create_form_is_collapsed_behind_a_button(monkeypatch: pytest.MonkeyPatc
     assert not app.exception, app.exception
 
     marks = "\n".join(str(element.value) for element in app.markdown)
-    assert "群收款总金额" not in marks, "查看列表时不该直接铺开发起表单"
+    assert "总金额（元）" not in marks, "查看列表时不该直接铺开发起表单"
     assert any(button.label == "＋ 新增群收款" for button in app.button)
 
     next(button for button in app.button if button.label == "＋ 新增群收款").click().run()
     assert not app.exception, app.exception
-    assert any(box.label == "群收款总金额（元）" for box in app.number_input), "点了按钮才展开表单"
+    assert any(box.label == "总金额（元）" for box in app.number_input), "点了按钮才展开表单"
 
 
 def test_form_is_cleared_after_completion(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -269,5 +266,5 @@ def test_form_is_cleared_after_completion(monkeypatch: pytest.MonkeyPatch) -> No
     assert not app.exception, app.exception
     # 办完后再看页面：不该再展开表单
     marks = "\n".join(str(element.value) for element in app.markdown)
-    assert "群收款总金额" not in marks, "办完后表单应已收起"
+    assert "总金额（元）" not in marks, "办完后表单应已收起"
     assert any(button.label == "＋ 新增群收款" for button in app.button)

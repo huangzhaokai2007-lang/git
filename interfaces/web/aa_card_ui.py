@@ -149,18 +149,21 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款（含你自己）",
                              "填金额 → 选参与人 → 发起；每人均摊，你承担自己那一份", tone="")
-        total = st.number_input("群收款总金额（元）", min_value=0.0, step=10.0, key="aa-total",
-                                format="%.2f")
-        title = st.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
+        money_col, title_col = st.columns([1, 2], vertical_alignment="bottom")
+        total = money_col.number_input("总金额（元）", min_value=0.0, step=10.0, key="aa-total",
+                                       format="%.2f")
+        title = title_col.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
 
-        if st.button("修改参与人" + ("  ▾" if st.session_state.get("aa-pick-open") else "  ▸"),
-                     key="aa-pick-toggle", width="stretch"):
-            _toggle("aa-pick-open")
-        if st.session_state.get("aa-pick-open"):
-            people_now = list(st.session_state.get("aa-people") or [])
-            if people_now:
-                st.caption("已选参与人（点「删除」移出）：")
-                for index, name in enumerate(people_now):
+        people = list(st.session_state.get("aa-people") or [])
+        plan = executor.submit(aa_flow.group_plan, people, float(total or 0)).result()
+        summary = (f"{plan['count']} 人（含我）· {'、'.join(people)}" if people
+                   else "还没有参与人")
+        st.caption(f"参与人：{summary}")
+
+        #: 参与人的增删都收进这个 expander（不再占主视野）
+        with st.expander("✏️ 修改参与人", expanded=False):
+            if people:
+                for index, name in enumerate(people):
                     row_left, row_right = st.columns([5, 1], vertical_alignment="center")
                     row_left.markdown(f"**{name}**")
                     if row_right.button("删除", key=f"aa-rm-{index}-{name}", width="stretch"):
@@ -168,9 +171,8 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                         st.rerun()
             else:
                 st.caption("还没有参与人 —— 从下面挑，或新增一个不在名单里的人。")
-
             names = executor.submit(aa_flow.candidates).result()
-            options = [n for n in names if n not in people_now]
+            options = [n for n in names if n not in people]
             picked = st.multiselect("添加参与人（可搜索、可多选）", options, key="aa-picked",
                                     placeholder="选择要添加的人")
             col_add, col_all = st.columns(2)
@@ -186,34 +188,31 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                     turn = executor.submit(payee_flow.submit_payee, new_name.strip(),
                                            new_phone.strip(), session_id=session_id).result()
                     if getattr(turn, "executed", False) or "已添加" in (turn.reply or ""):
-                        people = list(st.session_state.get("aa-people") or [])
-                        if new_name.strip() not in people:
-                            people.append(new_name.strip())
-                        st.session_state["aa-people"] = people
+                        merged = list(st.session_state.get("aa-people") or [])
+                        if new_name.strip() not in merged:
+                            merged.append(new_name.strip())
+                        st.session_state["aa-people"] = merged
                     st.rerun()
 
-        people = list(st.session_state.get("aa-people") or [])
         if not people:
-            st.caption("还没有确认参与人 —— 选好后点「确认参与人」。")
+            st.caption("选好参与人后这里会显示均摊金额。")
             return
-        plan = executor.submit(aa_flow.group_plan, people, float(total or 0)).result()
-        #: 2026-10-29：金额用 `num_html(flash=True)` —— 数字一变就有一道渐变脉冲，
-        #: 让「改金额/换人数」有即时反馈（这个 helper 之前写好了却没人用）。
+        #: 均摊大区块：大字金额 + 我承担/待收 一行（金额一变就有渐变脉冲）
         import premium_css
 
         amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
-        st.markdown(f"<div style='text-align:center;margin:.4rem 0 .2rem'>"
-                    f"<span style='color:#9aa0ac;font-size:.85rem'>均摊金额（含我）</span><br>"
-                    f"<span style='font-size:2.1rem;font-weight:650'>{amount_html}</span>"
-                    f"</div>", unsafe_allow_html=True)
-        st.caption(f"{plan['count']} 人（含我）· 我承担 {plan['mine_yuan']} 元 · "
-                   f"待收 {plan['collect_yuan']} 元 · 参与人：{'、'.join(people)}")
+        st.markdown(
+            f"<div style='text-align:center;margin:.2rem 0 .1rem'>"
+            f"<span style='color:#9aa0ac;font-size:.8rem'>均摊金额（含我）</span><br>"
+            f"<span style='font-size:2rem;font-weight:650'>{amount_html}</span>"
+            f"<div style='color:#9aa0ac;font-size:.8rem;margin-top:.15rem'>"
+            f"我承担 {plan['mine_yuan']} 元 · 待收 <b style='color:#d1d4dc'>"
+            f"{plan['collect_yuan']} 元</b></div></div>",
+            unsafe_allow_html=True)
 
-        if st.button("按人设置金额" + ("  ▾" if st.session_state.get("aa-split-open") else "  ▸"),
-                     key="aa-split-toggle", width="stretch"):
-            _toggle("aa-split-open")
         amounts: dict[str, str] = {}
-        if st.session_state.get("aa-split-open"):
+        with st.expander("✏️ 按人设置金额（可选）", expanded=False):
+            st.caption("只填**其他人**该给你的金额；你自己那份由总额自动扣。")
             for index, name in enumerate(people):
                 amounts[name] = st.text_input(f"{name} 应收（元）", key=f"aa-amt-{index}",
                                               value=plan["per_yuan"])
@@ -226,7 +225,8 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             filled = {name: value.strip() for name, value in amounts.items() if value.strip()}
             if filled:
                 slots["amounts"] = "、".join(f"{name} {value}" for name, value in filled.items())
-            _start(executor, session_id, "aa_collect", slots, "（按钮）发起群收款：" + "、".join(people))
+            _start(executor, session_id, "aa_collect", slots,
+                   "（按钮）发起群收款：" + "、".join(people))
 
 
 def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> None:

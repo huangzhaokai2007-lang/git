@@ -83,7 +83,7 @@ def test_night_factor_hour_boundaries(seeded: Path) -> None:
 
 def test_limits_report_single_and_daily_headroom() -> None:
     limits = _transfer_risk._limits([{"amount": -60_000}, {"amount": -40_000}])
-    assert limits == {"single_max": 50_000, "daily_max": 200_000,
+    assert limits == {"single_max": 200_000, "daily_max": 200_000,
                       "daily_used": 100_000, "daily_remaining": 100_000}
     assert all(isinstance(value, int) for value in limits.values())          # 整数分，无浮点
 

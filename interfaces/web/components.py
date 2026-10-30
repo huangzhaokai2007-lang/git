@@ -245,11 +245,16 @@ def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
             if line.strip():
                 st.markdown(line)
         st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后提交执行。')
-        left, right = st.columns(2)
+        left, middle, right = st.columns(3)
         if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
             return 'confirm'
-        if right.button('✖ 取消', key='confirm-cancel', width='stretch'):
+        if middle.button('✖ 取消', key='confirm-cancel', width='stretch'):
             return 'cancel'
+        opened = bool(st.session_state.get('card-edit-open'))
+        if right.button('✏️ 收起修改' if opened else '✏️ 修改', key='confirm-modify',
+                        width='stretch'):
+            st.session_state['card-edit-open'] = not opened
+            st.rerun()
         return None
     intent = str(confirmation.intent)
     title = _CARD_TITLE.get(intent, "转账确认卡")
@@ -276,11 +281,18 @@ def confirm_card(confirmation: Any, *, compact: bool = False) -> str | None:
         if risk := _line(confirmation.card_text, "风险提示："):
             st.warning(f"风险提示：{risk}")
         _evidence(confirmation)                       # 「依据：为什么是这个档位」
-        left, right, _rest = st.columns([1, 1, 3])
+        #: 2026-10-30（用户要求）：「修改」放在确认/取消旁边，点了才把修改面板**拉出来**，
+        #: 不再默认把「修改这张确认卡」整块铺在卡面上方。
+        left, middle, right, _rest = st.columns([1, 1, 1, 2])
         if left.button("✅ 确认", type="primary", key="confirm-ok", width="stretch"):
             return "confirm"
-        if right.button("✖ 取消", key="confirm-cancel", width="stretch"):
+        if middle.button("✖ 取消", key="confirm-cancel", width="stretch"):
             return "cancel"
+        opened = bool(st.session_state.get("card-edit-open"))
+        if right.button("✏️ 收起修改" if opened else "✏️ 修改", key="confirm-modify",
+                        width="stretch"):
+            st.session_state["card-edit-open"] = not opened
+            st.rerun()
     return None
 
 
@@ -328,8 +340,8 @@ def payee_form(defaults: dict | None = None) -> dict | None:
                                  value=str(defaults.get("name") or ""))
             phone = st.text_input("手机号", key="payee-phone", placeholder="11 位数字，例如 13812345678",
                                   value=str(defaults.get("phone") or ""))
-            card_no = st.text_input("银行卡号（可空）", key="payee-card-no",
-                                    placeholder="只保存脱敏形态（**** **** **** 8888）")
+            #: 2026-10-30（用户要求）：新增收款人**不再收银行卡号**（卡号仍可在收款人详情里补录）
+            card_no = ""
             tags = st.text_input("标签（可空，多个用、分隔；**能用来指代这个人**）", key="payee-tags",
                                  placeholder="例如：妈妈、房东（之后可以说「给我妈转 200」）")
             note = st.text_input("备注（可空；**只给自己看，不参与识别**）", key="payee-note",
