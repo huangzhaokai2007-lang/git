@@ -218,30 +218,6 @@ def _pct_facts(basis_points: int, name: str) -> dict:
     return {name: basis_points, f"{name}_text": text}
 
 
-def _product_history(product_id: str, max_gain: float, max_loss: float) -> list[dict]:
-    """三年模拟表现：**同一个产品 id 永远得到同一组数字**（sha256 取种子，跨机器可复现）。
-
-    采样区间**就是卡片上那条区间**（`[max_loss, max_gain]`）—— 否则会出现
-    「卡片写 0.00~+2.10%，展开却看到 +2.31%」这种自相矛盾（实测踩过）。
-    回撤幅度同样不超过下沿。
-
-    为什么是模拟：演示数据集没有净值表，规格也未定义历史业绩。界面必须标明「模拟」。
-    将来若接真实净值，只换本函数实现，`facts.items[].history` 的形状不变。
-    """
-    span = max_gain - max_loss
-    rows: list[dict] = []
-    for year in HISTORY_YEARS:
-        digest = hashlib.sha256(f"{product_id}:{year}".encode()).digest()
-        r1 = int.from_bytes(digest[:4], "big") / 0xFFFFFFFF
-        r2 = int.from_bytes(digest[4:8], "big") / 0xFFFFFFFF
-        ret = max_loss + span * r1
-        dd = -abs(max_loss) * (0.35 + 0.65 * r2)
-        rows.append({"year": year,
-                     **_pct_facts(round(ret * 100), "return"),
-                     **_pct_facts(round(dd * 100), "drawdown")})
-    return rows
-
-
 def _candle_period(offset: int) -> str:
     """第 `offset` 个月（0 = 最早）的 `YYYY-MM`；末月 = `AS_OF` 所在月。"""
     end = AS_OF.year * 12 + (AS_OF.month - 1)
@@ -568,8 +544,6 @@ def recommend_wealth(risk_level: str | None = None, horizon_days: int | None = N
                         "risk_label": risk_label(item.risk_level),
                         **_money_facts(next(row["min_amount"] for row in products
                                             if row["id"] == item.product_id), "min_amount"),
-                        #: 历年表现（模拟）：区间与卡片图例**同源**，界面点开直接渲染，无需再调工具。
-                        "history": _product_history(item.product_id, *bounds[item.product_id]),
                         #: 月 K（模拟）：只随推荐下发 —— 全部产品目录（T22）不带，避免 payload 翻几倍。
                         "candles": _product_candles(item.product_id, *bounds[item.product_id]),
                         #: 买得起吗 —— 由工具层判定（铁律 1：编排层与界面不做业务算术）。
