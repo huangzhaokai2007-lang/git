@@ -69,12 +69,27 @@ def active_panel(*, intent: str | None, has_confirmation: bool, picker_pending: 
     return None
 
 
-def clears_state(panel: str | None) -> dict:
-    """面板切换时要复位哪些"子状态"（避免上次的展开态/编辑态残留到这张卡上）。"""
-    return {
-        "payee": {"payee-open": None},
-        "schedule": {"sched-edit": None},
-        "aa": {},
-        "gift": {},
-        "cards": {},
-    }.get(panel or "", {})
+#: 每个面板自己的「展开/编辑」子状态（面板切走/切回时一律复位，避免残留）
+PANEL_STATE = {
+    "payee": ("payee-open",),
+    "schedule": ("sched-edit",),
+    "aa": ("aa-create-open", "aa-pick-open", "aa-split-open"),
+    "gift": (),
+    "cards": (),
+}
+
+
+def clears_state(previous: str | None, current: str | None = None) -> dict:
+    """换面板时要复位哪些子状态：**离场**与**入场**那张卡的展开态都清掉。
+
+    2026-10-30（用户：卡片该消失不消失）：原来只管 `payee-open` / `sched-edit`，
+    没管群收款的 `aa-create-open` —— 在群收款里点开「新增群收款」再去看收款人，
+    回来表单还是展开的。
+    """
+    reset: dict = {}
+    for name in {previous, current}:
+        if not name:
+            continue
+        for key in PANEL_STATE.get(str(name), ()):
+            reset[key] = None
+    return reset

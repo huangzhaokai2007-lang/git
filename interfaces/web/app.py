@@ -211,6 +211,8 @@ def _render_confirm(*, inline: bool = False) -> None:
     _agent_executor().submit(web_features.clear_removed_drafts, st.session_state['session_id']).result()
     confirmation = confirm_card.current(st.session_state["session_id"])
     if confirmation is None:
+        #: 2026-10-30：卡没了就把「修改」抽屉的展开态复位，否则下一张确认卡会自动展开
+        st.session_state["card-edit-open"] = False
         return
     if confirmation.stage == "otp":
         action = ui.otp_card(confirmation, compact=inline)

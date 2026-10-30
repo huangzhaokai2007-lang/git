@@ -253,8 +253,8 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
         flags=st.session_state,
     )
     previous = st.session_state.get('workspace-active-panel')
-    if previous != panel:                       # 换卡 → 复位上一张卡的展开/编辑态
-        for key, value in panel_router.clears_state(previous).items():
+    if previous != panel:                       # 换卡 → 复位离场那张卡的展开/编辑态
+        for key, value in panel_router.clears_state(previous, panel).items():
             st.session_state[key] = value
         st.session_state['workspace-active-panel'] = panel
     renderers = {'payee': payee_card_ui.render, 'schedule': schedule_card_ui.render,
