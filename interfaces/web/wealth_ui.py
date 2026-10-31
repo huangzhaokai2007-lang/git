@@ -261,6 +261,29 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             ask(f"买 {item.get('name')} {int(amount)} 元")
 
 
+def render_holdings_actions(turn: Mapping[str, Any], *, ask: Callable[[str], None],
+                           key_prefix: str) -> None:
+    """持仓页的**赎回入口**：每只持仓一个按钮，点了让编排层去问金额。
+
+    **只放按钮、不复述数字**：上面那段回执已经把名称 / 持有金额 / 年化 / 买入日期列全了，
+    这里再画一遍就是「同一份数据出现两遍」—— 收款人卡片踩过这个坑，用户要求只留一处。
+
+    金额不在按钮里写死：点下去发的是「赎回 <产品名>」，缺槽由编排层追问，
+    用户自己说金额。这样全额/部分赎回走的是同一条路径。
+    """
+    items = (turn.get("facts") or {}).get("items") or []
+    if not items:
+        return
+    st.markdown("<div style='font-size:.8rem;color:#94a3b8;margin:.7rem 0 .1rem;'>"
+                "赎回（点产品名，接着告诉我金额）</div>", unsafe_allow_html=True)
+    cols = st.columns(min(len(items), 2))
+    for index, item in enumerate(items):
+        with cols[index % len(cols)]:
+            key = f"{key_prefix}-redeem-{item.get('holding_id') or index}"
+            if st.button(f"赎回 · {item.get('name')}", key=key, width="stretch"):
+                ask(f"赎回 {item.get('name')}")
+
+
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
                 key_prefix: str = "wealth",
                 daily_loader: Callable[[str], Mapping[str, Any]] | None = None, readonly: bool = False) -> None:

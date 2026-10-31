@@ -167,6 +167,11 @@ def result(executor, session: str, ask, detail_loader) -> None:
                     wealth_daily.load, session, pid, gran).result())
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
+    elif scene == 'wealth_holdings':
+        st.markdown(turn.get('reply') or '当前没有查询结果。')
+        #: 持仓页原来只有一段文字，没有任何动作 —— 用户想赎回无从下手（实测确认）。
+        wealth_ui.render_holdings_actions(
+            turn, ask=ask, key_prefix='workspace-hold-' + str(turn.get('trace_id')))
     elif scene == 'risk_assess':
         st.markdown(turn.get('reply') or '当前没有查询结果。')
         risk_ui.render_turn(turn, ask=ask, key_prefix='workspace-risk-' + str(turn.get('trace_id')))
@@ -180,11 +185,8 @@ def result(executor, session: str, ask, detail_loader) -> None:
           and (turn.get('facts') or {}).get('status', 'active') == 'active'
           and ((turn.get('facts') or {}).get('items') or (turn.get('facts') or {}).get('overdue_items'))):
         subscription_ui.render_turn(turn, ask=ask, key_prefix='workspace-subs-' + str(turn.get('trace_id')))
-    elif scene not in ('cards', 'payee_list', 'scheduled_list', 'aa_list', 'aa_collect',
-                       'gift_order_list') and not any(
+    elif scene not in ('cards', 'payee_list') and not any(
             state in turn.get('states', []) for state in ('CONFIRM_CARD', 'OTP')):
-        #: 2026-10-31 精简：这几类场景下面就有对应业务卡，回复正文在聊天区已经显示过一次，
-        #: 这里再贴一遍就是重复（用户截图里"同一句话出现两遍"）。
         st.markdown(turn.get('reply') or '当前没有查询结果。')
 
 
@@ -226,6 +228,8 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
     activity_ui.render(st.session_state['turns'])
     pending()
     payee_picker_ui.render(executor, session)
+    if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent') == 'transfer_single'):
+        card_edit_ui.render(executor, session)
     forms()
     if scene == 'cards':
         if st.session_state.get('bound-card-query'):
@@ -240,43 +244,20 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
         inline_confirmation_rendered = True
         confirmation(**kwargs)
 
-    #: 2026-10-30（用户反馈：卡片该消失不消失、乱出现、顺序乱）：业务卡改由 **panel_router 统一裁决** ——
-    #: 一屏最多一张；解析卡待选 / 在途确认时业务卡一律让位；换面板时复位上一张的展开态。
-    import panel_router
-
-    last_turn = (st.session_state.get('turns') or [{}])[-1].get('turn') or {}
-    from agent import confirm_card as _confirm_card, payee_picker as _payee_picker
-
-    has_confirmation = bool(executor and executor.submit(_confirm_card.current, session).result())
-    picker_pending = bool(executor and executor.submit(_payee_picker.pending, session).result())
-    panel = panel_router.active_panel(
-        intent=last_turn.get('intent'),
-        has_confirmation=has_confirmation,
-        picker_pending=picker_pending,
-        flags=st.session_state,
-    )
-    previous = st.session_state.get('workspace-active-panel')
-    if previous != panel:                       # 换卡 → 复位离场那张卡的展开/编辑态
-        for key, value in panel_router.clears_state(previous, panel).items():
-            st.session_state[key] = value
-        st.session_state['workspace-active-panel'] = panel
-    renderers = {'payee': payee_card_ui.render, 'schedule': schedule_card_ui.render,
-                 'aa': aa_card_ui.render, 'gift': gift_card_ui.render}
-    if panel in renderers:
-        if panel == 'payee':
-            renderers[panel](executor, session, confirmation=inline_confirmation)
-        else:
-            renderers[panel](executor, session)
+    renderers = (('payee_list', 'payee', payee_card_ui.render),
+                 ('scheduled_list', 'schedule', schedule_card_ui.render),
+                 ('aa_list', 'aa', aa_card_ui.render),
+                 ('gift_order_list', 'gift', gift_card_ui.render))
+    for name, flag, renderer in renderers:
+        if (scene == name or (name == 'aa_list' and scene == 'aa_collect')) and st.session_state.get(f'bound-{flag}-query'):
+            if name == 'payee_list':
+                renderer(executor, session, confirmation=inline_confirmation)
+            else:
+                renderer(executor, session)
     if scene not in ('cards', 'records'):
         scene_ui.render(executor, session, ask, show_scope=False)
     if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent')):
         slot_form_ui.render(executor, session)
-    #: 2026-10-31 修：只有**群收款本身的**确认卡由群收款卡自己画（三卡合一）；
-    #: 「登记已付」等其他在途确认仍然走通用确认卡 —— 否则登记已付没有确认按钮，流程卡死。
-    _pending_conf = (executor.submit(_confirm_card.current, session).result()
-                     if executor else None)
-    _aa_owns = (getattr(_pending_conf, 'intent', '') == 'aa_collect')
-    if not inline_confirmation_rendered and not _aa_owns:
+    if not inline_confirmation_rendered and not (
+            scene in ('aa_list', 'aa_collect') and st.session_state.get('bound-aa-query')):
         confirmation()
-    #: 2026-10-30：修改面板已作为**确认卡内部抽屉**渲染（见 components.confirm_card），
-    #: 这里不再单独画，避免页面上出现两块一样的编辑区。
