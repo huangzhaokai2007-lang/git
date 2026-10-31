@@ -53,6 +53,8 @@ def test_per_person_amounts_take_effect_and_labels_are_names(
     boxes[0].set_value("100").run()
     boxes = [box for box in app.text_input if "应收" in box.label]
     boxes[1].set_value("150").run()
+    #: 2026-10-31：改成"草稿 + 确认修改"模型 —— 改完必须点确认才生效
+    next(button for button in app.button if "确认修改" in button.label).click().run()
     next(button for button in app.button if button.label == "发起群收款").click().run()
     assert not app.exception, app.exception
 

@@ -83,6 +83,40 @@ def _normalize_candidates(raw: list) -> dict[str, dict]:
     return catalog
 
 
+def _applied_of(people: list[str], plan: dict) -> dict:
+    """当前**已确认**的分摊（`aa-applied`）；换人/第一次进来时按均摊值初始化。"""
+    applied = st.session_state.get("aa-applied") or {}
+    #: 空名单时 [] == [] 会误判成"已初始化"，所以显式要求键齐全。
+    if (list(applied.get("people") or []) != list(people)
+            or "others" not in applied or "mine" not in applied):
+        per = float(plan["per_yuan"])
+        mine = float(plan.get("mine_yuan") or per)
+        applied = {"people": list(people),
+                   "others": {pid: per for pid in people}, "mine": mine}
+        st.session_state["aa-applied"] = applied
+    return applied
+
+
+def _mark_touched() -> None:
+    """输入框一被改动就记一笔：别再拿均摊值覆盖用户填的数字（草稿也要保住）。"""
+    st.session_state["aa-amount-touched"] = True
+
+
+def _apply_amounts(people: list[str], staged: dict, mine_staged: object) -> None:
+    """把输入框里的草稿点「确认修改」后落成生效值；总额延后一轮同步到总额输入框。"""
+    others = {pid: round(_to_yuan(value), 2) for pid, value in staged.items()}
+    mine = round(_to_yuan(mine_staged), 2)
+    st.session_state["aa-applied"] = {"people": list(people), "others": others, "mine": mine}
+    st.session_state["aa-total-sync"] = round(sum(others.values()) + mine, 2)
+
+
+def _apply_pending_total_sync() -> None:
+    """下一轮开头把「确认修改」算出的总额写进总额输入框（不能在当轮改已实例化控件）。"""
+    value = st.session_state.pop("aa-total-sync", None)
+    if value:
+        st.session_state["aa-total"] = float(value)
+
+
 def _to_yuan(value: object) -> float:
     """把用户输入的金额文本转成元（认不出就当 0）。"""
     try:
@@ -120,6 +154,12 @@ def _write_amounts(values: list[float], mine: float) -> None:
     st.session_state["aa-mine"] = f"{mine:.2f}"
     st.session_state["aa-total"] = round(sum(values) + mine, 2)
     st.session_state["aa-amount-touched"] = True     # 这是一次"用户设定"，别被默认值对齐覆盖
+    #: 2026-10-31：快捷操作（一键均摊 / 按份数）结果直接算"已确认"，汇总块立刻跟着变。
+    people_now = list(st.session_state.get("aa-people") or [])
+    st.session_state["aa-applied"] = {
+        "people": people_now,
+        "others": {pid: value for pid, value in zip(people_now, values)},
+        "mine": mine}
 
 
 def _even_split() -> None:
@@ -310,12 +350,13 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         #: 2026-10-31（用户要求）：**参与人与每人应摊表合并成一块**，配色也调过（不再是灰表格）。
         _align_amount_defaults(people, plan)
         _per = float(plan["per_yuan"])
-        _values = [_to_yuan(st.session_state[f"aa-amt-{i}"])
-                   if f"aa-amt-{i}" in st.session_state else _per
-                   for i in range(len(people))]
-        _others = sum(_values)
-        _mine = (_to_yuan(st.session_state["aa-mine"])
-                 if "aa-mine" in st.session_state else _per)
+        #: 2026-10-31 修（用户实测「改完金额，上面均摊变 0 / 合计不对」）：
+        #: 汇总块只读**已确认的分摊**；输入框是草稿，点「✅ 确认修改」才生效。
+        _applied = _applied_of(people, plan)
+        _values = [float(_applied["others"].get(pid, 0)) for pid in people]
+        _others = round(sum(_values), 2)
+        _mine = float(_applied["mine"])
+        _avg = round((_others + _mine) / (len(people) + 1), 2) if people else 0.0
         if people:
             chips = "".join(f'<span class="aa-chip">{label}</span>' for label in labels)
             rows_html = "".join(
@@ -333,7 +374,7 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                 f'<div class="aa-chips">{chips}</div>'
                 f'<div class="aa-split">{rows_html}</div>'
                 f'<div class="aa-split-foot"><span>待收 ¥{_others:,.2f}</span>'
-                f'<span>均摊 ¥{plan["per_yuan"]}</span></div></div>',
+                f'<span>均摊 ¥{_avg:,.2f}</span></div></div>',
                 unsafe_allow_html=True)
         else:
             st.markdown('<div class="aa-people"><div class="aa-people-head">'
@@ -396,16 +437,23 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             st.session_state["aa-amounts-open"] = not _amounts_open
             st.rerun()
         if _amounts_open:
-            st.caption("默认是当前均摊值；改谁就动谁，**总额会跟着自动变**（总额 = 其他人合计 + 我承担）。")
-            #: 2026-03-31：签名只跟**参与人**走 —— 改总额不该把用户已填的金额冲掉。
+            st.caption("默认是当前均摊值；改完请点下面的「✅ 确认修改」，合计与均摊会一起重算。")
             for index, pid in enumerate(people):
                 #: 标签用人话（李四（139****1001）），键仍用 payee_id（同名不会串）
                 label = catalog.get(pid, {}).get("label") or pid
                 amounts[pid] = st.text_input(f"{label} 应收（元）", key=f"aa-amt-{index}",
-                                             on_change=_sync_total)
-            #: 2026-10-31（用户要求）：按人编辑里**加上"我"** —— 否则改完其他人金额，
-            #: 我那份还是老值，看起来像"均摊份额没变化"。改动会经 _sync_total 反推总额。
-            mine_value = st.text_input("我承担（元）", key="aa-mine", on_change=_sync_total)
+                                             on_change=_mark_touched)
+            #: 2026-10-31（用户要求）：按人编辑里**加上"我"**，并把「确认」放在它下面。
+            mine_value = st.text_input("我承担（元）", key="aa-mine", on_change=_mark_touched)
+            _dirty = (any(abs(_to_yuan(value) - float(_applied["others"].get(pid, 0))) > 0.005
+                          for pid, value in amounts.items())
+                      or abs(_to_yuan(mine_value) - _mine) > 0.005)
+            _col_ok, _col_tip = st.columns([1, 2], vertical_alignment="center")
+            if _col_ok.button("✅ 确认修改", key="aa-amounts-apply", type="primary",
+                              width="stretch", disabled=not _dirty):
+                _apply_amounts(people, amounts, mine_value)
+                st.rerun()
+            _col_tip.caption("有未确认的改动" if _dirty else "已与上方合计一致")
 
             #: 两个快捷（用户 2026-10-31 要求）：一键均摊 / 按份数均摊
             col_even, col_weight = st.columns(2)
@@ -427,17 +475,18 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
                               on_click=_toggle, args=("aa-weight-open",))
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
-                     disabled=float(total or 0) <= 0):
-            slots = {"payee_ids": people, "amount": plan["total_yuan"]}   # people 已是 payee_id
+                     disabled=(_others + _mine) <= 0):
+            #: 用**已确认的分摊**作总额：输入框里的草稿没确认就不会被算进去，账目才对得上。
+            slots = {"payee_ids": people, "amount": f"{_others + _mine:.2f}"}   # people 已是 payee_id
             if title.strip():
                 slots["title"] = title.strip()
             #: 2026-10-30 修：默认值就是均摊值，**不要**当"按人金额"发下去 ——
             #: 含我口径下 Σ每人 ≠ 含我总额，会被判「每人金额合计与总金额不符」，
             #: 卡面停在发起态 → 用户再点一次又会触发收款人解析（用户实测的"还是会解析"）。
-            filled = {name: value.strip() for name, value in amounts.items()
-                      if value.strip() and value.strip() != plan["per_yuan"]}
+            filled = {pid: f"{value:,.2f}" for pid, value in _applied["others"].items()
+                      if abs(float(value) - _per) > 0.005}
             if filled:
-                slots["amounts"] = "、".join(f"{name} {value}" for name, value in filled.items())
+                slots["amounts"] = "、".join(f"{pid} {value}" for pid, value in filled.items())
             _start(executor, session_id, "aa_collect", slots,
                    "（按钮）发起群收款：" + "、".join(people))
 
@@ -557,6 +606,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     先给一个「＋ 新增群收款」按钮，点了才拉开；已经在补槽（例如刚说"向王五群收款"缺金额）时自动展开。
     """
     _apply_pending_reset()
+    _apply_pending_total_sync()          # 「确认修改」算出的总额，下一轮开头写回总额输入框
     if st.session_state.pop("aa-reset-form-pending", False):
         _reset_form()                     # 新的一句「我要 aa 收款」→ 表单归零
     _drain_paid_queue(executor, session_id)

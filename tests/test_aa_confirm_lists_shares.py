@@ -47,6 +47,8 @@ def test_confirm_card_lists_each_person_share(monkeypatch: pytest.MonkeyPatch) -
         boxes = [box for box in app.text_input
                  if "应收" in box.label or "我承担" in box.label]
         boxes[index].set_value(value).run()
+    #: 2026-10-31：改完按人金额要先「确认修改」，才会落到确认卡的逐人明细里
+    next(button for button in app.button if "确认修改" in button.label).click().run()
 
     next(button for button in app.button if button.label == "发起群收款").click().run()
     assert not app.exception, app.exception

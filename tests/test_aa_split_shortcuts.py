@@ -79,6 +79,7 @@ def test_even_split_restores_equal_shares_without_changing_total(
         boxes = [box for box in app.text_input if any(word in box.label for word in AMOUNT_LABELS)]
         boxes[index].set_value(value).run()
     assert _amounts(app) == ["100", "200", "700"]
+    next(button for button in app.button if "确认修改" in button.label).click().run()
 
     next(button for button in app.button if button.label == "一键均摊").click().run()
     assert not app.exception, app.exception
