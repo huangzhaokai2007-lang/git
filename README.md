@@ -34,7 +34,7 @@
 | `data/` | SQLite、合成数据、DAO | 数据结构变更先同步规格 |
 | `tests/` | 原有回归与验收用例 | 每个功能页列出测试入口 |
 
-`app/cli.py` 是命令行入口；`agents/` 是旧 AI 角色说明，**不是**业务编排层 `agent/`。
+`app/cli.py` 是命令行入口；`docs/agents/` 是旧 AI 角色说明，**不是**业务编排层 `agent/`。
 
 ## 启动与验证
 

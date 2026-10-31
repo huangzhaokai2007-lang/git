@@ -10,7 +10,7 @@ names=("$@")
 [ "${#names[@]}" -eq 0 ] && names=(analyst worker reviewer)
 
 for n in "${names[@]}"; do
-  src="agents/${n}.md"
+  src="docs/agents/${n}.md"
   dst="$H/profiles/$n/SOUL.md"
   [ -f "$src" ] || { echo "❌ 找不到 $src"; continue; }
   [ -d "$H/profiles/$n" ] || { echo "❌ 没有 profile $n（先 hermes profile create $n）"; continue; }
@@ -26,7 +26,7 @@ for n in "${names[@]}"; do
     echo "所属：FinTechathon 2026 AI Banking Agent 三人小组（分析师 / 打工的 / 审核师）"
     echo "项目仓库：$REPO_ABS"
     echo
-    echo "> 本文件由仓库内 \`agents/$n.md\` 同步而来。**源文件是唯一真相**——改角色请改源文件，再跑 \`bash scripts/sync-soul.sh\`。"
+    echo "> 本文件由仓库内 \`docs/agents/$n.md\` 同步而来。**源文件是唯一真相**——改角色请改源文件，再跑 \`bash scripts/sync-soul.sh\`。"
     echo
     cat "$src"
   } > "$dst"
