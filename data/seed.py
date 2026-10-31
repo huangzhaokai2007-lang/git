@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 SEED = 20260912                                            # 固定随机种子
 AS_OF = date(2026, 9, 12)                                  # 数据集的"今天"（固定常量，跨天复现）
 DEFAULT_DB_PATH = Path(os.environ.get("DB_PATH") or "var/bank.db")   # 卡 20-C：库住 var/，不混进代码目录 data/
-DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 9, 30), 13
+DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 12, 31), 16
+#: 2026-11-01（用户要求）：账期由 13 个月扩到 16 个月（2025-09 ~ 2026-12），保证演示界面里
+#: 选任意一个月（含今年 10/11/12 月）都有分类数据、都能拉出饼图；锚点 AS_OF 仍是 9-12（演示时钟）。
 USER_ID, SAVINGS_ID, CREDIT_ID = "u_zhangsan_0001", "acc_savings_0001", "acc_credit_0001"
 CREDIT_LIMIT = 3_000_000                                   # 信用额度 30,000.00 元（分）
 SALARY = 950_000                                           # 月薪 9,500.00 元（分）
@@ -208,6 +210,13 @@ def _month_last_day(index: int) -> int:
     return AS_OF.day if _month_of(index) == (AS_OF.year, AS_OF.month) else 28
 
 
+def _period_end(months: int | None = None) -> date:
+    """生成 `months` 个账期时的最后一天（日志用；默认 `MONTHS`）。"""
+    total = MONTHS if months is None else months
+    year, month = _month_of(total - 1)
+    return date(year, month, _month_last_day(total - 1))
+
+
 def _sample_days(rng: random.Random, pool: range, count: int) -> list[int]:
     """在 `pool` 里取 `count` 个日子：够抽就不重复，天数不够（末月）才允许同日多笔。"""
     return rng.sample(pool, count) if len(pool) >= count else rng.choices(pool, k=count)
@@ -350,8 +359,11 @@ def _write(conn: sqlite3.Connection, rows: list[tuple], balances: dict[str, int]
 
 
 def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False,
-             bind_cards: bool = False) -> dict[str, int]:
+             bind_cards: bool = False, months: int | None = None) -> dict[str, int]:
     """生成全套合成数据，返回各表写入行数；目标库非空时抛 `ValueError`（覆盖请传 reset=True）。
+
+    `months`：生成多少个账期（默认 `MONTHS` = 16）。测试夹具传 13 —— 那里有一批
+    「本月/近 N 天」相对时间用例，依赖**当前月没有数据**这条基线（见 tests/conftest.py）。
 
     `bind_cards=True`：额外把 6 张预设卡预绑到演示用户（`agent_card_binding`），
     让评委第一次打开网页就能在「管卡」看到卡、转账时能选付款卡。默认 False ——
@@ -365,16 +377,19 @@ def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False,
         if existing:
             raise ValueError(f"{path} 里已有 {existing} 行数据：请先清库（--reset）再生成")
         rng = random.Random(SEED)
+        total = MONTHS if months is None else months
         payee_usage: dict[str, str] = {}
         drafts: list[TxnDraft] = []
         prev_credit = CREDIT_OPENING_BILL                      # 首月还的是期初账单
-        for index in range(MONTHS):
+        for index in range(total):
             month_drafts, prev_credit = _month_drafts(index, rng, prev_credit, payee_usage)
             drafts.extend(month_drafts)
         for sub in SUBSCRIPTIONS:                              # 年费 + 已取消订阅的历史扣费
             if not (sub.status == "active" and sub.cycle == "monthly"):
                 label = "年费" if sub.cycle == "yearly" else "月费"
                 for index in sub.charged_months:
+                    if index >= total:                         # 只生成到 total 个月
+                        continue
                     year, month = _month_of(index)
                     drafts.append(TxnDraft(SAVINGS_ID, _ts(date(year, month, sub.charge_day), 10, 5), -sub.amount,
                                            "订阅", "代扣", sub.merchant, f"{sub.merchant} {label}"))
@@ -384,8 +399,16 @@ def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False,
         with transaction(conn):
             counts = _write(conn, rows, balances, payee_usage)
             if bind_cards:
-                from data import card_binding_seed
+                from data import card_binding, card_binding_seed, card_limit_seed
+                from guard import card_credentials
+                #: 绑卡/密码表都是**懒建**的（`agent_card_secret`、`agent_card_binding`），
+                #: 先把 schema 建出来，再补密码、补额度演练卡，最后才绑——否则撞「no such table」/外键。
+                card_binding.ensure_schema(conn)
+                card_binding_seed.provision(conn, card_credentials.hash_pin)
+                card_limit_seed.provision(conn, card_credentials.hash_pin)
                 counts["agent_card_binding"] = card_binding_seed.provision_bindings(conn)
+                #: 演示库：所有卡恢复为未挂失（评委现场不想要一张已挂失的卡挡路）
+                counts["card_normalized"] = card_binding_seed.reset_card_status(conn)
         logger.info("已在 %s 写入合成数据：%s", path, counts)
         return counts
     finally:
@@ -398,14 +421,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--reset", action="store_true", help="先清库再生成（覆盖已有数据）")
     parser.add_argument("--bind-cards", action="store_true", help="额外把 6 张预设卡预绑到演示用户（网页演示用）")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="库文件路径，默认取环境变量 DB_PATH")
+    parser.add_argument("--months", type=int, default=None,
+                        help=f"生成多少个账期（默认 {MONTHS}；测试夹具用 13 保持「本月无数据」基线）")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        counts = generate(args.db, reset=args.reset, bind_cards=args.bind_cards)
+        counts = generate(args.db, reset=args.reset, bind_cards=args.bind_cards, months=args.months)
     except (ValueError, sqlite3.Error) as exc:
         logger.error("生成失败：%s", exc)
         return 2
-    logger.info("账期 %s ~ %s，共 %d 条流水，%d 张表已就绪", DATA_START, DATA_END, counts["txn"], len(counts))
+    logger.info("账期 %s ~ %s，共 %d 条流水，%d 张表已就绪", DATA_START, _period_end(args.months), counts["txn"], len(counts))
     return 0
 
 

@@ -67,7 +67,9 @@ class Demo:
 def build_temp_db() -> Path:
     """造一份临时合成库并把进程与子进程都指向它（仓库里的演示库不受影响）。"""
     path = Path(tempfile.mkdtemp(prefix="demo19-")) / "bank.db"
-    generate(path)
+    #: 13 个账期：测试用这份库，且有一批「本月/近 N 天」相对时间用例依赖「当前月无数据」；
+    #: 网页演示库（`python -m data.seed --bind-cards`）才用默认 16 个账期。
+    generate(path, months=13)
     os.environ["DB_PATH"] = str(path)
     dao.connect_db(path)
     return path

@@ -11,7 +11,7 @@ from tools import card_binding, query
 
 
 def bound():
-    result = card_binding.preview_binding('6222000000000001', '314159', session_id='lost')
+    result = card_binding.preview_binding('6222000000000001', '123456', session_id='lost')
     return card_binding.confirm_binding(result.data['token'], session_id='lost').data['card_id']
 
 
@@ -22,7 +22,7 @@ def prepared():
 
 
 def submit(flow, preview, **kw):
-    return flow.submit(preview['token'], kw.get('pin', '314159'), kw.get('otp', '123456'),
+    return flow.submit(preview['token'], kw.get('pin', '123456'), kw.get('otp', '123456'),
                        kw.get('branch', preview['default_branch_id']), kw.get('session', 'lost'))
 
 
@@ -30,7 +30,7 @@ def test_preview_no_card_mutation_and_no_sensitive_return(seeded):
     flow, card_id, p = prepared()
     assert p['estimated_days'] == 15 and p['total_fee_yuan'] == '0.00'
     assert raw(seeded, 'SELECT status FROM card WHERE id=?', (card_id,))[0]['status'] == 'normal'
-    assert not any(secret in str(p) for secret in ['314159', '123456', '6222000000000001'])
+    assert not any(secret in str(p) for secret in ['123456', '6222000000000001'])
     assert not submit(flow, p, session='other')['ok']
     assert not submit(flow, p, branch='tampered')['ok']
 
@@ -135,7 +135,7 @@ def test_concurrent_submit_and_no_secrets_in_storage(seeded):
     assert results[0]['data']['application_id'] == results[1]['data']['application_id']
     rows = raw(seeded, 'SELECT * FROM agent_card_lost_request')
     assert len([r for r in rows if r['status'] == 'pending']) == 1
-    assert not any(x in str(rows) for x in ['314159', '123456', '6222000000000001'])
+    assert not any(x in str(rows) for x in ['123456', '6222000000000001'])
 
 
 def test_expired_preview_and_late_cancel(seeded, monkeypatch):
@@ -245,7 +245,7 @@ def test_rejected_requests_leave_safe_audit(seeded, monkeypatch, case):
     rejected = raw(seeded, "SELECT * FROM audit_log WHERE intent='card_report_lost' AND result='rejected'")
     assert len(rejected) == before + 1
     assert 'foreign-secret-card' not in str(rejected)
-    assert not any(x in str(rejected) for x in ['314159', '123456', '6222000000000001'])
+    assert not any(x in str(rejected) for x in ['123456', '6222000000000001'])
 
 
 def test_application_audit_contains_application_id(seeded):

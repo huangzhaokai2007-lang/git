@@ -29,7 +29,7 @@ def test_unlock_preview_identity_and_idempotency(seeded):
     assert raw(seeded, 'SELECT * FROM account') == accounts
     audits = raw(seeded, "SELECT * FROM audit_log WHERE tool='self_service_card_unlock' AND result='success'")
     assert len(audits) == 1
-    assert '314159' not in str(audits) and '123456' not in str(audits)
+    assert '123456' not in str(audits) and '123456' not in str(audits)
 
 
 @pytest.mark.parametrize('status', ['normal', 'lost', 'frozen', 'locked'])

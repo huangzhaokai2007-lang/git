@@ -401,8 +401,14 @@ def _report_markdown(period: str, kind: str, facts: dict, groups: list[dict]) ->
     if facts["vs_prev_in_pct"] is not None:
         lines.append(_delta_line("收入", facts["vs_prev_in_diff"], facts["vs_prev_in_diff_abs_yuan"],
                                  facts["prev_in_sum_yuan"], facts["in_sum_yuan"], facts["vs_prev_in_pct"]))
-    lines += ["", "## 收支明细", "| 项目 | 金额（元） | 占比 |", "| --- | --- | --- |"]
-    lines += [f"| {group['key']} | {group['amount_yuan']} | {group['pct']}% |" for group in groups]
+    if groups:
+        lines += ["", "## 收支明细", "| 项目 | 金额（元） | 占比 |", "| --- | --- | --- |"]
+        lines += [f"| {group['key']} | {group['amount_yuan']} | {group['pct']}% |" for group in groups]
+    else:
+        #: 2026-11-01（用户实测）：空账期原来会印出一个**只有表头的空表**，饼图也没有分类可画，
+        #: 看起来像「图不见了」。改成一句话，界面侧 `spending_pie` 自然不画。
+        from agent.render_query import T_REPORT_EMPTY      # 局部导入：tools → agent 避免模块级循环
+        lines += ["", "## 收支明细", T_REPORT_EMPTY]
     lines += ["", "## 异常提示", f"本期发现 {facts['anomaly_count']} 笔可疑交易（详见异常检测结果）。"]
     return "\n".join(lines)
 

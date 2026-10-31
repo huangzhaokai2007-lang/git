@@ -75,7 +75,8 @@ def seeded(tmp_path: Path, clock: Clock) -> Path:
     否则断言会随运行时刻抖动（卡 04b 拆 conftest 时保留了这个依赖关系）。
     """
     path = tmp_path / "bank.db"
-    generate(path)
+    generate(path, months=13)      # 13 个账期：本仓库有一批「本月/近 N 天」相对时间用例，
+                                   # 依赖「当前月没有数据」这条基线；演示库用默认 16 个账期。
     dao.connect_db(path)
     from agent import session_memory
     session_memory.reset()

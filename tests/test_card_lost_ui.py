@@ -62,7 +62,7 @@ def test_verified_application_reaches_pending_then_success(monkeypatch, seeded):
     next(s for s in at.selectbox if s.label == '领卡网点').set_value('demo_east').run()
     click(at, '下一步：验证确认')
     next(c for c in at.checkbox if c.label == '确认原卡失效及补卡信息，提交本次申请').check()
-    fill(at, '模拟银行卡密码', '314159')
+    fill(at, '模拟银行卡密码', '123456')
     fill(at, '模拟短信验证码', '123456')
     click(at, '确认挂失并提交补卡申请')
     assert any('挂失待生效' in e.value for e in at.info)

@@ -263,8 +263,12 @@ def _render_confirm(*, inline: bool = False) -> None:
     _editable = bool(_draft is not None and getattr(_draft, "fields", None))
     #: 2026-10-31（用户要求）：转账/定时转账**没显式选过收款卡** → 确认按钮置灰，
     #: 逼用户先选（选卡卡面见 slot_form_ui）；服务端 _prepare 也会拒绝无卡请求。
+    #: 2026-11-01 修：`Confirmation` 没有 `facts` 字段（extra="forbid"），事实快照在 `evidence` 里 ——
+    #: 之前读 `confirmation.facts` 永远拿到 None，于是**不管选没选卡，确认键一律置灰**（用户实测：
+    #: 选了收款卡也点不动）。这里改读 `evidence`。
+    _card_facts = getattr(confirmation, "evidence", None) or {}
     _card_unsure = (str(getattr(confirmation, "intent", "")) in ("transfer_single", "transfer_scheduled")
-                    and not bool((getattr(confirmation, "facts", None) or {}).get("payee_card_chosen")))
+                    and not bool(_card_facts.get("payee_card_chosen")))
     action = ui.confirm_card(
         confirmation, compact=inline, editable=_editable,
         confirm_disabled=_card_unsure,
@@ -320,7 +324,7 @@ def _render_demo_clock() -> None:
 def _sidebar() -> None:
     """侧边栏：账户余额、快捷场景与重置会话。"""
     with st.sidebar:
-        st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="AI Banking Agent"><span aria-hidden="true">AI Banking</span><span aria-hidden="true">Agent</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="Speculator’s Blade"><span aria-hidden="true">Speculator’s</span><span aria-hidden="true">Blade</span></div>', unsafe_allow_html=True)
         st.divider()
         st.markdown("#### 账户余额")
         scope = (st.session_state["session_id"], _agent_executor().submit(card_binding_flow.owner_key).result())
@@ -404,7 +408,7 @@ def _chat_page() -> None:
         st.rerun()
 
 def main() -> None:
-    st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
+    st.set_page_config(page_title="Speculator’s Blade · 模拟环境", page_icon="🏦", layout="wide")
     st.markdown(ui.load_css(), unsafe_allow_html=True)
     premium_ui.inject_css()                                 # 卡片入场 / 等宽数字 / 卡头色条
     if not _ensure_db():
