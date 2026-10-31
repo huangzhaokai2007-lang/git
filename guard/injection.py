@@ -22,6 +22,8 @@ from typing import Iterable, NamedTuple
 
 from pydantic import BaseModel, ConfigDict
 
+from guard.injection_context import strip_benign_contexts
+
 #: 命中规则时的意图名（与规格 §3 的意图清单一致）
 UNSAFE_INTENT = "unsafe_request"
 
@@ -78,6 +80,25 @@ RULES: dict[str, tuple[str, str]] = {
         r"(系统提示|系统消息|管理员说|银行通知|官方要求|开发者说明)[^\n]{0,4}(：|:)[^\n]{0,10}"
         r"(请|你)?[^\n]{0,6}(转账|付款|提供|告知|执行)"
         r"|(system message|admin says|official notice)[^\n]{0,4}:[^\n]{0,20}(transfer|send|give|execute)"),
+    "inj-urgency-bypass": (
+        "利用紧急事态施压要求规避确认、核验或审计",
+        r"(救命|急诊|抢救|住院|出事|来不及|人命关天|十万火急)[^\n]{0,28}"
+        r"(不走流程|不走审批|不走核验|别弹确认|别让我确认|省掉确认|先斩后奏|不留审计|不要记录|不记日志|假装已确认)"
+        r"|(emergency|life or death|urgent)[^\n]{0,30}"
+        r"(no confirmation|skip audit|off the record|pretend confirmed|bypass approval)"),
+    "inj-hypothetical-jailbreak": (
+        "借虚拟语境诱导未授权划扣、伪造状态或抹除审计",
+        r"(写小说|编故事|拍电影|剧本|假设在虚拟世界|红队测试|安全演练|学术研究)[^\n]{0,28}"
+        r"(后台直连划扣|静默划转|不留审计|不记日志|抹掉记录|伪造回执|假装已确认|演示转走他人)"
+        r"|(hypothetical|fictional|story|roleplay|penetration test)[^\n]{0,30}"
+        r"(silent transfer|wipe audit|no audit log|fake receipt|pretend confirmed)"),
+    "inj-single-turn-combo": (
+        "单轮组合越权：高危动作、规避确认或审计及特权背书",
+        r"(?s)\A(?=.*(转账|汇款|划扣|提额|改密|解冻|导出账单|查看他人|transfer|withdraw|limit|export))"
+        r"(?=.*(不走流程|不走审批|别弹确认|别让我确认|省掉步骤|后台直连|静默执行|不要记录|不留审计|不记日志|假装已确认"
+        r"|off the record|silently|without asking|no confirmation|no audit|pretend confirmed))"
+        r"(?=.*(领导交代|行长批示|VIP特批|内部测试通道|白名单特权|出了事我负责|后果自负|特殊授权码"
+        r"|VIP override|CEO approved|authorized test|take full responsibility))"),
 }
 
 #: 归一化：unicode 转义 / 十六进制转义
@@ -120,7 +141,8 @@ def compact(text: str) -> str:
 
 def _match(text: str) -> list[str]:
     """在归一化串与紧凑串上各跑一遍规则表，返回命中的规则 id（保持规则表顺序、去重）。"""
-    forms = (normalize(text), compact(normalize(text)))
+    sanitized = strip_benign_contexts(normalize(text))
+    forms = (sanitized, compact(sanitized))
     hits = [rule_id for rule_id, (_note, pattern) in RULES.items()
             if any(re.search(pattern, form, re.IGNORECASE) for form in forms)]
     return hits

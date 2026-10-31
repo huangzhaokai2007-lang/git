@@ -107,7 +107,7 @@ run_one_card() {
     # —— 打工的 ——
     echo; echo "──── [卡 $c] 打工的（$WORKER_MODEL）第 $try 轮"
     local WLOG="logs/card-${c}-worker-try${try}.log" P="board/.tmp/prompt-worker-${c}-${try}.md"
-    build_prompt agents/worker.md "$P" "$CARD"
+    build_prompt docs/agents/worker.md "$P" "$CARD"
     if [ "$try" -gt 1 ]; then
       printf '\n\n=== 上一轮未通过，必须逐条闭环（不许改测试来过关）。越界文件必须 git checkout 回退 ===\n' >> "$P"
       cat "board/reviews/card-${c}.md" >> "$P"
@@ -143,7 +143,7 @@ run_one_card() {
     local RLOG="logs/card-${c}-review-try${try}.log" RP="board/.tmp/prompt-review-${c}-${try}.md"
     if [ "$DRY" -eq 1 ]; then echo "     [dry-run] hermes -p reviewer chat -m $REVIEWER_MODEL < $RP"; verdict="PASS"; else
       { echo "=== 当前未提交改动（自己再跑 git diff HEAD 看细节）==="; git status --short -uall; } > /tmp/gs.$c.tmp
-      build_prompt agents/reviewer.md "$RP" "$CARD" /tmp/gs.$c.tmp
+      build_prompt docs/agents/reviewer.md "$RP" "$CARD" /tmp/gs.$c.tmp
       local PRE; PRE="$(sig)"
       run_agent reviewer "$RP" "$REVIEWER_MODEL" "$RLOG" | tail -28
       local POST; POST="$(sig)"
@@ -201,7 +201,7 @@ run_analyst() {
   echo; echo "──── 分析师（$ANALYST_MODEL）复盘并决定下一步"
   git log --oneline -15 > /tmp/gitlog.tmp 2>&1
   ls board/reviews/ > /tmp/rl.tmp 2>/dev/null
-  build_prompt agents/analyst.md board/.tmp/prompt-analyst.md board/ledger.md /tmp/gitlog.tmp /tmp/rl.tmp
+  build_prompt docs/agents/analyst.md board/.tmp/prompt-analyst.md board/ledger.md /tmp/gitlog.tmp /tmp/rl.tmp
   if [ "$DRY" -eq 1 ]; then echo "     [dry-run] hermes -p analyst chat -m $ANALYST_MODEL < board/.tmp/prompt-analyst.md"; return 0; fi
   local OUT; OUT="$(run_agent analyst board/.tmp/prompt-analyst.md "$ANALYST_MODEL" "$L" | tail -40)"
   printf '\n%s\n' "$OUT" >> board/ledger.md

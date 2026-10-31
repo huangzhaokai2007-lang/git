@@ -7,7 +7,7 @@
 *.py[cod]
 logs/
 board/
-agents/
+docs/agents/
 data/*.db
 data/*.db-*
 var/*.db
