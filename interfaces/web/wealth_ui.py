@@ -261,27 +261,129 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             ask(f"买 {item.get('name')} {int(amount)} 元")
 
 
-def render_holdings_actions(turn: Mapping[str, Any], *, ask: Callable[[str], None],
-                           key_prefix: str) -> None:
-    """持仓页的**赎回入口**：每只持仓一个按钮，点了让编排层去问金额。
+def render_holdings(turn: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
+                    daily_loader: Callable[[str, str], Mapping[str, Any]] | None = None) -> None:
+    """持仓页：**合计 + 每只一张卡（K 线 / 还能带来多少 / 赎回）**。
 
-    **只放按钮、不复述数字**：上面那段回执已经把名称 / 持有金额 / 年化 / 买入日期列全了，
-    这里再画一遍就是「同一份数据出现两遍」—— 收款人卡片踩过这个坑，用户要求只留一处。
+    和推荐卡同一套视觉语言 —— 用户在同一条业务线里不该看到两种排版。
+    与推荐卡的区别：
+    - 金额是**实际持有**，不是起购额；
+    - 收益给的是「**还能带来多少**」（按剩余期限算），不是每万元标尺；
+    - 有赎回按钮。
 
-    金额不在按钮里写死：点下去发的是「赎回 <产品名>」，缺槽由编排层追问，
-    用户自己说金额。这样全额/部分赎回走的是同一条路径。
+    **数据来源**：金额/年化/到期/收益预估全部来自 `list_holdings` 的 facts（铁律 2），
+    界面只排版；K 线走 T14b 按需拉取（持仓 facts 不带 candles，避免每次进页面都扛 25 只）。
     """
-    items = (turn.get("facts") or {}).get("items") or []
+    facts = turn.get("facts") or {}
+    items = facts.get("items") or []
     if not items:
+        st.markdown(turn.get("reply") or "您目前没有持有中的理财产品。")
         return
-    st.markdown("<div style='font-size:.8rem;color:#94a3b8;margin:.7rem 0 .1rem;'>"
-                "赎回（点产品名，接着告诉我金额）</div>", unsafe_allow_html=True)
+
+    #: 合计行（数字来自 facts；回执原文不再上屏，避免同一份数据出现两遍）
+    st.markdown(
+        "<div style='display:flex;align-items:baseline;gap:.5rem;margin:.1rem 0 .5rem;'>"
+        f"<span style='font-size:1.5rem;font-weight:700;line-height:1;'>"
+        f"{html.escape(str(facts.get('total_amount_yuan', '0.00')))}</span>"
+        "<span style='font-size:.78rem;color:#94a3b8;'>持有合计（元）</span>"
+        f"<span style='font-size:.78rem;color:#94a3b8;margin-left:.4rem;'>"
+        f"{html.escape(str(facts.get('total_count', len(items))))} 只</span></div>",
+        unsafe_allow_html=True)
+
     cols = st.columns(min(len(items), 2))
     for index, item in enumerate(items):
         with cols[index % len(cols)]:
-            key = f"{key_prefix}-redeem-{item.get('holding_id') or index}"
-            if st.button(f"赎回 · {item.get('name')}", key=key, width="stretch"):
-                ask(f"赎回 {item.get('name')}")
+            _holding_card(item, ask=ask, key_prefix=key_prefix, daily_loader=daily_loader)
+
+
+def _holding_card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
+                  daily_loader: Callable[[str, str], Mapping[str, Any]] | None) -> None:
+    """一只持仓一张卡：名称 → 持有金额 → 关键信息 → K 线 → 还能带来多少 → 赎回。"""
+    pid = str(item.get("product_id"))
+    with st.container(border=True):
+        st.markdown(f"**{item.get('name')}**")
+        st.markdown(
+            "<div style='display:flex;align-items:baseline;gap:.45rem;margin:.1rem 0 .15rem;'>"
+            f"<span style='font-size:1.55rem;font-weight:700;line-height:1;'>"
+            f"{html.escape(str(item.get('amount_yuan')))}</span>"
+            "<span style='font-size:.75rem;color:#94a3b8;'>持有金额（元）</span></div>"
+            "<div style='font-size:.8rem;color:#94a3b8;'>"
+            f"年化 {html.escape(str(item.get('yield')))} · "
+            f"买入 {html.escape(str(item.get('purchase_date')))} · "
+            f"{html.escape(_term_text(item))}</div>",
+            unsafe_allow_html=True)
+
+        #: K 线：持仓 facts 不带 candles，按需拉月 K 并缓存（和推荐卡同一个 loader）。
+        cache_key = f"{key_prefix}-hk-{pid}"
+        loaded = st.session_state.get(cache_key)
+        if loaded is None and daily_loader is not None:
+            result = daily_loader(pid, "monthly")
+            loaded = result if result and result.get("ok") else {}
+            st.session_state[cache_key] = loaded
+        if loaded and loaded.get("candles"):
+            _kline(loaded["candles"])
+
+        #: 「还能带来多少」：数字来自工具层（`to_maturity_income_yuan` / `annual_income_yuan`），
+        #: 界面只选一个显示，不做乘法。已到期的显示「已到期」，不显示 0.00 元。
+        remaining = int(item.get("remaining_days") or 0)
+        if item.get("maturity_date") and remaining == 0:
+            line = "<span style='color:#94a3b8;'>已到期，随时可赎</span>"
+        elif item.get("to_maturity_income_yuan"):
+            line = (f"持有到期预计还能带来约 <b>{html.escape(str(item['to_maturity_income_yuan']))} 元</b>"
+                    f"（剩余 {remaining} 天 · 模拟）")
+        else:
+            line = (f"持有一年预计带来约 <b>{html.escape(str(item.get('annual_income_yuan', '0.00')))} 元</b>"
+                    "（活期 · 模拟）")
+        st.markdown(f"<div style='font-size:.78rem;color:#64748b;margin:.1rem 0 .45rem;'>{line}</div>",
+                    unsafe_allow_html=True)
+
+        if st.button("赎回", key=f"{key_prefix}-redeem-{item.get('holding_id') or pid}",
+                     width="stretch"):
+            ask(f"赎回 {item.get('name')}")
+
+
+def _term_text(item: Mapping[str, Any]) -> str:
+    """期限的中文说法（纯文案，不含业务数字）。"""
+    days = int(item.get("term_days") or 0)
+    if days <= 0:
+        return "活期"
+    if days % 365 == 0:
+        return f"{days // 365} 年期"
+    if days % 30 == 0:
+        return f"{days // 30} 个月期"
+    return f"{days} 天期"
+
+
+#: 期限筛选的档位（顺序即界面顺序）
+TERM_CHOICES = ("全部", "1 年内", "1–3 年", "3 年以上")
+#: 排序口径：收益降序是工具层给的默认序，这里只在用户要求时换一种看法
+SORT_CHOICES = ("收益 ↓", "期限 ↑")
+
+
+def filter_by_term(items: list[Mapping[str, Any]], choice: str) -> list[Mapping[str, Any]]:
+    """按期限档位筛「工具已返回的 items」。
+
+    **纯视图筛选**：不重新查工具、不动风险上限（那是工具层的职责）。
+    活期产品 `term=0` 归入「1 年内」—— 它确实随时能取。
+    """
+    def keep(term: object) -> bool:
+        days = int(term or 0)
+        if choice == "1 年内":
+            return days <= 365
+        if choice == "1–3 年":
+            return 365 < days <= 1095
+        if choice == "3 年以上":
+            return days > 1095
+        return True
+
+    return [item for item in items if keep(item.get("term"))]
+
+
+def order_items(items: list[Mapping[str, Any]], choice: str) -> list[Mapping[str, Any]]:
+    """`期限 ↑` 时按天数升序；其余保持工具层给的收益降序。"""
+    if choice == "期限 ↑":
+        return sorted(items, key=lambda row: int(row.get("term") or 0))
+    return list(items)
 
 
 def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
@@ -321,26 +423,13 @@ def render_turn(turn: Mapping[str, Any], *, ask: Callable[[str], None],
     #: 所以这里只给「按期限找货 + 换个排序」——纯视图，不动业务口径。
     fcol1, fcol2 = st.columns(2)
     term_choice = fcol1.radio(
-        '期限', ['全部', '1 年内', '1–3 年', '3 年以上'], horizontal=True,
+        '期限', list(TERM_CHOICES), horizontal=True,
         key=f'{key_prefix}-term', label_visibility='collapsed')
     sort_choice = fcol2.radio(
-        '排序', ['收益 ↓', '期限 ↑'], horizontal=True,
+        '排序', list(SORT_CHOICES), horizontal=True,
         key=f'{key_prefix}-sort', label_visibility='collapsed')
 
-    def _term_ok(term: object) -> bool:
-        days = int(term or 0)
-        if term_choice == '1 年内':
-            return days <= 365
-        if term_choice == '1–3 年':
-            return 365 < days <= 1095
-        if term_choice == '3 年以上':
-            return days > 1095
-        return True
-
-    filtered = [item for item in items if _term_ok(item.get('term'))]
-    if sort_choice == '期限 ↑':
-        #: 收益序是工具层给的（降序），这里只在用户要求时换一种看法。
-        filtered = sorted(filtered, key=lambda row: int(row.get('term') or 0))
+    filtered = order_items(filter_by_term(items, term_choice), sort_choice)
     if not filtered:
         st.info('这个期限档位下暂时没有产品，换个档位看看。')
         return
