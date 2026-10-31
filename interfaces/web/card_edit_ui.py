@@ -101,7 +101,7 @@ def _card_picker(executor: ThreadPoolExecutor, session_id: str, confirmation,
     if not cards:
         return
     labels = {card["card_id"]: (f"{card['bank']} {card['card_no_mask']}"
-                                + ("　（默认卡）" if card["is_default"] else ""))
+                                )
               for card in cards}
     ids = list(labels)
     current = str(filled.get("payee_card_id") or ids[0])

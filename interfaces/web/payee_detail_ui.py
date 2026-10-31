@@ -161,7 +161,7 @@ def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict, confirm
             cards = executor.submit(payee_card_flow.cards_of, person["payee_id"]).result()
             if cards:
                 chips = "　".join(
-                    f"{card['bank']} {card['card_no_mask']}" + (" ⭐" if card["is_default"] else "")
+                    f"{card['bank']} {card['card_no_mask']}" 
                     for card in cards)
                 st.caption(f"银行卡（{len(cards)} 张）：{chips}")
             else:

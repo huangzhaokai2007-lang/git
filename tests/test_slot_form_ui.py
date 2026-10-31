@@ -20,6 +20,13 @@ if str(REPO / "scripts") not in sys.path:
 
 import demo                                                       # noqa: E402
 
+
+def _pick_first_card(app) -> None:
+    """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
+    candidates = [button for button in app.button if "6222" in button.label]
+    if candidates:
+        candidates[0].click().run()
+
 FILLS = {'收款人': '王五', '总金额': '100', '预约时间': '2026-11-20 09:00'}
 
 

@@ -51,7 +51,11 @@ def test_drawer_does_not_carry_values_to_a_new_card(monkeypatch: pytest.MonkeyPa
     app = _app(monkeypatch, [_scheduled("王五", "100", "明天 09:00"),
                              _scheduled("张小美", "600", "后天 10:00")])
     app.chat_input[0].set_value("明天 9 点给王五转 100").run()
-    next(button for button in app.button if button.label == "✏️ 修改").click().run()
+    #: 2026-10-31：确认卡会自动拉开选卡抽屉 → 已是「收起修改」就不用点
+    toggle = next((button for button in app.button
+                   if button.label in ("✏️ 修改", "✏️ 收起修改")), None)
+    if toggle is not None and toggle.label == "✏️ 修改":
+        toggle.click().run()
     assert next(box.value for box in app.text_input if box.label == "收款人") == "王五"
 
     app.chat_input[0].set_value("后天 10 点给张小美转 600").run()
@@ -73,7 +77,11 @@ def test_editing_amount_keeps_the_schedule(monkeypatch: pytest.MonkeyPatch) -> N
     before = (confirm_card.current(session).filled or {}).get("schedule")
     assert before
 
-    next(button for button in app.button if button.label == "✏️ 修改").click().run()
+    #: 2026-10-31：确认卡会自动拉开选卡抽屉 → 已是「收起修改」就不用点
+    toggle = next((button for button in app.button
+                   if button.label in ("✏️ 修改", "✏️ 收起修改")), None)
+    if toggle is not None and toggle.label == "✏️ 修改":
+        toggle.click().run()
     next(box for box in app.text_input if "金额" in box.label).set_value("600").run()
     next(button for button in app.button if button.label == "按修改重新预检").click().run()
     assert not app.exception, app.exception

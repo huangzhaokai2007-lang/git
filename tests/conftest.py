@@ -321,9 +321,10 @@ def _reset_agent_globals():
     （表现为 `payee_list` 被判成 `out_of_scope`）。本隔离**没有**修好它 ——
     根因未定位，已排除的假设见 PR 描述。
     """
-    from agent import confirm_card, payee_picker, pending_slots, session_memory, write_flow
+    from agent import card_policy, confirm_card, payee_picker, pending_slots, session_memory, write_flow
 
-    write_flow.set_aa_edit_first(False)     # agent 层用例默认走"直接出确认卡"的旧契约
+    write_flow.set_aa_edit_first(False)
+    card_policy.set_require_payee_card(False)      # 转账必须选卡只对网页生效     # agent 层用例默认走"直接出确认卡"的旧契约
 
     #: 2026-10-29：**顺带清掉确认卡与缺槽续接** —— 它们同样是模块级全局。
     #: 群收款卡面的用例会留下在途确认，泄漏到后面的用例时会表现成

@@ -17,7 +17,7 @@ import datetime
 import re
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
+from agent import card_policy, confirm_card, payee_clarify, payee_resolve, payee_risk
 from agent import _relative_time                              # 相对时间说法（明天/下周一/月底）
 from agent._write_common import repeat_cycle, Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
@@ -175,6 +175,10 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
             missing.append("amount")
         else:
             filled["amount_cents"] = cents
+    #: 2026-10-31（用户要求）：**必须选收款人的银行卡**（取消"默认卡"自动带过）。
+    #: 槽位 `payee_card` 装的是卡 id；这里统一映射到工具层参数名 `payee_card_id`。
+    if filled.get("payee_card") and not filled.get("payee_card_id"):
+        filled["payee_card_id"] = str(filled["payee_card"])
     clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
     return ShapeResult(filled=filled, missing=missing, clarify=clarify,
                        candidates=list(payee_facts.get("candidates") or []))

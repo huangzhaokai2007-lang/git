@@ -195,8 +195,15 @@ def edit(session_id: str, updates: Mapping) -> Step:
         masked = str(((confirmation.filled or {}).get("masked_phone") or "")).strip()
         if masked and "payee" in raw:
             raw["payee"] = masked
+    #: 2026-10-31（转账必须选卡）：改卡时要把**已选的收款卡**带上，否则重检会再问一次；
+    #: 换了收款人就把它摘掉（旧卡属于上一个人）。
+    if "payee_card" not in updates and "payee" not in updates:
+        chosen_card = str(((confirmation.filled or {}).get("payee_card_id") or "")).strip()
+        if chosen_card:
+            raw["payee_card_id"] = chosen_card
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
-    derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
+    derived = {"amount": ("amount_cents",),
+               "payee": ("payee_id", "masked_phone", "payee_card_id"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
                "amounts": ("per_person_cents", "amount_cents", "amount"),
                "schedule": (), "date": ()}
@@ -278,7 +285,8 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
 
 #: 缺槽时给用户看的字段名（**只影响措辞**，不含任何业务数字）
 SLOT_LABELS = {
-    "payee": "收款人", "payee_ids": "收款人", "amount": "总金额", "date": "日期",
+    "payee": "收款人",
+    "payee_card": "收款卡", "payee_ids": "收款人", "amount": "总金额", "date": "日期",
     "schedule": "预约时间", "budget": "预算", "contact": "联系人",
     "platform": "平台", "address": "收货地址", "order_no": "平台订单号",
     "tags": "标签", "note": "备注", "card_no": "银行卡号",

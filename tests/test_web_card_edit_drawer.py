@@ -22,6 +22,13 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _pick_first_card(app) -> None:
+    """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
+    candidates = [button for button in app.button if "6222" in button.label]
+    if candidates:
+        candidates[0].click().run()
+
+
 def _app(monkeypatch: pytest.MonkeyPatch, intent: str, slots: dict) -> AppTest:
     import os
     os.environ["DB_PATH"] = str(demo.build_temp_db())
@@ -45,10 +52,17 @@ def test_edit_panel_is_collapsed_until_clicked(clock,
     app.chat_input[0].set_value("给王五转 100 元").run()
     assert not app.exception, app.exception
     labels = [button.label for button in app.button]
-    assert "✅ 确认" in labels and "✖ 取消" in labels and "✏️ 修改" in labels
-    assert "收款人" not in [box.label for box in app.text_input]        # 收起时没有编辑框
+    assert "✅ 确认" in labels and "✖ 取消" in labels
+    assert any(label in labels for label in ("✏️ 修改", "✏️ 收起修改"))
+    #: 2026-10-31（新交互）：转账卡会**自动拉开**选卡抽屉 → 编辑框本来就在，
+    #: 所以这里只断言"抽屉里有收款人/金额"，收起/展开由下面的按钮文案与选卡区体现。
+    assert "收款人" in [box.label for box in app.text_input]
 
-    next(button for button in app.button if button.label == "✏️ 修改").click().run()
+    #: 2026-10-31：转账确认卡会自动拉开选卡抽屉 → 已经是「收起修改」时就不用再点
+    toggle = next((button for button in app.button
+                   if button.label in ("✏️ 修改", "✏️ 收起修改")), None)
+    if toggle is not None and toggle.label == "✏️ 修改":
+        toggle.click().run()
     assert not app.exception, app.exception
     assert "收款人" in [box.label for box in app.text_input]            # 抽屉里出现编辑框
     assert "按修改重新预检" in [button.label for button in app.button]

@@ -19,7 +19,7 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import balance_flow, card_binding_flow, confirm_card, orchestrator, write_flow  # noqa: E402
+from agent import card_policy, balance_flow, card_binding_flow, confirm_card, orchestrator, write_flow  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -256,6 +256,14 @@ def _render_confirm(*, inline: bool = False) -> None:
     #: 只有"有可编辑字段"的确认卡才给「修改」（黑名单确认卡之类点了也没用）
     from agent import card_draft
 
+    #: 2026-10-31（用户要求）：转账/定时转账**必须选收款卡** —— 确认卡一出现就把
+    #: 「✏️ 修改」抽屉自动拉开（抽屉第一块就是「🏦 选择银行卡」），用户选一张即生效。
+    if (getattr(confirmation, "intent", "") in ("transfer_single", "transfer_scheduled")
+            and not (getattr(confirmation, "filled", None) or {}).get("payee_card_id")):
+        seen = st.session_state.setdefault("card-pick-auto", set())
+        if confirmation.trace_id not in seen:
+            seen.add(confirmation.trace_id)
+            st.session_state["card-edit-open"] = True
     _draft = _agent_executor().submit(card_draft.draft_of, st.session_state["session_id"]).result()
     _editable = bool(_draft is not None and getattr(_draft, "fields", None))
     action = ui.confirm_card(
@@ -351,6 +359,10 @@ def _sidebar() -> None:
 def _chat_page() -> None:
     #: 网页里群收款要先出**可编辑的发起卡**（用户 2026-10-31），点「发起群收款」才出确认卡。
     #: 用 getattr 兜一下：万一部署时序错开（app 新、agent 旧），也不至于整页红屏。
+    #: 2026-10-31（用户要求）：网页里转账/定时转账**必须先选收款卡**（取消默认卡）
+    _enable_card = getattr(card_policy, "set_require_payee_card", None)
+    if callable(_enable_card):
+        _enable_card(True)
     _enable_edit_first = getattr(write_flow, "set_aa_edit_first", None)
     if callable(_enable_edit_first):
         _enable_edit_first(True)

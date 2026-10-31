@@ -18,6 +18,13 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _pick_first_card(app) -> None:
+    """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
+    candidates = [button for button in app.button if "6222" in button.label]
+    if candidates:
+        candidates[0].click().run()
+
+
 def _app(monkeypatch: pytest.MonkeyPatch, intent: str, slots: dict) -> AppTest:
     import os
     os.environ["DB_PATH"] = str(demo.build_temp_db())
@@ -44,7 +51,10 @@ def test_edit_after_picking_a_same_name_payee_does_not_reopen_the_picker(
     assert not app.exception, app.exception
     assert not [button for button in app.button if button.label == "选这位"]
 
-    next(button for button in app.button if button.label == "✏️ 修改").click().run()
+    toggle = next((button for button in app.button
+                   if button.label in ("✏️ 修改", "✏️ 收起修改")), None)
+    if toggle is not None and toggle.label == "✏️ 修改":
+        toggle.click().run()
     assert not app.exception, app.exception
     payee_box = next(box for box in app.text_input if box.label == "收款人")
     #: 用户要求：框里显示**姓名**（人看得懂）；重检时编排层自己用手机号去歧义。

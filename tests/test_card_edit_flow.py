@@ -23,6 +23,7 @@ from agent import (
     orchestrator,
     session_memory,
     write_flow,
+    pending_slots,
 )
 from data import payee_dao
 from tests.conftest import raw
@@ -54,9 +55,19 @@ def _fake(monkeypatch, payee_name: str = "房东", amount: str = "100") -> None:
     monkeypatch.setattr(llm, "chat_json", chat_json)
 
 
+#: 2026-10-31：转账现在**必须选收款卡** → 用例里统一补一张（房东=王五 pc_0003_a）
+CARD_ID = "pc_0003_a"
+
+
 def _start_transfer(wired, monkeypatch, amount: str = "100"):
+    """出确认卡（含"必须先选收款卡"这一步）。"""
     _fake(monkeypatch, amount=amount)
-    return orchestrator.handle(f"给房东转 {amount} 元", session_id=SESSION)
+    turn = orchestrator.handle(f"给房东转 {amount} 元", session_id=SESSION)
+    #: 2026-10-31：网页里必须选卡是开关（agent 层默认关），这里做兼容 ——
+    #: 万一以后打开开关也不会炸（pending 还在才提交）。
+    if "收款卡" in (turn.reply or "") and pending_slots.peek(SESSION) is not None:
+        turn = pending_slots.submit_form(SESSION, {"payee_card": CARD_ID})
+    return turn
 
 
 def test_edit_amount_rereuns_risk(wired, monkeypatch) -> None:
@@ -82,6 +93,9 @@ def test_edit_payee_switches_person_and_tier(wired, monkeypatch) -> None:
     card = _start_transfer(wired, monkeypatch)
     assert card.tier == "L1"
     edited = write_flow.edit(SESSION, {"payee": ZHANG})
+    #: 2026-10-31：换了收款人 → 旧卡作废，必须重新选他的卡（这里选张小美的 pc_0004_a）
+    if "收款卡" in (edited.reply or "") and pending_slots.peek(SESSION) is not None:
+        edited = pending_slots.submit_form(SESSION, {"payee_card": "pc_0004_a"})
     assert ZHANG in edited.reply and edited.tier == "L2"                # 张小美非白名单
 
 

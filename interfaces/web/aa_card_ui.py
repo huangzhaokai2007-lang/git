@@ -439,7 +439,7 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         if _my_cards:
             _card_labels = {card["card_id"]: (f"{card['card_type']} {card['bank']} "
                                               f"{card['card_no_mask']}"
-                                              + ("　（默认）" if card["is_default"] else ""))
+                                              )
                             for card in _my_cards}
             _card_ids = list(_card_labels)
             _saved = str(st.session_state.get("aa-my-card") or "")
