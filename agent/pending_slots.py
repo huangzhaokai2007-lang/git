@@ -83,7 +83,7 @@ def merge(item: dict, text: str) -> dict | None:
     - 一片都没填上 → `None`。
     """
     raw = str(text or "").strip()
-    if not raw or _NEW_REQUEST.search(raw):
+    if not raw or _NEW_REQUEST.search(raw) or raw in ('算了', '算了吧', '不办了', '先不办了', '谢谢', '好的', '你好', '重试', '再试一下'):
         return None
     parts = [part for part in _SPLIT.split(raw) if part]
     missing = list(item.get("missing") or [])
@@ -119,6 +119,19 @@ def submit_form(session_id: str, values: dict):
         intent_resolver=lambda *_: classifier.IntentOut(intent=item['intent'], confidence=1, slots=slots))
 
 
+def read_answer(session_id: str, verdict: Any) -> Any | None:
+    """Read clarifications stay reads, rather than entering the write state machine."""
+    item = peek(session_id)
+    if not item or item['intent'] not in ('anomaly_check', 'bill_report', 'bill_analysis', 'txn_query'):
+        return None
+    if verdict.intent != item['intent']:
+        return None
+    from agent.classifier import IntentOut
+    clear(session_id)
+    return IntentOut(intent=verdict.intent, confidence=verdict.confidence,
+                     slots={**item['slots'], **verdict.slots})
+
+
 def resume(session_id: str, text: str, verdict: Any, *, trace_id: str = "") -> Any | None:
     """尝试续接（**在分类之后**调用，用分类结果决定怎么合并）。
 
@@ -144,6 +157,8 @@ def resume(session_id: str, text: str, verdict: Any, *, trace_id: str = "") -> A
 
     from agent import write_flow
 
+    if item['intent'] not in write_flow.WRITE_INTENTS:
+        return None
     step = write_flow.start(item["intent"], merged, session_id, trace_id=trace_id)
     if step.missing:
         _PENDING[session_id] = {**item, "slots": merged, "missing": list(step.missing),
