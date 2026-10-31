@@ -188,6 +188,13 @@ def edit(session_id: str, updates: Mapping) -> Step:
             raw["payee_ids"] = names
         if "aa_target" in confirmation.filled:
             raw["aa_target"] = confirmation.filled["aa_target"]
+    #: 2026-10-30（用户实测「点修改后收款人显示成电话号码」）：卡面显示姓名，
+    #: 但**重检**不能拿姓名再解析一遍（同名会再弹解析卡）。用户没改收款人时，
+    #: 直接用卡上已经解析好的脱敏手机号（解析关卡里唯一可辨）。
+    if "payee" not in updates:
+        masked = str(((confirmation.filled or {}).get("masked_phone") or "")).strip()
+        if masked and "payee" in raw:
+            raw["payee"] = masked
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
     derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
@@ -303,7 +310,22 @@ def missing_hint(missing: list[str], intent: str = "") -> str:
     return templates.clarify_missing(labels)
 
 
-def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -> Step:
+#: 网页端「群收款先出编辑卡」的开关（agent 层用例默认关闭 = 旧的"直接出确认卡"契约）
+_AA_EDIT_FIRST = False
+
+
+def set_aa_edit_first(enabled: bool) -> None:
+    """界面每次渲染时设置：网页里群收款要先看到可编辑的发起卡。"""
+    global _AA_EDIT_FIRST
+    _AA_EDIT_FIRST = bool(enabled)
+
+
+def aa_edit_first_enabled() -> bool:
+    return _AA_EDIT_FIRST
+
+
+def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "",
+          from_card: bool = False) -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
     spec = write_intents.spec_of(intent)
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
@@ -329,9 +351,23 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
         if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
             ask = f"{shaped.clarify}\n请补充：{'、'.join(absent)}。"
         #: 2026-10-27：登记「还差什么」，让用户下一句短答能**续接补槽**（不再被当新意图）。
-        pending_slots.remember(session_id, intent, dict(slots), list(shaped.missing))
+        #: 2026-10-30：登记**解析之后**的槽位（`filled` 里有 payee_id / aa_names），
+        #: 否则下一轮卡面拿到的是原始姓名，同名就没法回填（用户实测"解析完人没进参与人"）。
+        pending_slots.remember(session_id, intent, {**dict(slots), **dict(shaped.filled)},
+                               list(shaped.missing))
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
+    #: 2026-10-31（用户要求）：群收款在**聊天里**说全了也先铺发起卡（可改人、可改钱），
+    #: 只有点卡上的「发起群收款」（`from_card=True`）才继续预检、出确认卡。
+    if intent == "aa_collect" and not from_card and aa_edit_first_enabled():
+        pending_slots.remember_prefill(session_id, intent,
+                                       {**dict(slots), **dict(shaped.filled)})
+        return Step(states=["SLOT_FILL"], intent=intent,
+                    reply="已按你说的铺好群收款卡：核对参与人与金额，点「发起群收款」我再出确认卡。",
+                    ask="aa_prefill")
+    #: 2026-10-30（用户实测）：走到这里说明**不再缺槽**（要出卡/要执行了），
+    #: 把之前的补槽记录清掉 —— 否则「还差这几项」表单会在随后几轮一直挂着。
+    pending_slots.clear(session_id)
     filled = shaped.filled
     if confirm_card.is_locked(session_id):
         return Step(states=["PRECHECK"], intent=intent, result="rejected",
