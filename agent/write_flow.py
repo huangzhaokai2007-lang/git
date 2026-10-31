@@ -338,6 +338,12 @@ def aa_edit_first_enabled() -> bool:
 def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "",
           from_card: bool = False) -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
+    #: 2026-10-31：上一步停在"选收款卡"、用户却改说了**另一笔**（同意图的新请求）——
+    #: 旧的选卡登记要作废，否则会拿旧草稿去预检，报「原草稿已失效」。
+    _stale = pending_slots.peek(session_id)
+    if (_stale and _stale.get("intent") == intent
+            and list(_stale.get("missing") or []) == ["payee_card"]):
+        pending_slots.clear(session_id)
     spec = write_intents.spec_of(intent)
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
         return Step(states=["SLOT_FILL"], intent=intent)

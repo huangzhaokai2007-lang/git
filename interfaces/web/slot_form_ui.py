@@ -130,6 +130,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     if "payee_card" in missing:
         _card_picker(executor, session_id, item, [slot for slot in missing if slot != "payee_card"])
         return
+    #: 收款人卡内的转账用**卡内表单**收金额，通用填表卡不重复弹（选卡卡面上面已单独处理）。
+    if st.session_state.get("payee-inline-intent"):
+        return
     with st.container(border=True):
         premium_ui.card_head("📝 还差这几项，直接填就好", "填完点「继续」；也可以照常在下面用一句话回答",
                              tone="warn")

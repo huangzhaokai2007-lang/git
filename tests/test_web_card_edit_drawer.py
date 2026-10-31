@@ -22,6 +22,13 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _pick_card_if_asked(app) -> None:
+    """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
+    cards = [button for button in app.button if "6222" in button.label]
+    if cards:
+        cards[0].click().run()
+
+
 def _pick_first_card(app) -> None:
     """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
     candidates = [button for button in app.button if "6222" in button.label]
@@ -50,13 +57,13 @@ def test_edit_panel_is_collapsed_until_clicked(clock,
     """默认收起：只有三个按钮；点「✏️ 修改」后才出现编辑控件。"""
     app = _app(monkeypatch, "transfer_single", {"payee": "王五", "amount": "100"})
     app.chat_input[0].set_value("给王五转 100 元").run()
+    _pick_card_if_asked(app)
     assert not app.exception, app.exception
     labels = [button.label for button in app.button]
     assert "✅ 确认" in labels and "✖ 取消" in labels
     assert any(label in labels for label in ("✏️ 修改", "✏️ 收起修改"))
-    #: 2026-10-31（新交互）：转账卡会**自动拉开**选卡抽屉 → 编辑框本来就在，
-    #: 所以这里只断言"抽屉里有收款人/金额"，收起/展开由下面的按钮文案与选卡区体现。
-    assert "收款人" in [box.label for box in app.text_input]
+    #: 2026-10-31：抽屉默认收起（选卡改由独立的「选择银行卡」卡面负责）
+    assert "收款人" not in [box.label for box in app.text_input]
 
     #: 2026-10-31：转账确认卡会自动拉开选卡抽屉 → 已经是「收起修改」时就不用再点
     toggle = next((button for button in app.button
@@ -74,6 +81,7 @@ def test_scheduled_edit_uses_calendar_and_cycle_picker(clock,
     app = _app(monkeypatch, "transfer_scheduled",
                {"payee": "王五", "amount": "100", "schedule": "明天"})
     app.chat_input[0].set_value("明天给王五转 100 元").run()
+    _pick_card_if_asked(app)
     assert not app.exception, app.exception
     #: 抽屉开/关由 session 状态决定；这里点一下确保它是**打开**的（点错方向就再点一次）
     def _open_drawer() -> None:

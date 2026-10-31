@@ -18,6 +18,13 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _pick_card_if_asked(app) -> None:
+    """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
+    cards = [button for button in app.button if "6222" in button.label]
+    if cards:
+        cards[0].click().run()
+
+
 def _pick_first_card(app) -> None:
     """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
     candidates = [button for button in app.button if "6222" in button.label]
@@ -46,8 +53,14 @@ def test_edit_after_picking_a_same_name_payee_does_not_reopen_the_picker(
     """同名选完 → 出确认卡 → 点「✏️ 修改」→ 收款人字段已是脱敏号 → 预检不再弹解析卡。"""
     app = _app(monkeypatch, "transfer_single", {"payee": "李四", "amount": "500"})
     app.chat_input[0].set_value("给李四转 500 元").run()
+    _pick_card_if_asked(app)
     assert not app.exception, app.exception
     next(button for button in app.button if button.label == "选这位").click().run()
+
+    #: 2026-10-31：转账先出「选择银行卡」卡面 → 点第一张再继续
+    _cards = [button for button in app.button if "6222" in button.label]
+    if _cards:
+        _cards[0].click().run()
     assert not app.exception, app.exception
     assert not [button for button in app.button if button.label == "选这位"]
 
@@ -74,6 +87,7 @@ def test_group_collect_has_no_collapse_button(monkeypatch: pytest.MonkeyPatch) -
     """群收款展开后不该再有「收起新增群收款」（那按钮点了没用，已去掉）。"""
     app = _app(monkeypatch, "aa_collect", {})
     app.chat_input[0].set_value("发起群收款").run()
+    _pick_card_if_asked(app)
     assert not app.exception, app.exception
     labels = [button.label for button in app.button]
     assert "收起新增群收款" not in labels

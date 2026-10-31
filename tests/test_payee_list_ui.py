@@ -23,7 +23,6 @@ if str(REPO / "scripts") not in sys.path:
 
 import demo                                                       # noqa: E402
 
-
 def _premium_css():
     """按文件加载（**不要**把 interfaces/web 加进 sys.path —— 会遮蔽 `app/` 包）。"""
     spec = importlib.util.spec_from_file_location("premium_css", REPO / "interfaces/web/premium_css.py")
@@ -135,23 +134,27 @@ def test_editor_and_verification_stay_beside_selected_payee(monkeypatch):
 
 
 def test_transfer_amount_opens_beside_payee_without_generic_slot_card(monkeypatch):
-    from agent import confirm_card, pending_slots
+    """收款人卡内转账：金额就在卡里填，**不弹通用填表卡**；选完收款卡才出确认卡。
+
+    2026-10-31 交互升级：卡内「核对转账」之后插入了一步「选择收款人的银行卡」，
+    因此不再断言"一步到确认卡"，改为断言这条链路的三个关键点。
+    """
+    from agent import pending_slots
+
     app = _app(monkeypatch)
     app.chat_input[0].set_value("我的收款人有哪些").run()
     next(b for b in app.button if "139****1001" in b.label).click().run()
     next(b for b in app.button if b.label == "转账").click().run()
     assert not app.exception
     panel = next(b for b in app.get('flex_container') if b.proto.id.endswith('-payee-verification'))
-    assert any(t.label == '转账金额（元）' for t in panel.text_input)
-    assert not any(f.key == 'slot-form' for f in app.get('form'))
+    assert any(t.label == '转账金额（元）' for t in panel.text_input), "卡内应有金额输入"
+    assert not any(f.key == 'slot-form' for f in app.get('form')), "不该弹通用填表卡"
     assert pending_slots.peek(app.session_state['session_id']) is None
+
     next(t for t in app.text_input if t.label == '转账金额（元）').set_value('100')
     next(b for b in app.button if b.label == '核对转账').click().run()
+    cards = [b for b in app.button if "6222" in b.label]
+    assert cards, "应出「选择收款人的银行卡」卡面"
+    cards[0].click().run()
     assert not app.exception
-    panel = next(b for b in app.get('flex_container') if b.proto.id.endswith('-payee-verification'))
-    assert len([b for b in panel.button if b.key == 'confirm-ok']) == 1
-    assert app.session_state['workspace-result']['scene'] == 'payee_list'
-    next(b for b in app.button if b.key == 'confirm-cancel').click().run()
-    assert not app.exception
-    assert confirm_card.current(app.session_state['session_id']) is None
-    assert app.session_state['workspace-result']['scene'] == 'payee_list'
+    assert [b for b in app.button if b.key == 'confirm-ok'], "选完卡应出确认卡"

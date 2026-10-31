@@ -272,8 +272,9 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
             renderers[panel](executor, session)
     if scene not in ('cards', 'records'):
         scene_ui.render(executor, session, ask, show_scope=False)
-    if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent')):
-        slot_form_ui.render(executor, session)
+    #: 2026-10-31：收款人卡内的「核对转账」也要能出「选择银行卡」卡面 ——
+    #: 通用填表卡由 slot_form_ui 自己按 payee-inline 跳过，这里不再整块跳过。
+    slot_form_ui.render(executor, session)
     #: 2026-10-31 修：只有**群收款本身**的确认卡由群收款卡自己画（三卡合一）；
     #: 「登记已付」等其他在途确认仍走通用确认卡 —— 否则登记已付没有确认按钮，流程卡死。
     _pending_conf = (executor.submit(_confirm_card.current, session).result()

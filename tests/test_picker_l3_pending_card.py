@@ -24,6 +24,13 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _pick_card_if_asked(app) -> None:
+    """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
+    cards = [button for button in app.button if "6222" in button.label]
+    if cards:
+        cards[0].click().run()
+
+
 def test_l3_pending_card_appears_for_picker_path(monkeypatch: pytest.MonkeyPatch) -> None:
     import os
     os.environ["DB_PATH"] = str(demo.build_temp_db())
@@ -39,11 +46,17 @@ def test_l3_pending_card_appears_for_picker_path(monkeypatch: pytest.MonkeyPatch
     app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
     app.run()
     app.chat_input[0].set_value("给李四转100").run()
+    _pick_card_if_asked(app)
     picks = [button for button in app.button if button.label == "选这位"]
     assert len(picks) == 2
 
     #: 第二个李四 = 普通收款人 + 深夜 + 首次 → L3；此时必须能看到待复核卡与撤销入口
     picks[1].click().run()
+
+    #: 2026-10-31：转账先出「选择银行卡」卡面 → 点第一张再继续
+    _cards = [button for button in app.button if "6222" in button.label]
+    if _cards:
+        _cards[0].click().run()
     assert not app.exception, app.exception
     reply = str(app.session_state["messages"][-1]["text"])
     assert "待人工复核" in reply or "确认卡" in reply, reply[:160]

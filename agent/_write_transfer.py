@@ -179,6 +179,12 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
     #: 槽位 `payee_card` 装的是卡 id；这里统一映射到工具层参数名 `payee_card_id`。
     if filled.get("payee_card") and not filled.get("payee_card_id"):
         filled["payee_card_id"] = str(filled["payee_card"])
+    #: 网页里（`card_policy` 打开）缺"收款卡"就先去**选卡卡面**，选完再出确认卡。
+    if (not missing and not filled.get("payee_card_id")
+            and card_policy.require_payee_card()):
+        from agent import payee_card_flow
+        if payee_card_flow.cards_of(str(filled.get("payee_id") or "")):
+            missing.append("payee_card")
     clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
     return ShapeResult(filled=filled, missing=missing, clarify=clarify,
                        candidates=list(payee_facts.get("candidates") or []))

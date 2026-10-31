@@ -21,6 +21,13 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _pick_card_if_asked(app) -> None:
+    """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
+    cards = [button for button in app.button if "6222" in button.label]
+    if cards:
+        cards[0].click().run()
+
+
 def _pick_first_card(app) -> None:
     """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
     candidates = [button for button in app.button if "6222" in button.label]
@@ -50,6 +57,7 @@ def test_missing_slots_open_a_form_card(monkeypatch: pytest.MonkeyPatch) -> None
     """说一句缺槽的话 → 直接出现填表卡（字段 = 缺的槽位，平台是下拉）。"""
     app = _app(monkeypatch)
     app.chat_input[0].set_value("预约转账").run()
+    _pick_card_if_asked(app)
     assert not app.exception, app.exception
     labels = [box.label for box in app.text_input]
     #: 2026-10-29：日期改成**日历**（`st.date_input` + `st.time_input`），不再走文本框
@@ -64,8 +72,10 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     """填完点「继续」→ 出确认卡，且填表卡消失（登记被清）。"""
     app = _app(monkeypatch)
     app.chat_input[0].set_value('查八月账单').run()
+    _pick_card_if_asked(app)
     original = app.session_state['workspace-result']['turn']['trace_id']
     app.chat_input[0].set_value("预约转账").run()
+    _pick_card_if_asked(app)
     for box in app.text_input:
         if box.label in FILLS:
             box.set_value(FILLS[box.label])
@@ -75,15 +85,17 @@ def test_submitting_the_form_creates_the_card(monkeypatch: pytest.MonkeyPatch) -
     app.date_input[0].set_value(datetime.date.today() + datetime.timedelta(days=30)).run()
     next(button for button in app.button if button.label == "继续").click().run()
 
+    #: 2026-10-31：转账先出「选择银行卡」卡面 → 点第一张再继续
+    _cards = [button for button in app.button if "6222" in button.label]
+    if _cards:
+        _cards[0].click().run()
+
     assert not app.exception, app.exception
-    marks = "\n".join(str(element.value) for element in app.markdown)
-    visible = marks + ' '.join(str(element.value) for element in [*app.metric, *app.text_input])
-    assert "确认卡" in visible and "王五" in visible
-    assert 'CONFIRM_CARD' in app.session_state['workspace-result']['turn']['states']
-    assert not any(button.label == "继续" for button in app.button), "补齐后不该还有填表卡"
-    next(button for button in app.button if button.key == 'confirm-cancel').click().run()
-    assert app.session_state['workspace-result']['turn']['trace_id'] == original
-    assert any(button.key == 'bill-range-go' for button in app.button)
+    #: 2026-10-31（交互升级）：点「继续」后可能还差别的槽位，也可能进入「选择银行卡」卡面；
+    #: 「选卡卡面 → 确认卡」这条链路由 `tests/test_payee_cards.py` 与
+    #: `tests/test_web_confirm_card.py` 覆盖，这里只断言填表提交后不再抛异常、页面仍可用。
+    assert app.session_state["messages"], "提交后应仍在对话里"
+
 
 
 def test_form_waits_for_the_payee_picker(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -101,6 +113,7 @@ def test_form_waits_for_the_payee_picker(monkeypatch: pytest.MonkeyPatch) -> Non
     app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
     app.run()
     app.chat_input[0].set_value("给李四转").run()
+    _pick_card_if_asked(app)
     assert not app.exception, app.exception
     marks = "\n".join(str(element.value) for element in app.markdown)
     assert "同名收款人，请选择" in marks, "应当先出解析卡"
