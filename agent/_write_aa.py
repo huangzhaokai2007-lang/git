@@ -187,6 +187,37 @@ def _prepare_aa(filled: dict) -> Prepared:
             "collect_yuan": f"{plan['collect_cents'] / 100:.2f}",
             "per_person_cents": [plan["per_cents"]] * len(payees),
         })
+    else:
+        #: 2026-10-31 修（用户实测卡面全是「—」）：按人金额 / 按份数均摊时，
+        #: 每人应缴、我承担、待收 也得由工具层的**同一份事实**给出来，卡面不能空。
+        per = [int(value) for value in (filled.get("per_person_cents") or [])]
+        if per:
+            shares = sum(per)
+            mine = int(filled["amount_cents"]) - shares
+            facts.update({
+                "per_person_cents": per,
+                "collect_cents": shares,
+                "collect_yuan": f"{shares / 100:.2f}",
+                "my_share_cents": mine,
+                "initiator_share": mine,
+                "initiator_share_yuan": f"{mine / 100:.2f}",
+                "per_person_amount_yuan": "、".join(f"{value / 100:.2f}" for value in per),
+                "per_person_items": [
+                    {"name": name, "cents": value, "yuan": f"{value / 100:.2f}"}
+                    for name, value in zip(names, per)],
+            })
+    if "per_person_items" not in facts:
+        #: 一键均摊：每人相同，也给出逐人明细（卡面统一按"逐人列出"渲染）
+        unit = int(facts.get("per_person_amount") or 0)
+        facts["per_person_items"] = [{"name": name, "cents": unit, "yuan": f"{unit / 100:.2f}"}
+                                     for name in names]
+    #: 2026-10-31（用户需求）：群收款要能选「收款到我哪张卡」——卡信息进事实包，
+    #: 卡面只印这里的值（铁律 2）。
+    from agent import my_card_flow
+    my_card = my_card_flow.pick(filled.get("my_card_id"))
+    if my_card:
+        facts.update({"my_card_bank": my_card["bank"], "my_card_mask": my_card["card_no_mask"],
+                      "my_card_type": my_card["card_type"], "my_card_id": my_card["card_id"]})
     facts["target_name"] = filled["aa_target"]
     #: 2026-10-24（人类规格「群收款总额同样受限额约束」）：超单笔上限 / 超今日剩余 → 直接拒。
     single_max = facts.get("limits_single_max")
@@ -232,6 +263,11 @@ def _card_aa(intent: str, filled: dict, facts: Mapping, tier: str,
                 ("每人", f"{facts['per_person_amount_yuan']} 元（含我一份）"),
                 ("我承担", f"{facts['initiator_share_yuan']} 元"),
                 ("待收", f"{facts.get('collect_yuan', facts['amount_yuan'])} 元")]
+    if facts.get("my_card_mask"):                       # 2026-10-31：钱收到我哪张卡
+        card_type = str(facts.get("my_card_type") or "储蓄卡")
+        card_bank = str(facts.get("my_card_bank") or "")
+        card_mask = str(facts["my_card_mask"])
+        rows.insert(1, ("收款到", f"{card_type} {card_bank} {card_mask}"))
     if facts.get("aa_otp_reason"):                      # 为什么要验证码，卡面说清楚
         rows.append(("验证码原因", str(facts["aa_otp_reason"])))
     return confirm_card.CardInput(
@@ -283,7 +319,8 @@ def _execute_aa(confirmation: confirm_card.Confirmation, otp: str | None) -> Too
     if result.ok:                              # T41：把 AA 变成可跟踪的请求（24h 有效）
         from tools import _aa_request
         opened = _aa_request.open_aa_request(payee_ids, amount_cents, group_total, mode,
-                                             str(filled.get("title") or "群收款"))
+                                              str(filled.get("title") or "群收款"),
+                                              my_card_id=filled.get("my_card_id"))
         if opened.ok:
             result = result.model_copy(update={
                 "message": f"{result.message}（群收款单号 {opened.data['request_id']}，24 小时内有效）"})

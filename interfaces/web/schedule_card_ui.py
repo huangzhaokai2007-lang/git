@@ -16,16 +16,15 @@ from concurrent.futures import ThreadPoolExecutor
 import streamlit as st
 
 import premium_ui
+import step_record
 from agent import confirm_card, schedule_flow, write_flow
 
 FILTERS = ("全部", "单笔", "循环")
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
-    state = st.session_state
-    text = step.reply or step.ask or ""
-    state["messages"].append({"role": "assistant", "text": text, "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    """按钮路径的回执记账（含 L3 的 pending_id）。"""
+    step_record.record_step(step, summary)
 
 
 def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
@@ -58,7 +57,10 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict) -> None:
     when = str(item["execute_at"]).replace("T", " ")
     opened = st.session_state.get("sched-edit") == schedule_id
     left, run_col, edit_col, cancel_col = st.columns([4.6, 1, 1, 1], vertical_alignment="center")
-    left.markdown(f"**{when}** · {item['payee_name']} · **{item['amount_yuan']} 元**"
+    #: 2026-10-31（用户要求）：查看预约时也要显示「转到哪张卡」（老预约没记卡就不印）。
+    card_bit = (f" · {item['payee_card_bank']} {item['payee_card_mask']}"
+                if item.get("payee_card_mask") else "")
+    left.markdown(f"**{when}** · {item['payee_name']}{card_bit} · **{item['amount_yuan']} 元**"
                   f"　`{_cycle_badge(item)}`")
     if run_col.button("立即执行", key=f"run-{schedule_id}", width="stretch",
                       help="现在就从账户扣款转账，不再等到预约时间"):

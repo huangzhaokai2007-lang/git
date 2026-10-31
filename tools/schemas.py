@@ -139,7 +139,7 @@ class GenerateBillReportReq(BaseModel):
     model_config = STRICT
 
     period: str
-    kind: Literal["monthly", "yearly"] = "monthly"
+    kind: Literal["monthly", "yearly", "range"] = "monthly"
 
 
 class BillReportData(BaseModel):
@@ -169,6 +169,24 @@ class PreviewTransferReq(BaseModel):
     amount: int = Field(gt=0)
     schedule: str | None = None
     split_with: list[str] | None = None
+    #: 2026-10-31（SPEC-CHANGE 已批）：转到该收款人的哪张卡；None = 默认卡
+    payee_card_id: str | None = None
+
+
+class ListPayeeCardsReq(BaseModel):
+    model_config = STRICT
+
+    payee_id: str = Field(min_length=1)
+
+
+class PayeeCardItem(BaseModel):
+    model_config = STRICT
+
+    card_id: str
+    bank: str
+    card_no_mask: str
+    card_type: str
+    is_default: bool
 
 class PreviewData(BaseModel):
     preview_token: str

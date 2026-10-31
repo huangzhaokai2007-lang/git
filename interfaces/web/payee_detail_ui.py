@@ -16,9 +16,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import confirm_card, payee_risk, pending_slots, write_flow
+from agent import confirm_card, payee_card_flow, payee_risk, pending_slots, write_flow
 
 import premium_ui
+import step_record
 import time_inputs
 
 KIND_CN = {"whitelist": "白名单", "blacklist": "黑名单", "normal": "普通"}
@@ -45,10 +46,8 @@ def _dispatch(executor: ThreadPoolExecutor, session_id: str, intent: str,
     if (st.session_state.get('payee-inline-intent') == intent
             and executor.submit(confirm_card.current, session_id).result() is None):
         st.session_state['payee-edit-feedback'] = step.reply or step.ask or ''
-    state = st.session_state
-    state["messages"].append({"role": "assistant", "text": step.reply or step.ask or "",
-                              "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": text, "turn": None})
+    #: 2026-10-30：回执统一用 step_record 记（带 pending_id，L3 待复核卡才显示）
+    step_record.record_step(step, text)
     st.rerun()
 
 
@@ -157,6 +156,16 @@ def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict, confirm
             card_no = person.get("card_no") or "未记录"
             recent = (f"最近转账 {str(person['last_used_ts'])[:10]}"
                       if person.get("last_used_ts") else "还没有转账记录")
+            #: 2026-10-31（用户需求）：收款人可能有多张卡（不同银行）—— 这里全列出来，
+            #: 转账时不选卡就用**默认卡**（带 ⭐）。
+            cards = executor.submit(payee_card_flow.cards_of, person["payee_id"]).result()
+            if cards:
+                chips = "　".join(
+                    f"{card['bank']} {card['card_no_mask']}" 
+                    for card in cards)
+                st.caption(f"银行卡（{len(cards)} 张）：{chips}")
+            else:
+                st.caption("银行卡：未登记")
             st.caption(f"卡号 {card_no} · 白名单有效期 {expire} · {recent}")
             _actions(executor, session_id, person, who)
         if side is not None:
@@ -206,8 +215,6 @@ def _row_label(person: dict, kind: str) -> str:
 def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict], confirmation=None) -> None:
     """一列「整行按钮」；点谁就在谁下面拉开详情（再点收起）。"""
     opened = st.session_state.get("payee-open")
-    premium_ui.card_head(f"👥 收款人管理（{len(people)} 位）",
-                         "点某一行展开这位收款人的详情与操作，再点一次收起", tone="")
     for person in people:
         payee_id = str(person["payee_id"])
         kind = _kind_of(person)

@@ -85,8 +85,18 @@ def list_scheduled(status: str | None = None) -> ToolResult:
         if cycle and row["status"] == "pending":
             from tools._transfer_schedule_ops import _next_occurrence
             nxt = _next_occurrence(str(row["execute_at"]), cycle)
+        #: 2026-10-31（用户要求）：查看预约时要能看到「转到哪张卡」。
+        #: 卡信息来自 payee_card（同一份掩码口径），没记卡的旧预约就留空、不编造。
+        card = None
+        if row.get("payee_card_id"):
+            card_row = dao.connection().execute(
+                "SELECT * FROM payee_card WHERE id = ?", (row["payee_card_id"],)).fetchone()
+            card = dict(card_row) if card_row is not None else None
         items.append({"schedule_id": row["id"], "payee_id": row["payee_id"],
                       "payee_name": (payee or {}).get("name") or "",
+                      "payee_card_id": str(row.get("payee_card_id") or ""),
+                      "payee_card_bank": (card or {}).get("bank", ""),
+                      "payee_card_mask": (card or {}).get("card_no_mask", ""),
                       "execute_at": row["execute_at"], "status": row["status"],
                       "repeat_cycle": cycle,
                       "repeat_until": str(row.get("repeat_until") or ""),
@@ -97,6 +107,17 @@ def list_scheduled(status: str | None = None) -> ToolResult:
 
 
 # ---------------- T21 schedule_transfer（落预约 · 不扣款） ----------------
+
+def card_facts_of(card_id: str | None) -> dict:
+    """按卡 id 取出「收款卡」事实（卡面只能印这里来的值，铁律 2）。"""
+    if not card_id:
+        return {}
+    from tools import _payee_cards as payee_cards_mod
+    conn = dao.connection()
+    row = conn.execute("SELECT * FROM payee_card WHERE id = ? AND user_id = ?",
+                       (card_id, current_user_id())).fetchone()
+    return payee_cards_mod.card_facts(dict(row)) if row is not None else {}
+
 
 def schedule_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
     """T21 落一条定时转账预约。**此刻不扣款** —— 「预约时间到达前不能按即时转账扣款」。
@@ -125,6 +146,7 @@ def schedule_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
     facts = {"schedule_id": schedule_id, "payee_id": token["payee_id"],
              "payee_name": token["payee_name"], "execute_at": execute_at,
              "status": STATUS_PENDING, "tier": token["tier"],
+             **card_facts_of(token.get("payee_card_id")),
              **_money_facts(token["amount"], "amount")}
     data = {"schedule_id": schedule_id, "execute_at": execute_at}
     message = (f"已预约 {execute_at} 向 {token['payee_name']} 转账 {facts['amount_yuan']} 元，"
@@ -136,10 +158,11 @@ def schedule_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
         with transaction(conn):
             conn.execute(
                 "INSERT INTO scheduled_transfer (id, user_id, payee_id, amount, execute_at, status,"
-                " tier, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " tier, token, created_at, payee_card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (schedule_id, current_user_id(), token["payee_id"], token["amount"], execute_at,
                  STATUS_PENDING, token["tier"], preview_token,
-                 transfer._now().isoformat(timespec="seconds")))
+                 transfer._now().isoformat(timespec="seconds"),
+                 token.get("payee_card_id")))
             dao.insert_audit(token["trace_id"], current_session_id(), actor="agent",
                              intent="transfer_scheduled", tool=SCHEDULE_TOOL,
                              params_json={"schedule_id": schedule_id, "payee_id": token["payee_id"],

@@ -167,6 +167,13 @@ def result(executor, session: str, ask, detail_loader) -> None:
                     wealth_daily.load, session, pid, gran).result())
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
+    elif scene == 'wealth_holdings':
+        #: 持仓页和推荐页同一套卡片：金额大字 + K 线 + 还能带来多少 + 赎回。
+        #: **回执原文不再上屏** —— 卡片已经把名称/金额/年化/买入日列全，再打一遍就是两份数据。
+        wealth_ui.render_holdings(
+            turn, ask=ask, key_prefix='workspace-hold-' + str(turn.get('trace_id')),
+            daily_loader=lambda pid, gran='monthly': executor.submit(
+                wealth_daily.load, session, pid, gran).result())
     elif scene == 'risk_assess':
         st.markdown(turn.get('reply') or '当前没有查询结果。')
         risk_ui.render_turn(turn, ask=ask, key_prefix='workspace-risk-' + str(turn.get('trace_id')))
@@ -223,6 +230,8 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
     activity_ui.render(st.session_state['turns'])
     pending()
     payee_picker_ui.render(executor, session)
+    #: 2026-10-30：修改面板已作为**确认卡内部抽屉**渲染（见 components.confirm_card 的 edit_panel），
+    #: 这里不再单独画，否则同一轮会出现两个 card-edit-box（Streamlit 会直接报重复 key）。
     forms()
     if scene == 'cards':
         if st.session_state.get('bound-card-query'):
@@ -237,21 +246,18 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
         inline_confirmation_rendered = True
         confirmation(**kwargs)
 
-    #: 2026-10-30（用户反馈：卡片该消失不消失、乱出现、顺序乱）：业务卡改由 **panel_router 统一裁决** ——
+    #: 2026-10-31（用户反馈：卡片该消失不消失、乱出现、顺序乱）：业务卡改由 **panel_router 统一裁决** —
     #: 一屏最多一张；解析卡待选 / 在途确认时业务卡一律让位；换面板时复位上一张的展开态。
     import panel_router
-
-    last_turn = (st.session_state.get('turns') or [{}])[-1].get('turn') or {}
     from agent import confirm_card as _confirm_card, payee_picker as _payee_picker
 
+    last_turn = (st.session_state.get('turns') or [{}])[-1].get('turn') or {}
     has_confirmation = bool(executor and executor.submit(_confirm_card.current, session).result())
     picker_pending = bool(executor and executor.submit(_payee_picker.pending, session).result())
-    panel = panel_router.active_panel(
-        intent=last_turn.get('intent'),
-        has_confirmation=has_confirmation,
-        picker_pending=picker_pending,
-        flags=st.session_state,
-    )
+    panel = panel_router.active_panel(intent=last_turn.get('intent'),
+                                      has_confirmation=has_confirmation,
+                                      picker_pending=picker_pending,
+                                      flags=st.session_state)
     previous = st.session_state.get('workspace-active-panel')
     if previous != panel:                       # 换卡 → 复位离场那张卡的展开/编辑态
         for key, value in panel_router.clears_state(previous, panel).items():
@@ -266,10 +272,13 @@ def panels(executor, session: str, ask, pending, forms, confirmation) -> None:
             renderers[panel](executor, session)
     if scene not in ('cards', 'records'):
         scene_ui.render(executor, session, ask, show_scope=False)
-    if not (scene == 'payee_list' and st.session_state.get('payee-inline-intent')):
-        slot_form_ui.render(executor, session)
-    if not inline_confirmation_rendered and not (
-            scene in ('aa_list', 'aa_collect') and st.session_state.get('bound-aa-query')):
+    #: 2026-10-31：收款人卡内的「核对转账」也要能出「选择银行卡」卡面 ——
+    #: 通用填表卡由 slot_form_ui 自己按 payee-inline 跳过，这里不再整块跳过。
+    slot_form_ui.render(executor, session)
+    #: 2026-10-31 修：只有**群收款本身**的确认卡由群收款卡自己画（三卡合一）；
+    #: 「登记已付」等其他在途确认仍走通用确认卡 —— 否则登记已付没有确认按钮，流程卡死。
+    _pending_conf = (executor.submit(_confirm_card.current, session).result()
+                     if executor else None)
+    _aa_owns = getattr(_pending_conf, 'intent', '') == 'aa_collect'
+    if not inline_confirmation_rendered and not _aa_owns:
         confirmation()
-    #: 2026-10-30：修改面板已作为**确认卡内部抽屉**渲染（见 components.confirm_card），
-    #: 这里不再单独画，避免页面上出现两块一样的编辑区。

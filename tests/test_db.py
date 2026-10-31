@@ -27,6 +27,7 @@ EXPECTED_COLUMN_COUNTS: dict[str, int] = {
     "wealth_product": 6,
     "holding": 6,
     "payee": 14,        # v2：+tags / whitelist_quota / whitelist_expire / note / card_no / blacklist / blacklist_reason
+    "payee_card": 8,    # 2026-10-31：id / payee_id / user_id / bank / card_no_mask / card_type / is_default / created_at
     "audit_log": 12,
     "risk_event": 7,
 }
@@ -97,7 +98,7 @@ def row_counts(conn: sqlite3.Connection) -> dict[str, int]:
 
 def test_all_tables_exist_after_init(conn: sqlite3.Connection) -> None:
     assert table_names(conn) == set(TABLES)
-    assert len(TABLES) == 16                    # 卡 14b：+idempotency +rate_limit；F16：+scheduled_transfer；F20：+gift_order
+    assert len(TABLES) == 17                    # 卡 14b：+idempotency +rate_limit；F16：+scheduled_transfer；F20：+gift_order；2026-10-31：+payee_card
 
 
 @pytest.mark.parametrize("table", sorted(EXPECTED_COLUMN_COUNTS))

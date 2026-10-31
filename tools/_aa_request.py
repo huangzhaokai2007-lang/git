@@ -73,8 +73,27 @@ def _shares(request_id: str) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _my_card(my_card_id: str | None) -> tuple[dict | None, str | None]:
+    """校验「收款到我哪张卡」：必须绑定在我名下且状态正常；不传 = 默认储蓄卡。
+
+    卡数据借汤的 `card` + `agent_card_binding` 口径（**只读**，不改他的代码）。
+    """
+    #: 未绑定 → 退回 T18「我名下的卡」，群收款不该因为"还没绑卡"就没得选。
+    from agent.my_card_flow import cards_of
+
+    cards = cards_of(current_user_id())
+    if not cards:
+        return (None, None) if not my_card_id else (None, "INVALID_ARGUMENT")
+    if not my_card_id:
+        return cards[0], None
+    picked = next((card for card in cards if card["card_id"] == my_card_id), None)
+    if picked is None:
+        return None, "INVALID_ARGUMENT"
+    return picked, None
+
+
 def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: str,
-                    title: str) -> ToolResult:
+                    title: str, my_card_id: str | None = None) -> ToolResult:
     """T41 落一条 群收款请求 + 每人份额（`active`，24h 后惰性失效）。`data` = `{request_id, expire_at}`。"""
     if (bad := _invalid(OpenAaRequestReq, payee_ids=payee_ids, amounts=amounts,
                         total=total, mode=mode, title=title)) is not None:
@@ -90,6 +109,9 @@ def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: 
         require_owned("这些收款人", DEMO_USER_ID, user_id, tool=OPEN_TOOL, intent="aa_collect")
     except ToolError as exc:
         return _fail(exc.code, exc.message)
+    my_card, card_error = _my_card(my_card_id)
+    if card_error is not None:
+        return _fail(ErrorCode.INVALID_ARGUMENT, "这张卡不能用来收款，请重新选择")
     names: list[str] = []
     for payee_id in payee_ids:
         row = dao.get_payee(payee_id)
@@ -103,9 +125,9 @@ def open_aa_request(payee_ids: list[str], amounts: list[int], total: int, mode: 
     with transaction(conn):
         conn.execute(
             "INSERT INTO aa_request (id, user_id, title, total, split_mode, status, created_at,"
-            " expire_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
+            " my_card_id, expire_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)",
             (request_id, user_id, title or "群收款", int(total), mode or "equal",
-             now.isoformat(timespec="seconds"), expire_at))
+             now.isoformat(timespec="seconds"), (my_card or {}).get("id"), expire_at))
         for payee_id, name, cents in zip(payee_ids, names, amounts):
             conn.execute(
                 "INSERT INTO aa_share (id, request_id, payee_id, payee_name, amount, status)"

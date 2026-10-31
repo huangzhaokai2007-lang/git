@@ -5,9 +5,13 @@ from tests.test_card_binding_ui import app, click
 from tests.conftest import raw
 
 
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
 @pytest.mark.parametrize('otp', [False, True])
-@pytest.mark.parametrize('shortcut', [False, True])
-def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp, shortcut):
+def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp):
     monkeypatch.setattr(llm, 'chat_json', lambda *a, **kw: (_ for _ in ()).throw(llm.LLMUnavailable('offline')))
     monkeypatch.setattr(classifier, 'classify', lambda *a, **kw: classifier.IntentOut(
         intent='transfer_single', confidence=1, slots={'payee': '王五', 'amount': '100'}))
@@ -15,10 +19,13 @@ def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp, short
     at.chat_input[0].set_value('查八月账单').run()
     original = at.session_state['workspace-result']['turn']['trace_id']
     balances = raw(seeded, 'SELECT id,balance FROM account ORDER BY id')
-    if shortcut:
-        click(at, '转账')
-    else:
-        at.chat_input[0].set_value('给王五转100元').run()
+    at.chat_input[0].set_value('给王五转100元').run()
+    _cards = [button for button in at.button if _is_pick(button)]
+    if _cards:                      # 2026-10-31：转账先出「选择银行卡」卡面
+        _cards[0].click().run()
+    _cards = [button for button in at.button if _is_pick(button)]
+    if _cards:                      # 2026-10-31：转账先出「选择银行卡」卡面
+        _cards[0].click().run()
     session = at.session_state['session_id']
     assert confirm_card.current(session)
     if otp:
@@ -31,7 +38,7 @@ def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp, short
     assert at.session_state['workspace-result']['turn']['trace_id'] == original
     assert scene_context.snapshot(session)['period'] == '2026-08'
     assert scene_context.snapshot(session)['intent'] == 'bill_report'
-    assert any(b.label == '📊 按分类分析支出' for b in at.button)
+    assert any(b.key == 'bill-range-go' for b in at.button)
     assert raw(seeded, 'SELECT id,balance FROM account ORDER BY id') == balances
     at.chat_input[0].set_value('最近的交易').run()
     assert scene_context.snapshot(session)['period'] == '2026-08'

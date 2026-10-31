@@ -178,20 +178,41 @@ def edit(session_id: str, updates: Mapping) -> Step:
     spec = write_intents.spec_of(confirmation.intent)
     raw = {k: confirmation.filled.get(k) for k in spec.missing
            if confirmation.filled.get(k) is not None}
+    #: 2026-10-31（用户实测「该凭证已使用，请重新发起转账」）：重检必须**重新签发**凭据，
+    #: 把卡上残留的凭据类键一律摘掉，避免把旧 token 带进下一次预览。
+    for stale_key in [k for k in list(raw) if "token" in str(k) or "credential" in str(k)]:
+        raw.pop(stale_key, None)
     if confirmation.intent == "aa_collect":                           # AA：用**姓名**重解析（id 不认名字匹配）
         names = list(confirmation.filled.get("aa_names") or [])
         if names:
             raw["payee_ids"] = names
         if "aa_target" in confirmation.filled:
             raw["aa_target"] = confirmation.filled["aa_target"]
+    #: 2026-10-30（用户实测「点修改后收款人显示成电话号码」）：卡面显示姓名，
+    #: 但**重检**不能拿姓名再解析一遍（同名会再弹解析卡）。用户没改收款人时，
+    #: 直接用卡上已经解析好的脱敏手机号（解析关卡里唯一可辨）。
+    if "payee" not in updates:
+        masked = str(((confirmation.filled or {}).get("masked_phone") or "")).strip()
+        if masked and "payee" in raw:
+            raw["payee"] = masked
+    #: 2026-10-31（转账必须选卡）：改卡时要把**已选的收款卡**带上，否则重检会再问一次；
+    #: 换了收款人就把它摘掉（旧卡属于上一个人）。
+    if "payee_card" not in updates and "payee" not in updates:
+        chosen_card = str(((confirmation.filled or {}).get("payee_card_id") or "")).strip()
+        if chosen_card:
+            raw["payee_card_id"] = chosen_card
     #: 改哪个槽位，就把它的**派生键**摘掉，逼 shape 重新算（`amount_cents`/`payee_id` 等）
-    derived = {"amount": ("amount_cents",), "payee": ("payee_id", "masked_phone"),
+    derived = {"amount": ("amount_cents",),
+               "payee": ("payee_id", "masked_phone", "payee_card_id"),
                "contact": ("payee_id",), "budget": ("amount_cents",),
                "amounts": ("per_person_cents", "amount_cents", "amount"),
                "schedule": (), "date": ()}
     for key, value in updates.items():
         if value in (None, ""):
             raw.pop(key, None)
+            continue
+        if key == "payee_card":                  #: 2026-10-31：换收款卡 → 工具层参数名是 payee_card_id
+            raw["payee_card_id"] = str(value)
             continue
         raw[key] = str(value)
         for stale in derived.get(key, ()):
@@ -264,7 +285,8 @@ def _to_confirmation_card(context: dict, verdict: permission.TierVerdict, filled
 
 #: 缺槽时给用户看的字段名（**只影响措辞**，不含任何业务数字）
 SLOT_LABELS = {
-    "payee": "收款人", "payee_ids": "收款人", "amount": "总金额", "date": "日期",
+    "payee": "收款人",
+    "payee_card": "收款卡", "payee_ids": "收款人", "amount": "总金额", "date": "日期",
     "schedule": "预约时间", "budget": "预算", "contact": "联系人",
     "platform": "平台", "address": "收货地址", "order_no": "平台订单号",
     "tags": "标签", "note": "备注", "card_no": "银行卡号",
@@ -272,26 +294,21 @@ SLOT_LABELS = {
 }
 
 
-def _dedupe_lines(text: str) -> str:
-    """追问文案去重：**同一行重复只留一次**（用户实测出现过同一句问三遍）。
-
-    只做「整行完全相同」与「紧邻重复」的合并 —— 不做模糊合并，
-    避免把「请补充金额」和「请补充总金额、预约时间」这类不同信息误删。
-    """
-    kept: list[str] = []
-    for line in str(text or "").splitlines():
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if kept and kept[-1] == stripped:          # 紧邻重复
-            continue
-        if stripped in kept:                       # 已经出现过（非紧邻）
-            continue
-        kept.append(stripped)
-    return "\n".join(kept)
+#: 少数意图里同一个槽位说法不同：赎回谈「赎回金额」，申购谈「申购金额」，
+#: 而全局 `SLOT_LABELS["amount"]` 是「总金额」（AA 群收款那边才该叫总金额）。
+_INTENT_SLOT_LABELS = {
+    "wealth_redeem": {"amount": "赎回金额", "product": "产品"},
+    "wealth_buy": {"amount": "申购金额", "product": "产品"},
+}
 
 
-def missing_hint(missing: list[str]) -> str:
+def slot_label(slot: str, intent: str = "") -> str:
+    """槽位的中文名：**先看意图覆盖，再落全局**。"""
+    override = _INTENT_SLOT_LABELS.get(intent) or {}
+    return override.get(slot) or SLOT_LABELS.get(slot, slot)
+
+
+def missing_hint(missing: list[str], intent: str = "") -> str:
     """缺槽追问（**兜底**：描述符没给 clarify 时用）。
 
     2026-10-24 修：以前这里可能返回空串 —— 界面按钮/解析卡路径只读 Step.reply，
@@ -300,12 +317,40 @@ def missing_hint(missing: list[str]) -> str:
     """
     if not missing:
         return ""
-    labels = [SLOT_LABELS.get(slot, slot) for slot in missing]
+    labels = [slot_label(slot, intent) for slot in missing]
     return templates.clarify_missing(labels)
 
 
-def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -> Step:
+#: 网页端「群收款先出编辑卡」的开关（agent 层用例默认关闭 = 旧的"直接出确认卡"契约）
+_AA_EDIT_FIRST = False
+
+
+def set_aa_edit_first(enabled: bool) -> None:
+    """界面每次渲染时设置：网页里群收款要先看到可编辑的发起卡。"""
+    global _AA_EDIT_FIRST
+    _AA_EDIT_FIRST = bool(enabled)
+
+
+def aa_edit_first_enabled() -> bool:
+    return _AA_EDIT_FIRST
+
+
+def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "",
+          from_card: bool = False) -> Step:
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
+    #: 2026-10-31：上一步停在"选收款卡"、用户却改说了**另一笔**（同意图的新请求）——
+    #: 旧的选卡登记要作废，否则会拿旧草稿去预检，报「原草稿已失效」。
+    #: 2026-10-31：上一笔转账还挂着确认卡（草稿态）时，用户改说了**另一笔** ——
+    #: 旧卡直接作废，避免后面 revoke 撞「原草稿已失效」。验证码阶段不动（用户可能只是想核对）。
+    _inflight = confirm_card.current(session_id)
+    if (_inflight is not None and str(getattr(_inflight, "stage", "")) == "confirm"
+            and intent in ("transfer_single", "transfer_scheduled")
+            and str(getattr(_inflight, "intent", "")) == intent):
+        confirm_card.clear(session_id)
+    _stale = pending_slots.peek(session_id)
+    if (_stale and _stale.get("intent") == intent
+            and list(_stale.get("missing") or []) == ["payee_card"]):
+        pending_slots.clear(session_id)
     spec = write_intents.spec_of(intent)
     if spec is None:                                                   # 调用方已按 WRITE_INTENTS 过滤
         return Step(states=["SLOT_FILL"], intent=intent)
@@ -321,24 +366,31 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "") -
                     else "payee")
             payee_picker.capture(session_id, intent, dict(slots), shaped.candidates,
                                  slot=slot)
-        hint = missing_hint(shaped.missing)
-        ask = _dedupe_lines(shaped.clarify) or hint    # 描述符优先，否则兜底
+        hint = missing_hint(shaped.missing, intent)
+        ask = shaped.clarify or hint                   # 描述符优先，否则兜底
         #: 描述符的追问如果**没提到**缺的那几项，就补一句 —— 用户一次知道要补什么，
         #: 不会出现「只问了标签、其实还差收款人」这种半句追问（实测）。
-        labels = [SLOT_LABELS.get(slot, slot) for slot in shaped.missing]
+        labels = [slot_label(slot, intent) for slot in shaped.missing]
         absent = [label for label in dict.fromkeys(labels) if label not in shaped.clarify]
         if shaped.clarify and absent:                  # 只补**没说到的**那几项，不重复
-            ask = f"{_dedupe_lines(shaped.clarify)}\n请补充：{'、'.join(absent)}。"
+            ask = f"{shaped.clarify}\n请补充：{'、'.join(absent)}。"
         #: 2026-10-27：登记「还差什么」，让用户下一句短答能**续接补槽**（不再被当新意图）。
-        #: 2026-10-30：登记**解析之后**的槽位（`filled` 里已有 payee_id / aa_names），
+        #: 2026-10-30：登记**解析之后**的槽位（`filled` 里有 payee_id / aa_names），
         #: 否则下一轮卡面拿到的是原始姓名，同名就没法回填（用户实测"解析完人没进参与人"）。
         pending_slots.remember(session_id, intent, {**dict(slots), **dict(shaped.filled)},
                                list(shaped.missing))
         return Step(states=["SLOT_FILL"], intent=intent, missing=shaped.missing,
                     ask=ask, reply=ask)              # reply 也带上：按钮路径只读 reply
+    #: 2026-10-31（用户要求）：群收款在**聊天里**说全了也先铺发起卡（可改人、可改钱），
+    #: 只有点卡上的「发起群收款」（`from_card=True`）才继续预检、出确认卡。
+    if intent == "aa_collect" and not from_card and aa_edit_first_enabled():
+        pending_slots.remember_prefill(session_id, intent,
+                                       {**dict(slots), **dict(shaped.filled)})
+        return Step(states=["SLOT_FILL"], intent=intent,
+                    reply="已按你说的铺好群收款卡：核对参与人与金额，点「发起群收款」我再出确认卡。",
+                    ask="aa_prefill")
     #: 2026-10-30（用户实测）：走到这里说明**不再缺槽**（要出卡/要执行了），
-    #: 把之前的补槽记录清掉 —— 否则「还差这几项」表单会在随后几轮一直挂着
-    #: （选完解析卡还在、业务都完成了还在）。
+    #: 把之前的补槽记录清掉 —— 否则「还差这几项」表单会在随后几轮一直挂着。
     pending_slots.clear(session_id)
     filled = shaped.filled
     if confirm_card.is_locked(session_id):

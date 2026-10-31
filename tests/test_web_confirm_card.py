@@ -37,6 +37,26 @@ if str(REPO / "scripts") not in sys.path:
 
 import demo                                                       # noqa: E402
 
+
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
+
+def _pick_card_if_asked(app) -> None:
+    """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
+    cards = [button for button in app.button if _is_pick(button)]
+    if cards:
+        cards[0].click().run()
+
+
+def _pick_first_card(app) -> None:
+    """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
+    candidates = [button for button in app.button if _is_pick(button)]
+    if candidates:
+        candidates[0].click().run()
+
 MERCHANT = "云音乐"          # sub_0001（data/seed.py）：active、15.00 元／月、唯一命中
 
 
@@ -82,12 +102,18 @@ def _metric_labels(at: AppTest) -> list[str]:
 
 
 def test_transfer_confirm_card_renders(monkeypatch: pytest.MonkeyPatch, clock: object) -> None:
-    """回归（用户实测的崩溃点）：转账走到确认卡必须能渲染。"""
+    """回归（用户实测的崩溃点）：转账走到确认卡必须能渲染。
+
+    2026-10-31 新交互：先出「选择收款人的银行卡」卡面 → 点一张卡后才出确认卡。
+    """
     at = _say(_app(monkeypatch, {"intent": "transfer_single", "confidence": 0.95,
                                  "slots": {"payee": "王五", "amount": "100.00"}}, clock),
               "给王五转 100 元")
+    cards = [button for button in at.button if _is_pick(button)]
+    assert cards, "应先出选择银行卡卡面"
+    cards[0].click().run()
     assert "转账确认卡" in _markdown(at)
-    assert _metric_labels(at) == ["金额（元）", "收款人", "权限档（风险等级）", "短信验证码"]
+    assert _metric_labels(at) == ["金额（元）", "收款人", "权限档", "验证码"]
     assert "王五" in _markdown(at) or "王五" in _caption(at)
 
 
@@ -100,10 +126,14 @@ def test_transfer_otp_card_renders(monkeypatch: pytest.MonkeyPatch, clock: objec
     at = _say(_app(monkeypatch, {"intent": "transfer_single", "confidence": 0.95,
                                  "slots": {"payee": "张小美", "amount": "100.00"}}, clock),   # 非白名单 → L2
               "给张小美转 100 元")
+    #: 2026-10-31：先选收款卡，再点确认
+    cards = [button for button in at.button if _is_pick(button)]
+    assert cards, "应先出选择银行卡卡面"
+    cards[0].click().run()
     confirm = next(b for b in at.button if str(getattr(b, "key", "")) == "confirm-ok")
     confirm.click().run()
     assert not at.exception, at.exception
-    assert any(str(element.label) == "短信验证码" for element in at.text_input)
+    assert any(str(element.label) == "验证码" for element in at.text_input)
     assert "张小美" in _caption(at)                                   # OTP 卡也要正确显示主对象
 
 

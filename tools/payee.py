@@ -105,6 +105,18 @@ def add_payee(name: str, phone: str) -> ToolResult:
         row = dao.insert_payee(user_id, clean_name, masked)
     except ValueError as exc:
         return _dao_reject(exc)
+    #: 2026-10-31（用户需求）：新收款人**随机生成 1–3 张银行卡**（模拟现实：不同银行、一个默认卡），
+    #: 之后转账时可以在卡面上选「转到他的哪张卡」。
+    try:
+        from tools import _payee_cards as payee_cards_mod
+        import datetime as _dt
+        payee_cards_mod.add_cards(dao.connection(), user_id=user_id, payee_id=row["id"],
+                                  primary_bank=row.get("bank"),
+                                  created_at=_dt.datetime.now().isoformat(timespec="seconds"),
+                                  bank_seed=row["id"])
+    except Exception:                      # noqa: BLE001 —— 卡生成失败不该让加收款人整体失败
+        import logging
+        logging.getLogger(__name__).warning("为新收款人生成银行卡失败", exc_info=True)
     return _ok(_payload(row), _facts(row), f"已添加 {clean_name}（{masked}）")
 
 
@@ -208,3 +220,29 @@ def list_payees() -> ToolResult:
     return _ok(data, facts, f"您共有 {len(items)} 位收款人，其中白名单 {len(whitelisted)} 位。")
 
 
+# ---------------- T54 list_payee_cards（2026-10-31 SPEC-CHANGE 已批 · L0 只读） ----------------
+
+def list_payee_cards(payee_id: str) -> ToolResult:
+    """T54 列出某位收款人的银行卡。`data` = `items[]` / `total_count`。
+
+    - 归属 fail-closed：只读**当前 user** 名下、且属于该收款人的卡；越权 `FORBIDDEN`；
+    - 卡号**只有掩码**（`6222 **** **** 1001`），完整号不入库也不返回（铁律 8）；
+    - 默认卡排在最前（`is_default DESC`），编排层照抄顺序、不重排。
+    """
+    user_id = current_user_id()
+    try:
+        require_owned("该收款人的银行卡", DEMO_USER_ID, user_id,
+                      tool="list_payee_cards", intent="payee_list")
+    except ToolError as exc:
+        return _fail(exc.code, exc.message)
+    row = dao.connection().execute("SELECT * FROM payee WHERE id = ?", (payee_id,)).fetchone()
+    if row is None or row["user_id"] != user_id:
+        return _fail(ErrorCode.NOT_FOUND, "找不到该收款人")
+    from tools import _payee_cards as payee_cards_mod
+    cards = [payee_cards_mod.card_payload(card)
+             for card in payee_cards_mod.cards_of(payee_id, user_id=user_id)]
+    data = {"items": cards, "total_count": len(cards)}
+    facts = {"payee_id": payee_id, "payee_name": dict(row)["name"],
+             "items": cards, "total_count": len(cards),
+             "default_card": next((c for c in cards if c["is_default"]), None)}
+    return _ok(data, facts, f"{dict(row)['name']} 名下共 {len(cards)} 张银行卡。")

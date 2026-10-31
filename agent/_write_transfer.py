@@ -17,7 +17,7 @@ import datetime
 import re
 from typing import Mapping
 
-from agent import confirm_card, payee_clarify, payee_resolve, payee_risk
+from agent import card_policy, confirm_card, payee_clarify, payee_resolve, payee_risk
 from agent import _relative_time                              # 相对时间说法（明天/下周一/月底）
 from agent._write_common import repeat_cycle, Prepared, ShapeResult, _code_of, normalize_query, yuan_to_cents
 from tools import transfer
@@ -175,6 +175,16 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
             missing.append("amount")
         else:
             filled["amount_cents"] = cents
+    #: 2026-10-31（用户要求）：**必须选收款人的银行卡**（取消"默认卡"自动带过）。
+    #: 槽位 `payee_card` 装的是卡 id；这里统一映射到工具层参数名 `payee_card_id`。
+    if filled.get("payee_card") and not filled.get("payee_card_id"):
+        filled["payee_card_id"] = str(filled["payee_card"])
+    #: 网页里（`card_policy` 打开）缺"收款卡"就先去**选卡卡面**，选完再出确认卡。
+    if (not missing and not filled.get("payee_card_id")
+            and card_policy.require_payee_card()):
+        from agent import payee_card_flow
+        if payee_card_flow.cards_of(str(filled.get("payee_id") or "")):
+            missing.append("payee_card")
     clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
     return ShapeResult(filled=filled, missing=missing, clarify=clarify,
                        candidates=list(payee_facts.get("candidates") or []))
@@ -190,7 +200,8 @@ def _prepare_transfer(filled: dict) -> Prepared:
     `_prepare_scheduled`（F16 已实现：落 `scheduled_transfer` 待执行行、到点才扣款），
     两条路径分开，本函数不传 `schedule` 是**设计如此**，不是缺口。
     """
-    preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"])
+    preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"],
+                                       payee_card_id=filled.get("payee_card_id"))
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
@@ -200,7 +211,10 @@ def _prepare_transfer(filled: dict) -> Prepared:
     tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
                                               str(preview.facts.get("tier") or "L2"),
                                               factors=preview.facts.get("factors") or [])
+    #: 2026-10-31：`payee_card_chosen` = 用户**显式选过**卡（false = 走的是工具层默认卡）；
+    #: 网页据此把「确认」置灰，逼用户先选卡。
     return Prepared(ok=True, facts={**preview.facts, "tier": tier, "payee_phone": masked,
+                                    "payee_card_chosen": bool(filled.get("payee_card_id")),
                                     "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
 
@@ -215,6 +229,8 @@ def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
     return confirm_card.CardInput(
         title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
         rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
+              *([("收款卡", f"{facts['payee_card_bank']} {facts['payee_card_mask']}")]
+                if facts.get("payee_card_mask") else []),
               ("金额", f"{facts['amount_yuan']} 元"),
               ("预计到账", confirm_card.expected_arrival(tier)),
               #: 2026-10-24 人类规格「转账卡片：转账后余额 / 今日剩余额度」——
@@ -249,7 +265,8 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     之外的数字 → 整张卡降级（铁律 2 守门），故预约时间必须可溯源。
     """
     preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"],
-                                        schedule=str(filled["schedule"]))
+                                        schedule=str(filled["schedule"]),
+                                        payee_card_id=filled.get("payee_card_id"))
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
@@ -259,6 +276,8 @@ def _prepare_scheduled(filled: dict) -> Prepared:
                                               str(preview.facts.get("tier") or "L2"),
                                               factors=preview.facts.get("factors") or [])
     facts = {**preview.facts, "tier": tier, "payee_phone": masked,
+             #: 2026-10-31：用户是否**显式选过**卡（网页据此把「确认」置灰）
+             "payee_card_chosen": bool(filled.get("payee_card_id")),
              "schedule": str(filled["schedule"]), "quota_note": quota_note}
     #: 2026-10-30（用户实测「产生了 bug」）：同收款人 + 同金额 + **同一天**已经有一笔待执行预约时，
     #: 卡面给一行警示（不阻止 —— 可能你就是要再建一笔），避免"悄悄多出一笔"。
@@ -307,6 +326,8 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
         rows.insert(3, ("循环方式", cycle))
         if filled.get("repeat_until"):
             rows.insert(4, ("循环结束", f"{filled['repeat_until']}（之后不再续期）"))
+    if facts.get("payee_card_mask"):                        # 2026-10-31：转到哪张卡也要印出来
+        rows.insert(1, ("收款卡", f"{facts['payee_card_bank']} {facts['payee_card_mask']}"))
     if facts.get("duplicate_hint"):                        # 重复预约：卡面点明，别静默多建一笔
         rows.append(("⚠️ 重复提示", str(facts["duplicate_hint"])))
     return confirm_card.CardInput(

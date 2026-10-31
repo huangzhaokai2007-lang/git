@@ -97,14 +97,16 @@ def resolve_payee(query: str) -> ToolResult:
     return _ok(data.model_dump(), facts, f"找到收款人 {only['name']}（{only['phone']}）。")
 
 def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
-                     split_with: list[str] | None = None) -> ToolResult:
+                     split_with: list[str] | None = None,
+                     payee_card_id: str | None = None) -> ToolResult:
     """T7 转账预览（L0，**只算不执行**）。data: `preview_token` / `fee` / `tier` / `requires_otp` / `limits`。
 
     token 登记落库 `idempotency`（卡 14b-6，重启后重放仍有效）、TTL 300 秒、绑定（payee_id + amount + 用户 + 档位）；本函数**不写任何流水与审计**。
     `schedule` / `split_with` 的语义属后续卡（定时/拆分转账），本卡只拒不做：传了就 `INVALID_ARGUMENT`。
     """
     if (bad := _invalid(PreviewTransferReq, payee_id=payee_id, amount=amount,
-                        schedule=schedule, split_with=split_with)) is not None:
+                        schedule=schedule, split_with=split_with,
+                        payee_card_id=payee_card_id)) is not None:
         return bad
     try:                                                              # 卡 14a：统一金额边界
         tool_guard.require_amount_cents(amount, tool="preview_transfer")
@@ -125,6 +127,12 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
             return _fail(ErrorCode.FORBIDDEN, "储蓄账户不属于当前用户")
         flows = _today_out_flows(_now())
         limits = _restrict_card_daily(_limits(flows), account["id"])
+        #: 2026-10-31：解析「转到他的哪张卡」——不传 = 默认卡；指定了但不是他的卡 → INVALID_ARGUMENT
+        from tools import _payee_cards as payee_cards_mod
+        payee_card, card_error = payee_cards_mod.resolve(payee["id"], payee_card_id)
+        if card_error is not None:
+            return _fail(ErrorCode.INVALID_ARGUMENT,
+                         "这张卡不属于该收款人，请重新选择")
     except ToolError as exc:
         return _fail(exc.code, exc.message)
     except ValueError as exc:
@@ -161,13 +169,15 @@ def preview_transfer(payee_id: str, amount: int, schedule: str | None = None,
              **{f"limits_{key}": value for key, value in limits.items()}, **limits_yuan,
              **_money_facts(account["balance"], "balance"), **_money_facts(fee, "fee"),
              **_money_facts(account["balance"] - amount - fee, "balance_after"),
-             **_money_facts(amount, "amount"), **_money_facts(mean, "history_mean")}
+             **_money_facts(amount, "amount"), **_money_facts(mean, "history_mean"),
+             **(payee_cards_mod.card_facts(payee_card) if payee_card else {})}
     data = PreviewData(preview_token=token, fee=fee, tier=judged["tier"], requires_otp=judged["requires_otp"], limits=limits)
     _store_token(token, {"user_id": current_user_id(), "session_id": current_session_id(),
                          "payee_id": payee["id"], "payee_name": payee["name"], "amount": amount,
                          "fee": fee, "tier": judged["tier"], "requires_otp": judged["requires_otp"],
                          "factors": judged["factors"], "account_id": account["id"], "trace_id": trace_id,
                          "schedule": schedule,              # F16：T21 落预约时要用（None = 即时转账）
+                         "payee_card_id": (payee_card or {}).get("id"),   # 2026-10-31：T21 落库用
                          "created_at": _now(), "state": "preview"})
     message = (f"转账 {facts['amount_yuan']} 元给 {payee['name']}：档位 {judged['tier']}，"
                f"手续费 {facts['fee_yuan']} 元，"

@@ -19,7 +19,7 @@ for _path in (Path(__file__).resolve().parent, ROOT):          # 同目录组件
 os.environ.setdefault("DB_PATH", str(ROOT / "var" / "bank.db"))  # 只设环境变量，不 import data/（卡 20-C：库住 var/，别写进代码目录 data/）
 
 from dotenv import load_dotenv                                  # noqa: E402  （.env 定位与 cwd 无关）
-from agent import balance_flow, card_binding_flow, confirm_card, orchestrator  # noqa: E402
+from agent import card_policy, balance_flow, card_binding_flow, confirm_card, orchestrator, write_flow  # noqa: E402
 
 import components as ui                                         # noqa: E402
 import card_binding_ui as cards_ui                               # noqa: E402
@@ -38,11 +38,33 @@ GREETING = "您好 请问我能为您提供什么帮助"
 HISTORY_TURNS = 4
 # ---------------- 启动引导（只碰环境变量与 data/ 层自己的 CLI） ----------------
 
+def _probe_db(db: Path) -> bool:
+    """探一下这个库能不能用（子进程里开一次：结构漂移/损坏都会非 0 退出）。
+
+    为什么用子进程：界面层只准调 `agent/`，不直接 import `data/`（分层铁律）。
+    """
+    code = ("import sys; sys.path.insert(0, '.');"
+            "from data.db import init_db; init_db(sys.argv[1])")
+    done = subprocess.run([sys.executable, "-c", code, str(db)], cwd=ROOT,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return done.returncode == 0
+
+
 def _ensure_db() -> bool:
-    """确保合成库存在；缺了就调 `python -m data.seed` 生成（界面不 import data/、不写 SQL）。"""
+    """确保合成库可用：缺了 → 生成；**结构漂移（旧库 + 新 schema）→ 自动重建**。
+
+    2026-10-31（用户实测「朋友刷新 main 也看不到新内容」）：云端实例里躺着一份旧结构的
+    `bank.db`，而旧版只判断"文件存在就返回 True" → 之后每次渲染都撞 SchemaDriftError，
+    页面直接报错，于是"仓库新、网站旧"。现在先探测，失败就重建（合成数据，重置无损）。
+    """
     db = Path(os.environ["DB_PATH"])
     if db.exists() and db.stat().st_size > 0:
-        return True
+        if _probe_db(db):
+            return True
+        with st.spinner("检测到数据库结构与新版本不一致，正在重建合成数据（演示数据会重置）…"):
+            subprocess.run([sys.executable, "-m", "data.seed", "--reset"], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return _probe_db(db)
     with st.spinner("首次启动：生成合成数据（`python -m data.seed`）…"):
         done = subprocess.run([sys.executable, "-m", "data.seed"], cwd=ROOT,
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -52,6 +74,7 @@ def _ensure_db() -> bool:
         return False
     st.success("合成数据已生成。")
     return True
+
 
 def _init_state() -> None:
     """会话态：对话、轨迹、余额回显、追问轮次（跨 rerun 保留）。"""
@@ -138,6 +161,12 @@ def _ask(text: str, *, display: str | None = None, extension: bool = False) -> N
     _pending = _picker.pending(st.session_state["session_id"])
     if _pending and _pending.get("intent") != turn.intent:
         _picker.clear(st.session_state["session_id"])
+    #: 2026-10-31（用户：重新发起群收款时金额还留着上次的 390）：新的一句「我要 aa 收款」
+    #: 属于**新起一笔** → 让卡面在下一轮开头把表单清空（不能在按钮/回调里直接清，
+    #: 那会跟已实例化的输入框打架）。
+    if (turn.intent == "aa_collect" and "CLASSIFY" in (turn.states or [])
+            and not {"CONFIRM_CARD", "EXECUTE"} & set(turn.states or [])):
+        state["aa-reset-form-pending"] = True
     state["bound-payee-query"] = turn.intent == "payee_list" and turn.error_code is None
     state["bound-schedule-query"] = turn.intent == "scheduled_list" and turn.error_code is None
     #: 2026-10-28：发起群收款（含缺槽追问）时也画卡面 —— 总额/选人/按人金额都在卡上填，
@@ -229,8 +258,15 @@ def _render_confirm(*, inline: bool = False) -> None:
 
     _draft = _agent_executor().submit(card_draft.draft_of, st.session_state["session_id"]).result()
     _editable = bool(_draft is not None and getattr(_draft, "fields", None))
+    #: 2026-10-31（用户要求）：转账/定时转账**没显式选过收款卡** → 确认按钮置灰，
+    #: 逼用户先选（选卡卡面见 slot_form_ui）；服务端 _prepare 也会拒绝无卡请求。
+    _card_unsure = (str(getattr(confirmation, "intent", "")) in ("transfer_single", "transfer_scheduled")
+                    and not bool((getattr(confirmation, "facts", None) or {}).get("payee_card_chosen")))
     action = ui.confirm_card(
         confirmation, compact=inline, editable=_editable,
+        confirm_disabled=_card_unsure,
+        disabled_hint="请先选择收款人的银行卡（在下方「🏦 选择收款人的银行卡」里点一张）"
+        if _card_unsure else "",
         edit_panel=lambda: card_edit_ui.render(_agent_executor(), st.session_state["session_id"]))
     if action == "confirm":
         _confirm_submit("确认", inline=inline)
@@ -290,7 +326,10 @@ def _sidebar() -> None:
             st.session_state['workspace-shortcut'] = prompt
             st.session_state.pop('workspace-result', None)
             st.session_state.pop('workspace-error', None)
-            if prompt == '查看操作记录':
+            if prompt == '出一份上个月的账单报告':
+                import legacy_bill_ui
+                legacy_bill_ui.open_picker()
+            elif prompt == '查看操作记录':
                 st.session_state['operation-records-open'] = True
             else:
                 _ask(prompt)
@@ -317,6 +356,15 @@ def _sidebar() -> None:
             st.rerun()
 
 def _chat_page() -> None:
+    #: 网页里群收款要先出**可编辑的发起卡**（用户 2026-10-31），点「发起群收款」才出确认卡。
+    #: 用 getattr 兜一下：万一部署时序错开（app 新、agent 旧），也不至于整页红屏。
+    #: 2026-10-31（用户要求）：网页里转账/定时转账**必须先选收款卡**（取消默认卡）
+    _enable_card = getattr(card_policy, "set_require_payee_card", None)
+    if callable(_enable_card):
+        _enable_card(True)
+    _enable_edit_first = getattr(write_flow, "set_aa_edit_first", None)
+    if callable(_enable_edit_first):
+        _enable_edit_first(True)
     workspace_ui.notifications(_agent_executor(), st.session_state['session_id'], _follow_up)
     workspace_ui.transcript(st.session_state['messages'], _agent_executor(),
                             st.session_state['session_id'], _follow_up)

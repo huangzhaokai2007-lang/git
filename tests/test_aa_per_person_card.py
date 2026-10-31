@@ -38,10 +38,12 @@ def test_per_person_amounts_take_effect_and_labels_are_names(
     app.run()
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
     options = list(app.multiselect[0].options)
     app.multiselect[0].set_value(options[:2]).run()
     next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
+    next(button for button in app.button if "按人设置金额" in button.label).click().run()
 
     labels = [box.label for box in app.text_input if "应收" in box.label]
     assert labels, "应该有按人金额输入框"
@@ -51,6 +53,8 @@ def test_per_person_amounts_take_effect_and_labels_are_names(
     boxes[0].set_value("100").run()
     boxes = [box for box in app.text_input if "应收" in box.label]
     boxes[1].set_value("150").run()
+    #: 2026-10-31：改成"草稿 + 确认修改"模型 —— 改完必须点确认才生效
+    next(button for button in app.button if "确认修改" in button.label).click().run()
     next(button for button in app.button if button.label == "发起群收款").click().run()
     assert not app.exception, app.exception
 

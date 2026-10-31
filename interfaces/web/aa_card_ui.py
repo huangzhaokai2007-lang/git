@@ -15,16 +15,16 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import aa_flow, confirm_card, payee_flow, payee_picker, write_flow
+from agent import (aa_flow, confirm_card, my_card_flow, payee_flow,
+                   payee_picker, write_flow)
 
 import premium_ui
+import step_record
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
-    state = st.session_state
-    state["messages"].append({"role": "assistant", "text": step.reply or step.ask or "",
-                              "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    """按钮/卡面路径的回执记账（含 L3 的 pending_id，否则待复核卡不显示）。"""
+    step_record.record_step(step, summary)
 
 
 def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
@@ -32,7 +32,9 @@ def _start(executor: ThreadPoolExecutor, session_id: str, intent: str,
     from agent import pending_slots
 
     confirm_card.clear(session_id)
-    step = executor.submit(write_flow.start, intent, slots, session_id).result()
+    #: 卡面点「发起群收款」= 用户已看过编辑卡 → 直接进预检/确认（不再绕回编辑卡）
+    step = executor.submit(write_flow.start, intent, slots, session_id,
+                           from_card=True).result()
     #: 2026-10-30 修（用户实测「成功发起后卡面不消失」）：出确认卡 / 已发起 → 清掉补槽记录，
     #: 否则下一轮 `pending_slots` 里那条 aa_collect 会把发起表单**又自动展开**并回填旧值。
     if not getattr(step, "missing", None):
@@ -82,6 +84,132 @@ def _normalize_candidates(raw: list) -> dict[str, dict]:
     return catalog
 
 
+def _applied_of(people: list[str], plan: dict) -> dict:
+    """当前**已确认**的分摊（`aa-applied`）；换人/第一次进来时按均摊值初始化。"""
+    applied = st.session_state.get("aa-applied") or {}
+    #: 空名单时 [] == [] 会误判成"已初始化"，所以显式要求键齐全。
+    if (list(applied.get("people") or []) != list(people)
+            or "others" not in applied or "mine" not in applied):
+        per = float(plan["per_yuan"])
+        mine = float(plan.get("mine_yuan") or per)
+        applied = {"people": list(people),
+                   "others": {pid: per for pid in people}, "mine": mine}
+        st.session_state["aa-applied"] = applied
+    return applied
+
+
+def _mark_touched() -> None:
+    """输入框一被改动就记一笔：别再拿均摊值覆盖用户填的数字（草稿也要保住）。"""
+    st.session_state["aa-amount-touched"] = True
+
+
+def _apply_amounts(people: list[str], staged: dict, mine_staged: object) -> None:
+    """把输入框里的草稿点「确认修改」后落成生效值；总额延后一轮同步到总额输入框。"""
+    others = {pid: round(_to_yuan(value), 2) for pid, value in staged.items()}
+    mine = round(_to_yuan(mine_staged), 2)
+    st.session_state["aa-applied"] = {"people": list(people), "others": others, "mine": mine}
+    st.session_state["aa-total-sync"] = round(sum(others.values()) + mine, 2)
+
+
+def _apply_pending_total_sync() -> None:
+    """下一轮开头把「确认修改」算出的总额写进总额输入框（不能在当轮改已实例化控件）。"""
+    value = st.session_state.pop("aa-total-sync", None)
+    if value:
+        st.session_state["aa-total"] = float(value)
+
+
+def _to_yuan(value: object) -> float:
+    """把用户输入的金额文本转成元（认不出就当 0）。"""
+    try:
+        return float(str(value or "").replace(",", "").strip() or 0)
+    except ValueError:
+        return 0.0
+
+
+def _sync_total() -> None:
+    """任一按人金额（含「我承担」）改动 → 总额自动重算：`Σ其他人 + 我承担`。
+
+    在 `on_change` 里调用（回调先于脚本重跑执行，所以能安全改 `aa-total` 这个控件状态）。
+    """
+    others = sum(_to_yuan(value) for key, value in list(st.session_state.items())
+                 if str(key).startswith("aa-amt-"))
+    mine = _to_yuan(st.session_state.get("aa-mine"))
+    st.session_state["aa-amount-touched"] = True      # 用户动过按人金额 → 不再自动对齐均摊值
+    #: 2026-10-31 修（用户实测：点「按份数均摊」后总金额被清零）——
+    #: 输入框还空着 / 都是 0 时**不要**拿 0 去覆盖已有总额。
+    total_now = round(others + mine, 2)
+    if total_now <= 0:
+        return
+    st.session_state["aa-total"] = total_now
+
+
+def _split_count() -> int:
+    """当前参与人个数（不含我）。"""
+    return len([key for key in st.session_state if str(key).startswith("aa-amt-")])
+
+
+def _write_amounts(values: list[float], mine: float) -> None:
+    """把算好的金额写回输入框（整数分落库口径，避免浮点尾巴）。"""
+    for index, value in enumerate(values):
+        st.session_state[f"aa-amt-{index}"] = f"{value:.2f}"
+    st.session_state["aa-mine"] = f"{mine:.2f}"
+    st.session_state["aa-total"] = round(sum(values) + mine, 2)
+    st.session_state["aa-amount-touched"] = True     # 这是一次"用户设定"，别被默认值对齐覆盖
+    #: 2026-10-31：快捷操作（一键均摊 / 按份数）结果直接算"已确认"，汇总块立刻跟着变。
+    people_now = list(st.session_state.get("aa-people") or [])
+    st.session_state["aa-applied"] = {
+        "people": people_now,
+        "others": {pid: value for pid, value in zip(people_now, values)},
+        "mine": mine}
+
+
+def _even_split() -> None:
+    """一键均摊：全员（含我）拉回平均。"""
+    total_cents = int(round(_to_yuan(st.session_state.get("aa-total")) * 100))
+    count = _split_count() + 1
+    if total_cents <= 0 or count <= 0:
+        return
+    #: 用整数分算：别人各拿 floor 的那一份，**零头记在我这边** —— 合计不会变成 999.99。
+    per = total_cents // count
+    mine = total_cents - per * (count - 1)
+    _write_amounts([per / 100] * (count - 1), mine / 100)
+
+
+def _apply_weights() -> None:
+    """按份数均摊：每份 = 总额 ÷ 总份数；余下的零头记在我这边（不外溢）。"""
+    total_cents = int(round(_to_yuan(st.session_state.get("aa-total")) * 100))
+    others = [max(1, int(st.session_state.get(f"aa-weight-{i}") or 1))
+              for i in range(_split_count())]
+    mine_weight = max(1, int(st.session_state.get("aa-weight-mine") or 1))
+    shares = sum(others) + mine_weight
+    if total_cents <= 0 or shares <= 0:
+        return
+    unit = total_cents // shares
+    cents = [unit * weight for weight in others]
+    mine_cents = unit * mine_weight + (total_cents - unit * shares)
+    _write_amounts([value / 100 for value in cents], mine_cents / 100)
+    st.session_state["aa-weight-open"] = False
+
+
+def _align_amount_defaults(people: list[str], plan: dict) -> None:
+    """用户还没动过按人金额时，把它对齐到**当前均摊值**。
+
+    2026-10-31 修（用户截图里明细全是 0.00）：总额是后填的（先加人、再填 490），
+    而金额输入框第一次渲染时落了 0.00；这里在**渲染显示区之前**按当前均摊值刷新，
+    用户一旦手改过（`aa-amount-touched`）就不再覆盖。
+    """
+    signature = "|".join(people)
+    if st.session_state.get("aa-amount-signature") != signature:
+        st.session_state["aa-amount-signature"] = signature
+        st.session_state["aa-amount-touched"] = False
+    if st.session_state.get("aa-amount-touched"):
+        return
+    for index in range(len(people)):
+        st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
+    #: 我那份用工具层算好的 mine_yuan（含零头）—— 否则 3 个人各 163.33 合计只有 489.99
+    st.session_state["aa-mine"] = plan.get("mine_yuan") or plan["per_yuan"]
+
+
 def _toggle(key: str) -> None:
     st.session_state[key] = not st.session_state.get(key, False)
 
@@ -98,6 +226,7 @@ def _add_selected(picked: list[str]) -> None:
     st.session_state["aa-people"] = current + [n for n in picked if n not in current]
     st.session_state["aa-people-touched"] = True
     st.session_state["aa-picked"] = []                      # 回调里清，下次渲染前生效
+    st.session_state["aa-people-open"] = False              # 2026-10-31：加完就收起这块
 
 
 def _remove_person(name: str) -> None:
@@ -105,6 +234,11 @@ def _remove_person(name: str) -> None:
     st.session_state["aa-people"] = [p for p in (st.session_state.get("aa-people") or [])
                                      if p != name]
     st.session_state["aa-people-touched"] = True
+
+
+def _collapse_people() -> None:
+    """把「修改参与人」收起（用户 2026-10-31：点完添加所选这块该自己收起来）。"""
+    st.session_state["aa-people-open"] = False
 
 
 def _select_all() -> None:
@@ -119,13 +253,20 @@ def _confirm_panel(executor: ThreadPoolExecutor, session_id: str, confirmation) 
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款 · 确认这一笔",
                              "看一眼再确认；确认后才会真的发出去", tone="warn")
-        rows = [("金额（元）", f"{getattr(confirmation, 'amount_cents', 0) / 100:,.2f}"),
-                ("收款人", str(filled.get("target_name") or "—")),
-                ("每人", f"{filled.get('per_person_amount_yuan', '—')} 元（含我一份）"),
-                ("我承担", f"{filled.get('initiator_share_yuan', '—')} 元"),
-                ("待收", f"{filled.get('collect_yuan', '—')} 元")]
-        for label, value in rows:
-            st.markdown(f"**{label}**　{value}")
+        st.markdown(f"**金额（元）**　{getattr(confirmation, 'amount_cents', 0) / 100:,.2f}")
+        st.markdown(f"**收款人**　{filled.get('target_name') or '—'}")
+        #: 2026-10-31（用户要求）：**逐人列出每人该承担多少**，不再挤成一句「每人 —」。
+        items = list(filled.get("per_person_items") or [])
+        if items:
+            table = ["| 收款人 | 应收（元） |", "| --- | --- |"]
+            table += [f"| {item.get('name') or '—'} | {item.get('yuan') or '0.00'} |"
+                      for item in items]
+            st.markdown("\n".join(table))
+        if filled.get("my_card_mask"):        #: 2026-10-31：收款到我的哪张卡
+            st.markdown(f"**收款到**　{filled.get('my_card_type') or '储蓄卡'} "
+                        f"{filled.get('my_card_bank')} {filled.get('my_card_mask')}")
+        st.markdown(f"**我承担**　{filled.get('initiator_share_yuan', '—')} 元")
+        st.markdown(f"**待收**　{filled.get('collect_yuan', '—')} 元")
         left, middle, right = st.columns(3, vertical_alignment="center")
         #: 2026-10-29 修（用户实测「点击确认后直接卡 bug」）：这里原来调的是**不存在的**
         #: `write_flow.confirm` / `write_flow.cancel` → AttributeError。
@@ -198,7 +339,8 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
     with st.container(border=True, key="aa-create"):
         premium_ui.card_head("🧾 群收款（含你自己）",
                              "填金额 → 选参与人 → 发起；每人均摊，你承担自己那一份", tone="")
-        money_col, title_col = st.columns([1, 2], vertical_alignment="bottom")
+        #: 2026-10-31（用户要求）：总金额与备注 **1:1**（原来 [1, 2]，金额框显得太窄）
+        money_col, title_col = st.columns([1, 1], vertical_alignment="bottom")
         total = money_col.number_input("总金额（元）", min_value=0.0, step=10.0, key="aa-total",
                                        format="%.2f")
         title = title_col.text_input("备注（事由）", key="aa-title", placeholder="例如 出去吃饭")
@@ -209,21 +351,49 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         plan = executor.submit(aa_flow.group_plan, labels, float(total or 0)).result()
         #: 2026-10-30（用户要求）：参与人要**醒目** —— 人数徽章 + 名字芯片，
         #: 不再是一行灰色小字。
+        #: 2026-10-31（用户要求）：**参与人与每人应摊表合并成一块**，配色也调过（不再是灰表格）。
+        _align_amount_defaults(people, plan)
+        _per = float(plan["per_yuan"])
+        #: 2026-10-31 修（用户实测「改完金额，上面均摊变 0 / 合计不对」）：
+        #: 汇总块只读**已确认的分摊**；输入框是草稿，点「✅ 确认修改」才生效。
+        _applied = _applied_of(people, plan)
+        _values = [float(_applied["others"].get(pid, 0)) for pid in people]
+        _others = round(sum(_values), 2)
+        _mine = float(_applied["mine"])
+        _avg = round((_others + _mine) / (len(people) + 1), 2) if people else 0.0
         if people:
             chips = "".join(f'<span class="aa-chip">{label}</span>' for label in labels)
+            rows_html = "".join(
+                f'<div class="aa-split-row"><span>{label}</span>'
+                f'<span class="aa-split-amt">¥ {value:,.2f}</span></div>'
+                for label, value in zip(labels, _values))
+            rows_html += ('<div class="aa-split-row me"><span>我（承担）</span>'
+                          f'<span class="aa-split-amt">¥ {_mine:,.2f}</span></div>')
+            rows_html += ('<div class="aa-split-row total"><span>合计</span>'
+                          f'<span class="aa-split-amt">¥ {_others + _mine:,.2f}</span></div>')
             st.markdown(
-                f'<div class="aa-people"><div class="aa-people-head">'
+                f'<div class="aa-people aa-merged"><div class="aa-people-head">'
                 f'<span class="aa-people-label">参与人</span>'
                 f'<span class="aa-people-count">{plan["count"]} 人（含我）</span></div>'
-                f'<div class="aa-chips">{chips}</div></div>', unsafe_allow_html=True)
+                f'<div class="aa-chips">{chips}</div>'
+                f'<div class="aa-split">{rows_html}</div>'
+                f'<div class="aa-split-foot"><span>待收 ¥{_others:,.2f}</span>'
+                f'<span>均摊 ¥{_avg:,.2f}</span></div></div>',
+                unsafe_allow_html=True)
         else:
             st.markdown('<div class="aa-people"><div class="aa-people-head">'
                         '<span class="aa-people-label">参与人</span></div>'
                         '<div class="aa-empty">还没有参与人 —— 点下面「✏️ 修改参与人」添加</div>'
                         '</div>', unsafe_allow_html=True)
 
-        #: 参与人的增删都收进这个 expander（不再占主视野）
-        with st.expander("✏️ 修改参与人", expanded=False):
+        #: 参与人的增删收进这块（不再占主视野）；2026-10-31 用户要求：
+        #: 「点添加所选之后这块可以收起」→ 用按钮控制展开态（expander 的状态改不动）。
+        _people_open = bool(st.session_state.get("aa-people-open"))
+        if st.button("✏️ 收起修改参与人" if _people_open else "✏️ 修改参与人",
+                     key="aa-people-toggle", width="stretch"):
+            st.session_state["aa-people-open"] = not _people_open
+            st.rerun()
+        if _people_open:
             if people:
                 for index, pid in enumerate(people):
                     row_left, row_right = st.columns([5, 1], vertical_alignment="center")
@@ -263,48 +433,101 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not people:
             st.caption("选好参与人后这里会显示均摊金额。")
             return
-        #: 均摊大区块：大字金额 + 我承担/待收 一行（金额一变就有渐变脉冲）
-        import premium_css
-
-        amount_html = premium_css.num_html(f"¥ {plan['per_yuan']}", flash=True)
-        st.markdown(
-            f"<div style='text-align:center;margin:.2rem 0 .1rem'>"
-            f"<span style='color:#9aa0ac;font-size:.8rem'>均摊金额（含我）</span><br>"
-            f"<span style='font-size:2rem;font-weight:650'>{amount_html}</span>"
-            f"<div style='color:#9aa0ac;font-size:.8rem;margin-top:.15rem'>"
-            f"我承担 {plan['mine_yuan']} 元 · 待收 <b style='color:#d1d4dc'>"
-            f"{plan['collect_yuan']} 元</b></div></div>",
-            unsafe_allow_html=True)
-
+        #: 2026-10-31（用户需求）：群收款也要能选「收款到我哪张卡」——列我名下已绑定的卡。
+        _my_cards = executor.submit(my_card_flow.cards_of).result()
+        _picked_card = ""
+        if _my_cards:
+            _card_labels = {card["card_id"]: (f"{card['card_type']} {card['bank']} "
+                                              f"{card['card_no_mask']}"
+                                              )
+                            for card in _my_cards}
+            _card_ids = list(_card_labels)
+            _saved = str(st.session_state.get("aa-my-card") or "")
+            _picked_card = st.selectbox(
+                "收款到我的卡", _card_ids,
+                index=_card_ids.index(_saved) if _saved in _card_ids else 0,
+                format_func=lambda card_id: _card_labels[card_id], key="aa-my-card")
+            st.caption("钱会收到这张卡；换卡不影响参与人和金额。")
         amounts: dict[str, str] = {}
-        with st.expander("✏️ 按人设置金额（可选）", expanded=False):
-            st.caption("默认就是**当前均摊值**，只改需要不同的那几位；你自己那份由总额自动扣。")
-            #: 2026-10-30 修：key 一旦进 session，`value=` 就失效 → 上一轮存下的 0.00 会一直沿用，
-            #: 最后提交「王五 0.00」被判"金额看不懂"（用户实测）。用签名变化把初值刷成当前均摊值。
-            signature = f"{plan['total_yuan']}:{plan['count']}"
-            if st.session_state.get("aa-amount-signature") != signature:
-                st.session_state["aa-amount-signature"] = signature
-                for index in range(len(people)):
-                    st.session_state[f"aa-amt-{index}"] = plan["per_yuan"]
+        #: 2026-10-31（用户：这两个按钮样式不一样）：和「修改参与人」统一成**按钮 + 展开区**
+        _amounts_open = bool(st.session_state.get("aa-amounts-open"))
+        if st.button("✏️ 收起按人设置金额" if _amounts_open else "✏️ 按人设置金额（可选）",
+                     key="aa-amounts-toggle", width="stretch"):
+            st.session_state["aa-amounts-open"] = not _amounts_open
+            st.rerun()
+        if _amounts_open:
+            st.caption("默认是当前均摊值；改完请点下面的「✅ 确认修改」，合计与均摊会一起重算。")
             for index, pid in enumerate(people):
-                #: 标签用人话（`李四（139****1001）`），键仍用 payee_id（同名不会串）
+                #: 标签用人话（李四（139****1001）），键仍用 payee_id（同名不会串）
                 label = catalog.get(pid, {}).get("label") or pid
-                amounts[pid] = st.text_input(f"{label} 应收（元）", key=f"aa-amt-{index}")
+                amounts[pid] = st.text_input(f"{label} 应收（元）", key=f"aa-amt-{index}",
+                                             on_change=_mark_touched)
+            #: 2026-10-31（用户要求）：按人编辑里**加上"我"**，并把「确认」放在它下面。
+            mine_value = st.text_input("我承担（元）", key="aa-mine", on_change=_mark_touched)
+            _dirty = (any(abs(_to_yuan(value) - float(_applied["others"].get(pid, 0))) > 0.005
+                          for pid, value in amounts.items())
+                      or abs(_to_yuan(mine_value) - _mine) > 0.005)
+            _col_ok, _col_tip = st.columns([1, 2], vertical_alignment="center")
+            if _col_ok.button("✅ 确认修改", key="aa-amounts-apply", type="primary",
+                              width="stretch", disabled=not _dirty):
+                _apply_amounts(people, amounts, mine_value)
+                st.rerun()
+            _col_tip.caption("有未确认的改动" if _dirty else "已与上方合计一致")
+
+            #: 两个快捷（用户 2026-10-31 要求）：一键均摊 / 按份数均摊
+            col_even, col_weight = st.columns(2)
+            col_even.button("一键均摊", key="aa-even", width="stretch", on_click=_even_split)
+            col_weight.button("按份数均摊", key="aa-weight-toggle", width="stretch",
+                              on_click=_toggle, args=("aa-weight-open",))
+            if st.session_state.get("aa-weight-open"):
+                st.caption("每份 = 总额 ÷ 总份数（份数可以不同，例如 1 / 2 / 2）。")
+                for index, pid in enumerate(people):
+                    label = catalog.get(pid, {}).get("label") or pid
+                    st.number_input(f"{label} 份数", key=f"aa-weight-{index}",
+                                    min_value=1, max_value=20, step=1, value=1)
+                st.number_input("我 份数", key="aa-weight-mine",
+                                min_value=1, max_value=20, step=1, value=1)
+                col_ok, col_no = st.columns(2)
+                col_ok.button("确认按份数均摊", key="aa-weight-apply", type="primary",
+                              width="stretch", on_click=_apply_weights)
+                col_no.button("取消", key="aa-weight-cancel", width="stretch",
+                              on_click=_toggle, args=("aa-weight-open",))
 
         if st.button("发起群收款", key="aa-create-go", type="primary", width="stretch",
-                     disabled=float(total or 0) <= 0):
-            slots = {"payee_ids": people, "amount": plan["total_yuan"]}   # people 已是 payee_id
+                     disabled=(_others + _mine) <= 0):
+            #: 用**已确认的分摊**作总额：输入框里的草稿没确认就不会被算进去，账目才对得上。
+            slots = {"payee_ids": people, "amount": f"{_others + _mine:.2f}"}   # people 已是 payee_id
             if title.strip():
                 slots["title"] = title.strip()
             #: 2026-10-30 修：默认值就是均摊值，**不要**当"按人金额"发下去 ——
             #: 含我口径下 Σ每人 ≠ 含我总额，会被判「每人金额合计与总金额不符」，
             #: 卡面停在发起态 → 用户再点一次又会触发收款人解析（用户实测的"还是会解析"）。
-            filled = {name: value.strip() for name, value in amounts.items()
-                      if value.strip() and value.strip() != plan["per_yuan"]}
+            if _picked_card:
+                slots["my_card_id"] = _picked_card
+            filled = {pid: f"{value:,.2f}" for pid, value in _applied["others"].items()
+                      if abs(float(value) - _per) > 0.005}
             if filled:
-                slots["amounts"] = "、".join(f"{name} {value}" for name, value in filled.items())
+                slots["amounts"] = "、".join(f"{pid} {value}" for pid, value in filled.items())
             _start(executor, session_id, "aa_collect", slots,
                    "（按钮）发起群收款：" + "、".join(people))
+
+
+def _drain_paid_queue(executor: ThreadPoolExecutor, session_id: str) -> None:
+    """把排队中的「登记已付」一个一个接上（当前没有在途确认卡时才接下一个）。"""
+    from agent import confirm_card as _cc
+
+    queue = list(st.session_state.get("aa-paid-queue") or [])
+    if not queue:
+        return
+    if executor.submit(_cc.current, session_id).result() is not None:
+        return                                   # 还有确认卡没处理，等用户
+    next_item = queue.pop(0)
+    st.session_state["aa-paid-queue"] = queue
+    step = executor.submit(write_flow.start, "aa_mark_paid",
+                           {"request_id": next_item["request_id"],
+                            "payee_id": next_item["payee_id"]}, session_id).result()
+    _record(step, f"（队列）登记 {next_item['payee_id']} 已付")
+    st.rerun()
 
 
 def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> None:
@@ -320,27 +543,70 @@ def _status_card(executor: ThreadPoolExecutor, session_id: str, item: dict) -> N
             st.markdown(f"{'✅' if done else '⏳'} **{share['payee_name']}** · "
                         f"{share['amount_yuan']} 元 · {'已付' if done else '未付'}")
         pending = [share for share in (item.get("shares") or []) if share["status"] != "paid"]
-        left, right = st.columns([3, 1], vertical_alignment="center")
+        #: 2026-10-31（用户要求）：登记已付改成**勾选式** —— 点按钮放出未付的人，
+        #: 勾谁付了（可多选）+ 确认/取消，不再一个一个地下拉选。
+        open_key = f"aa-paid-open-{request_id}"
+        gen_key = f"aa-paid-gen-{request_id}"
+        #: 2026-10-31 修（浏览器红屏 `StreamlitWidgetAlreadyInstantiatedError`）：
+        #: 勾选框用**代际 key**，开/关一次就换一代，旧 key 自然作废 —— 不用去 set/pop widget key。
+        picked_key = f"aa-paid-pick-{request_id}-{int(st.session_state.get(gen_key) or 0)}"
+        col_pay, col_cancel = st.columns(2, vertical_alignment="center")
         if pending:
-            names = {f"{share['payee_name']}（{share['amount_yuan']} 元）": share["payee_id"]
-                     for share in pending}
-            picked = left.selectbox("登记谁已付", list(names), key=f"aa-who-{request_id}",
-                                    label_visibility="collapsed")
-            if right.button("登记已付", key=f"aa-paid-{request_id}", type="primary",
-                            width="stretch"):
-                _start(executor, session_id, "aa_mark_paid",
-                       {"request_id": request_id, "payee_id": names[picked]},
-                       f"（按钮）登记 {picked} 已付")
+            label = "✏️ 收起登记" if st.session_state.get(open_key) else "登记已付"
+            if col_pay.button(label, key=f"aa-paid-{request_id}", type="primary",
+                              width="stretch"):
+                st.session_state[open_key] = not st.session_state.get(open_key)
+                st.session_state[gen_key] = int(st.session_state.get(gen_key) or 0) + 1
+                st.rerun()
         else:
-            left.caption("这笔群收款已全部付清 ✅")
-        if right.button("撤销", key=f"aa-cancel-{request_id}", width="stretch"):
+            col_pay.caption("这笔群收款已全部付清 ✅")
+        if col_cancel.button("撤销", key=f"aa-cancel-{request_id}", width="stretch"):
             _start(executor, session_id, "aa_cancel", {"request_id": request_id},
                    f"（按钮）撤销群收款 {item['title']}")
+
+        if pending and st.session_state.get(open_key):
+            options = {f"{share['payee_name']}（{share['amount_yuan']} 元）": share["payee_id"]
+                       for share in pending}
+            picked = st.multiselect("勾选已经付给你的人", list(options),
+                                    key=picked_key,
+                                    placeholder="勾选已经付了的人")
+            col_ok, col_no = st.columns(2)
+            if col_ok.button("确认登记", key=f"aa-paid-ok-{request_id}", type="primary",
+                             width="stretch", disabled=not picked):
+                #: 工具层一次登记一个人（各自走确认卡）→ 勾了多位就排队，
+                #: 当前这个先发起，其余等确认完自动接上（见 `_drain_paid_queue`）。
+                rest = [{"request_id": request_id, "payee_id": options[who]}
+                        for who in picked[1:]]
+                st.session_state["aa-paid-queue"] = rest
+                st.session_state[open_key] = False
+                #: 勾选框是**已实例化**的 widget，这里不能直接清 → 挂标记，下一轮开头清
+                st.session_state[gen_key] = int(st.session_state.get(gen_key) or 0) + 1
+                _start(executor, session_id, "aa_mark_paid",
+                       {"request_id": request_id, "payee_id": options[picked[0]]},
+                       f"（按钮）登记 {picked[0]} 已付")
+            if col_no.button("取消", key=f"aa-paid-no-{request_id}", width="stretch"):
+                st.session_state[open_key] = False
+                st.session_state[gen_key] = int(st.session_state.get(gen_key) or 0) + 1
+                st.rerun()
 
 
 #: 群收款办完后要清掉的表单状态（含 widget key，只能下一轮开头清）
 _FORM_KEYS = ("aa-create-open", "aa-people", "aa-people-touched", "aa-picked",
               "aa-total", "aa-title", "aa-pick-open", "aa-split-open")
+
+
+def _reset_form() -> None:
+    """把「新增群收款」表单清空（用户 2026-10-31：重新发起时金额还留着上一次的 390）。
+
+    点「＋ 新增群收款」= 明确要**新起一笔**，所以金额/备注/参与人/按人金额一律归零；
+    上一笔还没填完就切走的情况也走这里，避免旧数字串到下一笔。
+    """
+    for key in list(st.session_state):
+        name = str(key)
+        if name in _FORM_KEYS or name.startswith(("aa-amt-", "aa-weight-", "aa-amount-")):
+            st.session_state.pop(key, None)
+    for key in ("aa-mine", "aa-total", "aa-title"):
+        st.session_state.pop(key, None)
 
 
 def _apply_pending_reset() -> None:
@@ -351,8 +617,7 @@ def _apply_pending_reset() -> None:
     """
     if not st.session_state.pop("aa-reset-pending", False):
         return
-    for key in _FORM_KEYS:
-        st.session_state.pop(key, None)
+    _reset_form()
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
@@ -362,6 +627,10 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     先给一个「＋ 新增群收款」按钮，点了才拉开；已经在补槽（例如刚说"向王五群收款"缺金额）时自动展开。
     """
     _apply_pending_reset()
+    _apply_pending_total_sync()          # 「确认修改」算出的总额，下一轮开头写回总额输入框
+    if st.session_state.pop("aa-reset-form-pending", False):
+        _reset_form()                     # 新的一句「我要 aa 收款」→ 表单归零
+    _drain_paid_queue(executor, session_id)
     confirmation = executor.submit(confirm_card.current, session_id).result()
     if confirmation is not None and getattr(confirmation, "intent", "") == "aa_collect":
         st.session_state["aa-create-open"] = False       # 进了确认态就收起发起表单
@@ -380,9 +649,14 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not open_now:
             if st.button("＋ 新增群收款", key="aa-create-toggle", type="primary",
                          width="stretch"):
+                _reset_form()                     # 新起一笔 → 金额/备注/参与人全部归零
                 st.session_state["aa-create-open"] = True
                 st.rerun()
         else:
             _create_panel(executor, session_id)
-    for item in executor.submit(aa_flow.active).result():
-        _status_card(executor, session_id, item)
+    #: 2026-10-31（用户要求）：正在**新增**群收款时，下面不再铺历史群收款状态卡 ——
+    #: 这一屏只服务新起一笔，免得旧单子把视线拉走（发起/确认后历史会自己回来）。
+    creating = bool(st.session_state.get("aa-create-open")) and confirmation is None
+    if not creating:
+        for item in executor.submit(aa_flow.active).result():
+            _status_card(executor, session_id, item)

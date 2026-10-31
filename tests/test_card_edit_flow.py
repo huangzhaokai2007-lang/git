@@ -23,10 +23,17 @@ from agent import (
     orchestrator,
     session_memory,
     write_flow,
+    pending_slots,
 )
 from data import payee_dao
 from tests.conftest import raw
 from tools import payee
+
+
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
 
 UID = "u_zhangsan_0001"
 SESSION = "sess-edit"
@@ -54,9 +61,19 @@ def _fake(monkeypatch, payee_name: str = "房东", amount: str = "100") -> None:
     monkeypatch.setattr(llm, "chat_json", chat_json)
 
 
+#: 2026-10-31：转账现在**必须选收款卡** → 用例里统一补一张（房东=王五 pc_0003_a）
+CARD_ID = "pc_0003_a"
+
+
 def _start_transfer(wired, monkeypatch, amount: str = "100"):
+    """出确认卡（含"必须先选收款卡"这一步）。"""
     _fake(monkeypatch, amount=amount)
-    return orchestrator.handle(f"给房东转 {amount} 元", session_id=SESSION)
+    turn = orchestrator.handle(f"给房东转 {amount} 元", session_id=SESSION)
+    #: 2026-10-31：网页里必须选卡是开关（agent 层默认关），这里做兼容 ——
+    #: 万一以后打开开关也不会炸（pending 还在才提交）。
+    if "收款卡" in (turn.reply or "") and pending_slots.peek(SESSION) is not None:
+        turn = pending_slots.submit_form(SESSION, {"payee_card": CARD_ID})
+    return turn
 
 
 def test_edit_amount_rereuns_risk(wired, monkeypatch) -> None:
@@ -82,6 +99,9 @@ def test_edit_payee_switches_person_and_tier(wired, monkeypatch) -> None:
     card = _start_transfer(wired, monkeypatch)
     assert card.tier == "L1"
     edited = write_flow.edit(SESSION, {"payee": ZHANG})
+    #: 2026-10-31：换了收款人 → 旧卡作废，必须重新选他的卡（这里选张小美的 pc_0004_a）
+    if "收款卡" in (edited.reply or "") and pending_slots.peek(SESSION) is not None:
+        edited = pending_slots.submit_form(SESSION, {"payee_card": "pc_0004_a"})
     assert ZHANG in edited.reply and edited.tier == "L2"                # 张小美非白名单
 
 
@@ -194,3 +214,20 @@ def test_edit_aa_amounts_changes_the_total(wired, monkeypatch) -> None:
     edited = write_flow.edit(SESSION, {"amounts": "王五 300 元、张小美 200 元"})
     assert "500.00" in edited.reply                                     # 总额 = 合计
     assert "300.00" in edited.reply
+
+
+def test_new_transfer_discards_the_inflight_draft(wired, monkeypatch) -> None:
+    _fake(monkeypatch, [(WANGWU, "100"), (ZHANG, "200")])
+    orchestrator.handle(f"给{WANGWU}转 100 元", session_id=SESSION)
+    first = write_flow.start("transfer_single", {"payee": WANGWU, "amount": "100",
+                                                 "payee_card_id": CARD_ID}, SESSION)
+    assert "CONFIRM_CARD" in first.states
+    assert confirm_card.current(SESSION) is not None
+
+    # 用户改说另一笔（新请求，不是改卡）
+    second = orchestrator.handle(f"给{ZHANG}转 200 元", session_id=SESSION)
+    assert "原草稿已失效" not in (second.reply or ""), second.reply
+    done = write_flow.start("transfer_single", {"payee": ZHANG, "amount": "200",
+                                                "payee_card_id": "pc_0004_a"}, SESSION)
+    assert "CONFIRM_CARD" in done.states
+    assert ZHANG in done.reply and "200.00" in done.reply

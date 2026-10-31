@@ -13,15 +13,13 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
+import step_record
 from agent import payee_picker, write_flow
 
 
 def _record(step: write_flow.Step, summary: str) -> None:
-    """把选择后的回执记进会话（与 app._ask 同口径）。"""
-    state = st.session_state
-    text = step.reply or step.ask or ""
-    state["messages"].append({"role": "assistant", "text": text, "turn": None})
-    state["turns"].append({"ts": time.strftime("%H:%M:%S"), "text": summary, "turn": None})
+    """把选择后的回执记进会话（与 app._ask 同口径；含 L3 的 pending_id）。"""
+    step_record.record_step(step, summary)
 
 
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:

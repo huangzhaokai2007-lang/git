@@ -237,7 +237,9 @@ def _evidence(confirmation: Any) -> None:
 
 def confirm_card(confirmation: Any, *, compact: bool = False,
                  edit_panel: Callable[[], None] | None = None,
-                 editable: bool = True) -> str | None:
+                 editable: bool = True,
+                 confirm_disabled: bool = False,
+                 disabled_hint: str = "") -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     if compact:
         st.markdown('**核对修改**')
@@ -248,7 +250,10 @@ def confirm_card(confirmation: Any, *, compact: bool = False,
                 st.markdown(line)
         st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后提交执行。')
         left, middle, right = st.columns(3)
-        if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
+        if confirm_disabled and disabled_hint:
+            st.caption(disabled_hint)
+        if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch',
+                       disabled=confirm_disabled):
             return 'confirm'
         if middle.button('✖ 取消', key='confirm-cancel', width='stretch'):
             return 'cancel'
@@ -275,8 +280,8 @@ def confirm_card(confirmation: Any, *, compact: bool = False,
             head[slot].metric("金额（元）", confirmation.amount_yuan or "—")
             slot += 1
         head[slot].metric(target, confirmation.target_name or "—")
-        head[slot + 1].metric("权限档（风险等级）", confirmation.tier or "—")
-        head[slot + 2].metric("短信验证码", "需要" if confirmation.requires_otp else "不需要")
+        head[slot + 1].metric("权限档", confirmation.tier or "—")
+        head[slot + 2].metric("验证码", "需要" if confirmation.requires_otp else "不需要")
         parts = [f"意图：{_line(confirmation.card_text, '意图：') or confirmation.intent}"]
         if confirmation.masked_phone:                     # 转账/收款人才有
             parts.append(f"收款账号：{_esc(confirmation.masked_phone)}")
@@ -320,7 +325,7 @@ def otp_card(confirmation: Any, *, compact: bool = False) -> tuple[str, str] | N
             st.caption(f"{target} {_esc(confirmation.target_name)}（{_esc(confirmation.masked_phone)}）· "
                        f"金额 {_esc(confirmation.amount_yuan)} 元 · 权限档 {_esc(confirmation.tier)}")
         with st.form("otp-form", clear_on_submit=True):
-            code = st.text_input("短信验证码", type="password", key="otp-code",
+            code = st.text_input("验证码", type="password", key="otp-code",
                                  placeholder="请输入 6 位短信验证码", label_visibility="collapsed")
             left, right = st.columns(2) if compact else st.columns([1, 1, 3])[:2]
             submitted = left.form_submit_button("提交验证码", type="primary", key="otp-submit",

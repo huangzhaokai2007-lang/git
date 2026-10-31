@@ -60,7 +60,8 @@ def test_confirm_button_disabled_until_people_picked(monkeypatch: pytest.MonkeyP
     labels = [box.label for box in app.number_input]
     assert any("总金额（元）" in label for label in labels)
     #: 2026-10-30：参与人编辑收进 expander（面板里挑人）；没挑人时「添加所选」不可按
-    assert any("修改参与人" in str(element.label) for element in app.expander)
+    assert any("修改参与人" in button.label for button in app.button)
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
     add = next(button for button in app.button if button.label == "添加所选")
     assert add.disabled is True, "没挑人时「添加所选」必须不可按"
     captions = "\n".join(str(element.value) for element in app.caption)
@@ -72,16 +73,19 @@ def test_picking_people_shows_the_split_and_actions(monkeypatch: pytest.MonkeyPa
     app = _app(monkeypatch)
     app.chat_input[0].set_value("发起群收款").run()
     app.number_input[0].set_value(300.0)
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
     app.multiselect[0].set_value(["王五"]).run()          # 先 rerun，添加按钮才会解禁
     next(button for button in app.button if button.label == "添加所选").click().run()
     assert not app.exception, app.exception
     all_text = "\n".join(str(element.value) for element in app.markdown)
     assert "含我" in all_text                             # 参与人区块：2 人（含我）
     marks = "\n".join(str(element.value) for element in app.markdown)
-    assert "均摊金额" in marks and "¥ 150.00" in marks      # 大字均摊金额（300 / 2 份）
-    assert "我承担 150.00 元" in marks and "待收" in marks
+    #: 2026-10-31：均摊金额并进「参与人 + 明细表」合并块（不再有独立大字）
+    assert "均摊 ¥150.00" in marks                       # 300 / 2 份
+    #: 合并块里「我（承担）」是一行明细，金额用等宽字体显示为 ¥ 150.00
+    assert "我（承担）" in marks and "待收 ¥150.00" in marks
     #: 「按人设置金额」也收进 expander 了
-    assert any("按人设置金额" in str(element.label) for element in app.expander)
+    assert any("按人设置金额" in button.label for button in app.button)
     assert any(button.label == "发起群收款" for button in app.button)
 
 
@@ -93,7 +97,7 @@ def test_aa_card_has_no_policy_lines(seeded, monkeypatch: pytest.MonkeyPatch) ->
                                   rows=[("总金额", "300.00 元")], tier="L1",
                                   requires_otp=False, risk_note="常规群收款")
     text = confirm_card.render(card)
-    assert "权限档" not in text and "短信验证码" not in text
+    assert "权限档" not in text and "验证码" not in text
     assert "总金额" in text and "风险提示" in text
 
 
@@ -139,6 +143,7 @@ def test_confirm_button_actually_executes(monkeypatch: pytest.MonkeyPatch) -> No
     app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
     app.run()
     app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    next(button for button in app.button if button.label == "发起群收款").click().run()
     assert not app.exception, app.exception
 
     button = next(b for b in app.button if b.label == "✅ 确认")
@@ -191,10 +196,30 @@ def test_new_person_adder_is_reachable(monkeypatch: pytest.MonkeyPatch) -> None:
     app.chat_input[0].set_value("向王五群收款").run()
     assert not app.exception, app.exception
     assert not app.exception, app.exception
+    #: 参与人区现在是**按钮控制**（2026-10-31：点完添加所选要能收起）→ 先展开它
+    toggle = next(button for button in app.button if "修改参与人" in button.label)
+    toggle.click().run()
+    assert not app.exception, app.exception
     expanders = [str(element.label) for element in app.expander]
     assert any("新增收款人" in label for label in expanders)
     labels = [box.label for box in app.text_input]
     assert "姓名" in labels and "手机号" in labels
+
+
+def test_people_editor_collapses_after_adding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """用户 2026-10-31：点完「添加所选」，修改参与人这块要自己收起。"""
+    app = _app(monkeypatch)
+    app.chat_input[0].set_value("发起群收款").run()
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
+    assert not app.exception, app.exception
+    assert any("收起修改参与人" in button.label for button in app.button)
+
+    app.multiselect[0].set_value(list(app.multiselect[0].options)[:1]).run()
+    next(button for button in app.button if button.label == "添加所选").click().run()
+    assert not app.exception, app.exception
+    assert any("修改参与人" in button.label and "收起" not in button.label
+               for button in app.button), "加完应收起"
+    assert not app.multiselect, "收起后不该还有添加多选"
 
 
 def test_remove_participant(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -214,7 +239,7 @@ def test_remove_participant(monkeypatch: pytest.MonkeyPatch) -> None:
     app.run()
     app.chat_input[0].set_value("我和王五群收款").run()
     assert not app.exception, app.exception
-    assert not app.exception, app.exception
+    next(button for button in app.button if "修改参与人" in button.label).click().run()
     delete = next(b for b in app.button if b.label == "删除")
     delete.click().run()
     assert not app.exception, app.exception
@@ -262,6 +287,7 @@ def test_form_is_cleared_after_completion(monkeypatch: pytest.MonkeyPatch) -> No
     app = AppTest.from_file(str(REPO / "interfaces" / "web" / "app.py"), default_timeout=300)
     app.run()
     app.chat_input[0].set_value("我和王五群收款 300 元").run()
+    next(button for button in app.button if button.label == "发起群收款").click().run()
     next(button for button in app.button if button.label == "✅ 确认").click().run()
     assert not app.exception, app.exception
     # 办完后再看页面：不该再展开表单

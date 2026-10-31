@@ -85,8 +85,34 @@ def wired(seeded: Path, monkeypatch: pytest.MonkeyPatch, clock):
 
 
 def turn(monkeypatch: pytest.MonkeyPatch, text: str, script: list[dict]):
+    """走一轮编排层，并**跳过群收款的编辑卡**直接到确认卡。
+
+    2026-10-31：聊天里说全了群收款会先停在「发起卡」让用户核对（`from_card=False`）；
+    本文件测的是**确认 / 执行**这一段契约，所以补一次卡面「发起」的动作。
+    """
+    from agent import pending_slots, write_flow
+
     fake_llm(monkeypatch, script)
-    return orchestrator.handle(text, session_id=SESSION)
+    handled = orchestrator.handle(text, session_id=SESSION)
+    if "CONFIRM_CARD" in (getattr(handled, "states", None) or []):
+        return handled
+
+    item = pending_slots.peek(SESSION) or {}
+    if item.get("intent") == "aa_collect":
+        step = write_flow.start("aa_collect", item["slots"], SESSION, from_card=True)
+        pending_slots.clear(SESSION)
+        return _as_turn(step)
+    return handled
+
+
+def _as_turn(step):
+    """把 `write_flow.Step` 包成与 `orchestrator.handle` 同形状的对象（用例只读几个字段）。"""
+    from types import SimpleNamespace
+
+    return SimpleNamespace(states=list(step.states or []), reply=step.reply or "",
+                           tier=step.tier, executed=bool(step.executed),
+                           intent=step.intent, missing=list(step.missing or []),
+                           error_code=step.error_code, pending_id=step.pending_id)
 
 
 # ---------------- ① 确认前不发起请求（F15 验收第 2 条，最要紧的一条） ----------------

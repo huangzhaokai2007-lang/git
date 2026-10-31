@@ -21,6 +21,7 @@ import streamlit as st
 
 from agent import pending_slots, write_flow
 
+import bank_brand
 import premium_ui
 import time_inputs
 
@@ -79,6 +80,37 @@ def _submit(executor: ThreadPoolExecutor, session_id: str, item: dict, values: d
     st.rerun()
 
 
+def _card_picker(executor: ThreadPoolExecutor, session_id: str, item: dict,
+                 other_missing: list[str]) -> None:
+    """「选择收款人的银行卡」卡面：全部列出（无默认卡概念），点一张就继续。"""
+    from agent import payee_card_flow
+
+    slots = dict(item.get("slots") or {})
+    payee_id = str(slots.get("payee_id") or "")
+    cards = executor.submit(payee_card_flow.cards_of, payee_id).result()
+    name = str(slots.get("payee_name") or "")
+    st.markdown(bank_brand.style_css(), unsafe_allow_html=True)
+    with st.container(border=True, key="payee-card-picker"):
+        premium_ui.card_head("🏦 选择收款人的银行卡",
+                             f"{name} 有 {len(cards)} 张卡，请指定这次转到哪一张" if cards
+                             else "这位收款人还没有登记银行卡", tone="warn")
+        if not cards:
+            st.caption("先把这位收款人的银行卡登记上，或者换一位收款人。")
+            return
+        for card in cards:
+            label = f"{card['bank']} {card['card_no_mask']}"
+            #: 2026-10-31：卡面用**银行卡片**样式（品牌渐变 + 内联 SVG 标 + 掩码 + 卡种）。
+            st.markdown(bank_brand.card_html(card, holder=name), unsafe_allow_html=True)
+            if st.button("选择这张卡", key=f"pickcard-{card['card_id']}", width="stretch"):
+                turn = executor.submit(pending_slots.submit_form, session_id,
+                                       {"payee_card": card["card_id"]}).result()
+                import forms
+                forms._record(st.session_state, turn, f"（选择收款卡：{label}）")
+                st.rerun()
+        if other_missing:
+            st.caption("同时还需要：" + "、".join(_label(slot) for slot in other_missing))
+
+
 def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     """有未完成的补槽 → 画一张表单卡；没有就不画。"""
     item = executor.submit(pending_slots.peek, session_id).result()
@@ -96,6 +128,13 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     if executor.submit(payee_picker.pending, session_id).result():
         return
     if not missing:
+        return
+    #: 2026-10-31（用户要求）：缺的是「收款卡」时，不画文本框 —— 直接给**选卡卡面**。
+    if "payee_card" in missing:
+        _card_picker(executor, session_id, item, [slot for slot in missing if slot != "payee_card"])
+        return
+    #: 收款人卡内的转账用**卡内表单**收金额，通用填表卡不重复弹（选卡卡面上面已单独处理）。
+    if st.session_state.get("payee-inline-intent"):
         return
     with st.container(border=True):
         premium_ui.card_head("📝 还差这几项，直接填就好", "填完点「继续」；也可以照常在下面用一句话回答",
