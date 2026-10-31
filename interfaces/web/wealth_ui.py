@@ -294,7 +294,8 @@ def _profit_chart(items: list[Mapping[str, Any]]) -> None:
     zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
         color="#c4cbd5", strokeDash=[4, 4]).encode(y="y:Q")
     line = base.mark_line(strokeWidth=2).encode(
-        color=alt.Color("产品:N", legend=alt.Legend(title=None, orient="top", labelFontSize=10)),
+        color=alt.Color("产品:N", legend=alt.Legend(title=None, orient="top",
+                                                     labelFontSize=11, labelColor="#1a2230", symbolSize=90)),
         tooltip=[alt.Tooltip("月份:N"), alt.Tooltip("产品:N"),
                  alt.Tooltip("收益率:Q", format="+.2f")])
     points = base.mark_point(size=26, filled=True).encode(color=alt.Color("产品:N", legend=None))
@@ -358,7 +359,10 @@ def render_holdings(turn: Mapping[str, Any], *, ask: Callable[[str], None], key_
         left, right, action = st.columns([5, 3, 2])
         with left:
             st.markdown(
-                f"<div style='font-weight:600;color:#1a2230;font-size:.95rem;'>"
+                #: 产品名要压得住右边的数字：深蓝 + 加粗 + 略大一号。
+                #: 原来 #1a2230 / 600 / .95rem，和下面的灰色小字拉不开层次，看着「浅」。
+                f"<div style='font-weight:700;color:#0E3F8C;font-size:1.02rem;"
+                f"letter-spacing:.2px;'>"
                 f"{html.escape(str(item.get('name')))}</div>"
                 "<div style='font-size:.72rem;color:#94a3b8;'>"
                 f"年化 {html.escape(str(item.get('yield')))} · "
