@@ -64,8 +64,14 @@ OTP_CODE = "123456"                 # 来源：规格 §5 L2「demo 中固定 12
 
 
 def _now() -> datetime:
-    """取当前时间（单独抽出来是为了让测试能钉住「凌晨/短时高频」这类时间相关口径）。"""
-    return datetime.now()
+    """取当前时间（抽出来是为了让测试钉住「凌晨/短时高频」这类时间相关口径）。
+
+    2026-11-01：演示环境可开**演示时钟**（固定白天 12:00），避免深夜排练时每笔都被
+    
+ight 因子顶到 L3。风控规则本身一条没改，只是现在几点这个输入变了。
+    """
+    from guard import demo_clock
+    return demo_clock.moment(datetime.now())
 
 
 def resolve_payee(query: str) -> ToolResult:
