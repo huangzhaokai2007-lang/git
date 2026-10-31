@@ -18,7 +18,8 @@ from data import dao
 from data.seed import AS_OF
 from tools._query_common import ToolError, _dao_reject, _fail, _money_facts, _ok, current_user_id
 from tools import _wealth_products
-from tools._wealth_risk import (RISK_LABELS, RISK_SWING, _product_candles, _rank,
+from tools._wealth_risk import (RISK_LABELS, RISK_SWING, _daily_candles, _product_candles,
+                                _rank,
                                 _yield_text, require_assessment)
 from tools.schemas import ErrorCode, ToolResult
 
@@ -83,9 +84,23 @@ def _cumulative_facts(product_id: str, amount_cents: int, expected_yield: float,
     nav_current = int(candles[-1]["close"])
     pct = (nav_current - nav_purchase) / nav_purchase * 100 if nav_purchase else 0.0
     profit = amount_cents / 100 * pct / 100
+
+    #: 收益率曲线：从买入那根月 K 到今天，每根一个累计收益率（%）。
+    #: 和顶部那个总数用同一组数，图末点必然等于 `cum_profit_pct`。
+    series = [[row["period"], round((int(row["close"]) - nav_purchase) / nav_purchase * 100, 2)]
+              for row in candles if row["period"] >= entry["period"]] if nav_purchase else []
+
+    #: 当日收益：取日线最后两根（月 K 看不到一天的变化）。
+    daily = _daily_candles(product_id, expected_yield + swing, -swing)
+    today_pct = 0.0
+    if len(daily) >= 2 and daily[-2][4]:
+        today_pct = (daily[-1][4] - daily[-2][4]) / daily[-2][4] * 100
     return {"cum_profit_yuan": f"{profit:+,.2f}", "cum_profit_pct": f"{pct:+.2f}%",
             "cum_is_profit": pct >= 0, "nav_purchase": nav_purchase,
-            "nav_current": nav_current}
+            "nav_current": nav_current,
+            "today_profit_yuan": f"{amount_cents / 100 * today_pct / 100:+,.2f}",
+            "today_pct": f"{today_pct:+.2f}%",
+            "cum_series": series}
 
 
 def _rows(user_id: str) -> list[dict]:
@@ -163,7 +178,12 @@ def list_holdings() -> ToolResult:
     total_profit = sum(float(item["cum_profit_yuan"].replace(",", "")) for item in items)
     facts = {"items": items, "total_count": len(items), **_money_facts(total, "total_amount"),
              #: 合计累计收益（元，带符号）—— 持仓页顶部和回执都用它，别在界面加总。
-             "cum_profit_total_yuan": f"{total_profit:+,.2f}"}
+             "cum_profit_total_yuan": f"{total_profit:+,.2f}",
+             #: 总收益率 = 合计累计收益 ÷ 合计本金（工具层算，界面只显示）
+             "cum_pct_total": (f"{total_profit / (total / 100) * 100:+.2f}%"
+                               if total else "+0.00%"),
+             "today_profit_total_yuan": f"{sum(float(i['today_profit_yuan'].replace(',', '')) for i in items):+,.2f}",
+             "as_of": AS_OF.isoformat()}
     data = {"items": [{key: item[key] for key in FIELDS + ("amount", "amount_yuan")}
                       for item in items],
             "total_count": len(items), "total_amount": total}

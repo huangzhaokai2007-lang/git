@@ -261,32 +261,52 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             ask(f"买 {item.get('name')} {int(amount)} 元")
 
 
-def _profit_color(value: object) -> str:
-    """A 股口径：赚了红、亏了绿。零值按灰色处理，避免「+0.00% 却是红的」。"""
+def _profit_color(value: object, *, on_dark: bool = False) -> str:
+    """A 股口径：赚了红、亏了绿；零值灰。深色底用浅一档保证对比度。"""
     text = str(value or "").replace(",", "").replace("+", "")
     try:
         number = float(text.rstrip("%"))
     except ValueError:
-        return "#94a3b8"
+        return "#c9d8f0" if on_dark else "#94a3b8"
     if number > 0:
-        return "#c0392b"
+        return "#ff8a80" if on_dark else "#c0392b"
     if number < 0:
-        return "#2e8b57"
-    return "#94a3b8"
+        return "#7bd88f" if on_dark else "#2e8b57"
+    return "#c9d8f0" if on_dark else "#94a3b8"
+
+
+def _profit_chart(items: list[Mapping[str, Any]]) -> None:
+    """各持仓的**累计收益率曲线**（%）：横轴月份，纵轴收益率，0% 处一条基准线。"""
+    import altair as alt
+    import pandas as pd
+
+    rows = [{"月份": period, "产品": str(item.get("name")), "收益率": pct}
+            for item in items for period, pct in (item.get("cum_series") or [])]
+    if not rows:
+        return
+    frame = pd.DataFrame(rows)
+    base = alt.Chart(frame).encode(
+        x=alt.X("月份:N", title=None, axis=alt.Axis(labelAngle=-45, labelFontSize=10,
+                                                    tickCount=8, grid=False)),
+        y=alt.Y("收益率:Q", title="累计收益率（%）",
+                axis=alt.Axis(labelFontSize=10, grid=True, gridColor="#EEF0F3",
+                              format="+.0f")))
+    zero = alt.Chart(pd.DataFrame({"y": [0]})).mark_rule(
+        color="#c4cbd5", strokeDash=[4, 4]).encode(y="y:Q")
+    line = base.mark_line(strokeWidth=2).encode(
+        color=alt.Color("产品:N", legend=alt.Legend(title=None, orient="top", labelFontSize=10)),
+        tooltip=[alt.Tooltip("月份:N"), alt.Tooltip("产品:N"),
+                 alt.Tooltip("收益率:Q", format="+.2f")])
+    points = base.mark_point(size=26, filled=True).encode(color=alt.Color("产品:N", legend=None))
+    st.altair_chart((zero + line + points).properties(height=210).interactive(), width="stretch")
 
 
 def render_holdings(turn: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
                     daily_loader: Callable[[str, str], Mapping[str, Any]] | None = None) -> None:
-    """持仓页：**合计 + 每只一张卡（K 线 / 还能带来多少 / 赎回）**。
+    """持仓页：**总盈亏 → 摘要 → 收益率曲线 → 明细**，对齐券商「资产分析」的读法。
 
-    和推荐卡同一套视觉语言 —— 用户在同一条业务线里不该看到两种排版。
-    与推荐卡的区别：
-    - 金额是**实际持有**，不是起购额；
-    - 收益给的是「**还能带来多少**」（按剩余期限算），不是每万元标尺；
-    - 有赎回按钮。
-
-    **数据来源**：金额/年化/到期/收益预估全部来自 `list_holdings` 的 facts（铁律 2），
-    界面只排版；K 线走 T14b 按需拉取（持仓 facts 不带 candles，避免每次进页面都扛 25 只）。
+    顺序是刻意的：先回答「赚了还是亏了」，再回答「哪只在赚」，最后才是操作。
+    所有数字来自 `list_holdings` 的 facts（铁律 2），界面只排版、只上色。
     """
     facts = turn.get("facts") or {}
     items = facts.get("items") or []
@@ -294,84 +314,71 @@ def render_holdings(turn: Mapping[str, Any], *, ask: Callable[[str], None], key_
         st.markdown(turn.get("reply") or "您目前没有持有中的理财产品。")
         return
 
-    #: 合计行（数字来自 facts；回执原文不再上屏，避免同一份数据出现两遍）
+    profit = str(facts.get("cum_profit_total_yuan") or "+0.00")
+    pct = str(facts.get("cum_pct_total") or "+0.00%")
+    color = _profit_color(profit, on_dark=True)
+
+    #: 顶部总览：和券商 App 一样，第一眼先看「赚了多少、几个点」。
     st.markdown(
-        "<div style='display:flex;align-items:baseline;gap:.5rem;margin:.1rem 0 .5rem;'>"
-        f"<span style='font-size:1.5rem;font-weight:700;line-height:1;'>"
-        f"{html.escape(str(facts.get('total_amount_yuan', '0.00')))}</span>"
-        "<span style='font-size:.78rem;color:#94a3b8;'>持有合计（元）</span>"
-        f"<span style='font-size:.78rem;color:#94a3b8;margin-left:.4rem;'>"
-        f"{html.escape(str(facts.get('total_count', len(items))))} 只</span></div>",
-        unsafe_allow_html=True)
-    #: 合计累计收益：颜色按 A 股口径（红盈绿亏），数字来自工具层，界面只上色。
-    total_profit = str(facts.get("cum_profit_total_yuan") or "")
-    if total_profit:
-        st.markdown(
-            "<div style='display:flex;align-items:baseline;gap:.4rem;margin:.1rem 0 .55rem;'>"
-            f"<span style='font-size:1.15rem;font-weight:700;color:{_profit_color(total_profit)};'>"
-            f"{html.escape(total_profit)} 元</span>"
-            "<span style='font-size:.75rem;color:#94a3b8;'>累计收益</span></div>",
-            unsafe_allow_html=True)
+        "<div style='background:linear-gradient(135deg,#0E3F8C 0%,#2A5FB8 100%);"
+        "border-radius:10px;padding:16px 20px;'>"
+        "<div style='font-size:.78rem;color:#c9d8f0;'>累计收益（元）</div>"
+        f"<div style='font-size:2.3rem;font-weight:700;line-height:1.15;color:#ffffff;'>"
+        f"{html.escape(profit)}</div>"
+        f"<div style='font-size:.95rem;font-weight:600;color:{color};'>"
+        f"收益率 {html.escape(pct)}</div>"
+        "<div style='font-size:.72rem;color:#9fb4d8;margin-top:6px;'>"
+        f"持有 {html.escape(str(facts.get('total_count', len(items))))} 只 · "
+        f"本金 {html.escape(str(facts.get('total_amount_yuan')))} 元 · "
+        f"截至 {html.escape(str(facts.get('as_of', '')))}</div>"
+        "</div>", unsafe_allow_html=True)
 
-    cols = st.columns(min(len(items), 2))
+    #: 摘要行：当日 vs 累计（券商页面的固定组合）
+    today = str(facts.get("today_profit_total_yuan") or "+0.00")
+    st.markdown(
+        "<div style='display:flex;gap:1.6rem;padding:.55rem .2rem .35rem;"
+        "border-bottom:1px solid #EEF0F3;margin-bottom:.5rem;'>"
+        f"<div><div style='font-size:.7rem;color:#94a3b8;'>当日收益</div>"
+        f"<div style='font-size:1rem;font-weight:600;color:{_profit_color(today)};'>"
+        f"{html.escape(today)} 元</div></div>"
+        f"<div><div style='font-size:.7rem;color:#94a3b8;'>累计收益</div>"
+        f"<div style='font-size:1rem;font-weight:600;color:{_profit_color(profit)};'>"
+        f"{html.escape(profit)} 元</div></div>"
+        f"<div><div style='font-size:.7rem;color:#94a3b8;'>持仓市值</div>"
+        f"<div style='font-size:1rem;font-weight:600;color:#1a2230;'>"
+        f"{html.escape(str(facts.get('total_amount_yuan')))} 元</div></div>"
+        "</div>", unsafe_allow_html=True)
+
+    _profit_chart(items)
+
+    #: 明细：一行一只，右侧赎回。数字靠右对齐，方便上下对比。
+    st.markdown("<div style='font-size:.72rem;color:#94a3b8;margin:.35rem 0 .1rem;'>"
+                "持仓明细</div>", unsafe_allow_html=True)
     for index, item in enumerate(items):
-        with cols[index % len(cols)]:
-            _holding_card(item, ask=ask, key_prefix=key_prefix, daily_loader=daily_loader)
-
-
-def _holding_card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
-                  daily_loader: Callable[[str, str], Mapping[str, Any]] | None) -> None:
-    """一只持仓一张卡：名称 → 持有金额 → 关键信息 → K 线 → 还能带来多少 → 赎回。"""
-    pid = str(item.get("product_id"))
-    with st.container(border=True):
-        st.markdown(f"**{item.get('name')}**")
-        st.markdown(
-            "<div style='display:flex;align-items:baseline;gap:.45rem;margin:.1rem 0 .15rem;'>"
-            f"<span style='font-size:1.55rem;font-weight:700;line-height:1;'>"
-            f"{html.escape(str(item.get('amount_yuan')))}</span>"
-            "<span style='font-size:.75rem;color:#94a3b8;'>持有金额（元）</span></div>"
-            #: **累计收益**：用户最想看的数字，放在持有金额正下方、加粗上色。
-            #: 正负号和颜色都由工具层的 `cum_is_profit` 决定，界面不判断业务含义。
-            + (f"<div style='display:flex;align-items:baseline;gap:.35rem;margin:.05rem 0 .1rem;'>"
-               f"<span style='font-size:1.05rem;font-weight:700;color:{_profit_color(item.get('cum_profit_yuan'))};'>"
-               f"{html.escape(str(item.get('cum_profit_yuan')))} 元</span>"
-               f"<span style='font-size:.75rem;color:{_profit_color(item.get('cum_profit_yuan'))};'>"
-               f"{html.escape(str(item.get('cum_profit_pct')))}</span>"
-               "<span style='font-size:.7rem;color:#94a3b8;'>累计收益</span></div>"
-               if item.get("cum_profit_yuan") else "")
-            + "<div style='font-size:.8rem;color:#94a3b8;'>"
-            f"年化 {html.escape(str(item.get('yield')))} · "
-            f"买入 {html.escape(str(item.get('purchase_date')))} · "
-            f"{html.escape(_term_text(item))}</div>",
-            unsafe_allow_html=True)
-
-        #: K 线：持仓 facts 不带 candles，按需拉月 K 并缓存（和推荐卡同一个 loader）。
-        cache_key = f"{key_prefix}-hk-{pid}"
-        loaded = st.session_state.get(cache_key)
-        if loaded is None and daily_loader is not None:
-            result = daily_loader(pid, "monthly")
-            loaded = result if result and result.get("ok") else {}
-            st.session_state[cache_key] = loaded
-        if loaded and loaded.get("candles"):
-            _kline(loaded["candles"])
-
-        #: 「还能带来多少」：数字来自工具层（`to_maturity_income_yuan` / `annual_income_yuan`），
-        #: 界面只选一个显示，不做乘法。已到期的显示「已到期」，不显示 0.00 元。
-        remaining = int(item.get("remaining_days") or 0)
-        if item.get("maturity_date") and remaining == 0:
-            line = "<span style='color:#94a3b8;'>已到期，随时可赎</span>"
-        elif item.get("to_maturity_income_yuan"):
-            line = (f"持有到期预计还能带来约 <b>{html.escape(str(item['to_maturity_income_yuan']))} 元</b>"
-                    f"（剩余 {remaining} 天 · 模拟）")
-        else:
-            line = (f"持有一年预计带来约 <b>{html.escape(str(item.get('annual_income_yuan', '0.00')))} 元</b>"
-                    "（活期 · 模拟）")
-        st.markdown(f"<div style='font-size:.78rem;color:#64748b;margin:.1rem 0 .45rem;'>{line}</div>",
-                    unsafe_allow_html=True)
-
-        if st.button("赎回", key=f"{key_prefix}-redeem-{item.get('holding_id') or pid}",
-                     width="stretch"):
-            ask(f"赎回 {item.get('name')}")
+        left, right, action = st.columns([5, 3, 2])
+        with left:
+            st.markdown(
+                f"<div style='font-weight:600;color:#1a2230;font-size:.95rem;'>"
+                f"{html.escape(str(item.get('name')))}</div>"
+                "<div style='font-size:.72rem;color:#94a3b8;'>"
+                f"年化 {html.escape(str(item.get('yield')))} · "
+                f"买入 {html.escape(str(item.get('purchase_date')))} · "
+                f"{html.escape(_term_text(item))}</div>",
+                unsafe_allow_html=True)
+        with right:
+            st.markdown(
+                f"<div style='text-align:right;font-weight:700;font-size:.98rem;"
+                f"color:{_profit_color(item.get('cum_profit_yuan'))};'>"
+                f"{html.escape(str(item.get('cum_profit_yuan')))} 元</div>"
+                f"<div style='text-align:right;font-size:.72rem;"
+                f"color:{_profit_color(item.get('cum_profit_pct'))};'>"
+                f"{html.escape(str(item.get('cum_profit_pct')))} · 持有 "
+                f"{html.escape(str(item.get('amount_yuan')))} 元</div>",
+                unsafe_allow_html=True)
+        with action:
+            if st.button("赎回", key=f"{key_prefix}-redeem-{item.get('holding_id') or index}",
+                         width="stretch"):
+                ask(f"赎回 {item.get('name')}")
 
 
 def _term_text(item: Mapping[str, Any]) -> str:
@@ -393,9 +400,8 @@ SORT_CHOICES = ("收益 ↓", "期限 ↑")
 
 
 def filter_by_term(items: list[Mapping[str, Any]], choice: str) -> list[Mapping[str, Any]]:
-    """按期限档位筛「工具已返回的 items」。
+    """按期限档位筛「工具已返回的 items」。纯视图筛选，不动风险上限。
 
-    **纯视图筛选**：不重新查工具、不动风险上限（那是工具层的职责）。
     活期产品 `term=0` 归入「1 年内」—— 它确实随时能取。
     """
     def keep(term: object) -> bool:
