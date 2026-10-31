@@ -85,8 +85,18 @@ def list_scheduled(status: str | None = None) -> ToolResult:
         if cycle and row["status"] == "pending":
             from tools._transfer_schedule_ops import _next_occurrence
             nxt = _next_occurrence(str(row["execute_at"]), cycle)
+        #: 2026-10-31（用户要求）：查看预约时要能看到「转到哪张卡」。
+        #: 卡信息来自 payee_card（同一份掩码口径），没记卡的旧预约就留空、不编造。
+        card = None
+        if row.get("payee_card_id"):
+            card_row = dao.connection().execute(
+                "SELECT * FROM payee_card WHERE id = ?", (row["payee_card_id"],)).fetchone()
+            card = dict(card_row) if card_row is not None else None
         items.append({"schedule_id": row["id"], "payee_id": row["payee_id"],
                       "payee_name": (payee or {}).get("name") or "",
+                      "payee_card_id": str(row.get("payee_card_id") or ""),
+                      "payee_card_bank": (card or {}).get("bank", ""),
+                      "payee_card_mask": (card or {}).get("card_no_mask", ""),
                       "execute_at": row["execute_at"], "status": row["status"],
                       "repeat_cycle": cycle,
                       "repeat_until": str(row.get("repeat_until") or ""),

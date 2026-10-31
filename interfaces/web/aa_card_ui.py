@@ -15,7 +15,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import aa_flow, confirm_card, payee_flow, payee_picker, write_flow
+from agent import (aa_flow, confirm_card, my_card_flow, payee_flow,
+                   payee_picker, write_flow)
 
 import premium_ui
 import step_record
@@ -261,6 +262,9 @@ def _confirm_panel(executor: ThreadPoolExecutor, session_id: str, confirmation) 
             table += [f"| {item.get('name') or '—'} | {item.get('yuan') or '0.00'} |"
                       for item in items]
             st.markdown("\n".join(table))
+        if filled.get("my_card_mask"):        #: 2026-10-31：收款到我的哪张卡
+            st.markdown(f"**收款到**　{filled.get('my_card_type') or '储蓄卡'} "
+                        f"{filled.get('my_card_bank')} {filled.get('my_card_mask')}")
         st.markdown(f"**我承担**　{filled.get('initiator_share_yuan', '—')} 元")
         st.markdown(f"**待收**　{filled.get('collect_yuan', '—')} 元")
         left, middle, right = st.columns(3, vertical_alignment="center")
@@ -429,6 +433,21 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
         if not people:
             st.caption("选好参与人后这里会显示均摊金额。")
             return
+        #: 2026-10-31（用户需求）：群收款也要能选「收款到我哪张卡」——列我名下已绑定的卡。
+        _my_cards = executor.submit(my_card_flow.cards_of).result()
+        _picked_card = ""
+        if _my_cards:
+            _card_labels = {card["card_id"]: (f"{card['card_type']} {card['bank']} "
+                                              f"{card['card_no_mask']}"
+                                              + ("　（默认）" if card["is_default"] else ""))
+                            for card in _my_cards}
+            _card_ids = list(_card_labels)
+            _saved = str(st.session_state.get("aa-my-card") or "")
+            _picked_card = st.selectbox(
+                "收款到我的卡", _card_ids,
+                index=_card_ids.index(_saved) if _saved in _card_ids else 0,
+                format_func=lambda card_id: _card_labels[card_id], key="aa-my-card")
+            st.caption("钱会收到这张卡；换卡不影响参与人和金额。")
         amounts: dict[str, str] = {}
         #: 2026-10-31（用户：这两个按钮样式不一样）：和「修改参与人」统一成**按钮 + 展开区**
         _amounts_open = bool(st.session_state.get("aa-amounts-open"))
@@ -483,6 +502,8 @@ def _create_panel(executor: ThreadPoolExecutor, session_id: str) -> None:
             #: 2026-10-30 修：默认值就是均摊值，**不要**当"按人金额"发下去 ——
             #: 含我口径下 Σ每人 ≠ 含我总额，会被判「每人金额合计与总金额不符」，
             #: 卡面停在发起态 → 用户再点一次又会触发收款人解析（用户实测的"还是会解析"）。
+            if _picked_card:
+                slots["my_card_id"] = _picked_card
             filled = {pid: f"{value:,.2f}" for pid, value in _applied["others"].items()
                       if abs(float(value) - _per) > 0.005}
             if filled:

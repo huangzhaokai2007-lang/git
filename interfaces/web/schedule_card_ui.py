@@ -57,7 +57,10 @@ def _row(executor: ThreadPoolExecutor, session_id: str, item: dict) -> None:
     when = str(item["execute_at"]).replace("T", " ")
     opened = st.session_state.get("sched-edit") == schedule_id
     left, run_col, edit_col, cancel_col = st.columns([4.6, 1, 1, 1], vertical_alignment="center")
-    left.markdown(f"**{when}** · {item['payee_name']} · **{item['amount_yuan']} 元**"
+    #: 2026-10-31（用户要求）：查看预约时也要显示「转到哪张卡」（老预约没记卡就不印）。
+    card_bit = (f" · {item['payee_card_bank']} {item['payee_card_mask']}"
+                if item.get("payee_card_mask") else "")
+    left.markdown(f"**{when}** · {item['payee_name']}{card_bit} · **{item['amount_yuan']} 元**"
                   f"　`{_cycle_badge(item)}`")
     if run_col.button("立即执行", key=f"run-{schedule_id}", width="stretch",
                       help="现在就从账户扣款转账，不再等到预约时间"):

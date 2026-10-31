@@ -125,6 +125,7 @@ CREATE TABLE aa_request (                         -- F22 追加：AA 收款请�
   split_mode TEXT NOT NULL,                       -- equal | custom
   status TEXT NOT NULL,                           -- active | done | expired | cancelled
   created_at TEXT NOT NULL,
+  my_card_id TEXT,                                   -- 2026-10-31：收款到我哪张卡（NULL = 默认储蓄卡）
   expire_at TEXT NOT NULL                         -- 创建时刻 + 24h（ISO；到点惰性判 expired）
 );
 CREATE TABLE aa_share (                           -- AA 里每个收款人一份（每人已付状态）
