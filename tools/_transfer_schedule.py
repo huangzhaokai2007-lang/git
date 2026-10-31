@@ -98,6 +98,17 @@ def list_scheduled(status: str | None = None) -> ToolResult:
 
 # ---------------- T21 schedule_transfer（落预约 · 不扣款） ----------------
 
+def card_facts_of(card_id: str | None) -> dict:
+    """按卡 id 取出「收款卡」事实（卡面只能印这里来的值，铁律 2）。"""
+    if not card_id:
+        return {}
+    from tools import _payee_cards as payee_cards_mod
+    conn = dao.connection()
+    row = conn.execute("SELECT * FROM payee_card WHERE id = ? AND user_id = ?",
+                       (card_id, current_user_id())).fetchone()
+    return payee_cards_mod.card_facts(dict(row)) if row is not None else {}
+
+
 def schedule_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
     """T21 落一条定时转账预约。**此刻不扣款** —— 「预约时间到达前不能按即时转账扣款」。
 
@@ -125,6 +136,7 @@ def schedule_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
     facts = {"schedule_id": schedule_id, "payee_id": token["payee_id"],
              "payee_name": token["payee_name"], "execute_at": execute_at,
              "status": STATUS_PENDING, "tier": token["tier"],
+             **card_facts_of(token.get("payee_card_id")),
              **_money_facts(token["amount"], "amount")}
     data = {"schedule_id": schedule_id, "execute_at": execute_at}
     message = (f"已预约 {execute_at} 向 {token['payee_name']} 转账 {facts['amount_yuan']} 元，"
@@ -136,10 +148,11 @@ def schedule_transfer(preview_token: str, otp: str | None = None) -> ToolResult:
         with transaction(conn):
             conn.execute(
                 "INSERT INTO scheduled_transfer (id, user_id, payee_id, amount, execute_at, status,"
-                " tier, token, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " tier, token, created_at, payee_card_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (schedule_id, current_user_id(), token["payee_id"], token["amount"], execute_at,
                  STATUS_PENDING, token["tier"], preview_token,
-                 transfer._now().isoformat(timespec="seconds")))
+                 transfer._now().isoformat(timespec="seconds"),
+                 token.get("payee_card_id")))
             dao.insert_audit(token["trace_id"], current_session_id(), actor="agent",
                              intent="transfer_scheduled", tool=SCHEDULE_TOOL,
                              params_json={"schedule_id": schedule_id, "payee_id": token["payee_id"],

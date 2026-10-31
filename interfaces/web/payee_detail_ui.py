@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import streamlit as st
 
-from agent import confirm_card, payee_risk, pending_slots, write_flow
+from agent import confirm_card, payee_card_flow, payee_risk, pending_slots, write_flow
 
 import premium_ui
 import step_record
@@ -156,6 +156,16 @@ def _detail(executor: ThreadPoolExecutor, session_id: str, person: dict, confirm
             card_no = person.get("card_no") or "未记录"
             recent = (f"最近转账 {str(person['last_used_ts'])[:10]}"
                       if person.get("last_used_ts") else "还没有转账记录")
+            #: 2026-10-31（用户需求）：收款人可能有多张卡（不同银行）—— 这里全列出来，
+            #: 转账时不选卡就用**默认卡**（带 ⭐）。
+            cards = executor.submit(payee_card_flow.cards_of, person["payee_id"]).result()
+            if cards:
+                chips = "　".join(
+                    f"{card['bank']} {card['card_no_mask']}" + (" ⭐" if card["is_default"] else "")
+                    for card in cards)
+                st.caption(f"银行卡（{len(cards)} 张）：{chips}")
+            else:
+                st.caption("银行卡：未登记")
             st.caption(f"卡号 {card_no} · 白名单有效期 {expire} · {recent}")
             _actions(executor, session_id, person, who)
         if side is not None:

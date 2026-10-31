@@ -190,7 +190,8 @@ def _prepare_transfer(filled: dict) -> Prepared:
     `_prepare_scheduled`（F16 已实现：落 `scheduled_transfer` 待执行行、到点才扣款），
     两条路径分开，本函数不传 `schedule` 是**设计如此**，不是缺口。
     """
-    preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"])
+    preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"],
+                                       payee_card_id=filled.get("payee_card_id"))
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
@@ -215,6 +216,8 @@ def _card_transfer(intent: str, filled: dict, facts: Mapping, tier: str,
     return confirm_card.CardInput(
         title="转账确认卡", intent_cn=TRANSFER_CN.get(intent, intent),
         rows=[("收款人", f"{facts['payee_name']}（{masked}）"),
+              *([("收款卡", f"{facts['payee_card_bank']} {facts['payee_card_mask']}")]
+                if facts.get("payee_card_mask") else []),
               ("金额", f"{facts['amount_yuan']} 元"),
               ("预计到账", confirm_card.expected_arrival(tier)),
               #: 2026-10-24 人类规格「转账卡片：转账后余额 / 今日剩余额度」——
@@ -249,7 +252,8 @@ def _prepare_scheduled(filled: dict) -> Prepared:
     之外的数字 → 整张卡降级（铁律 2 守门），故预约时间必须可溯源。
     """
     preview = transfer.preview_transfer(filled["payee_id"], filled["amount_cents"],
-                                        schedule=str(filled["schedule"]))
+                                        schedule=str(filled["schedule"]),
+                                        payee_card_id=filled.get("payee_card_id"))
     if not preview.ok:
         return Prepared(ok=False, error_code=_code_of(preview), message=preview.message)
     masked = confirm_card.mask_phone(str(filled.get("masked_phone") or ""))
@@ -307,6 +311,8 @@ def _card_scheduled(intent: str, filled: dict, facts: Mapping, tier: str,
         rows.insert(3, ("循环方式", cycle))
         if filled.get("repeat_until"):
             rows.insert(4, ("循环结束", f"{filled['repeat_until']}（之后不再续期）"))
+    if facts.get("payee_card_mask"):                        # 2026-10-31：转到哪张卡也要印出来
+        rows.insert(1, ("收款卡", f"{facts['payee_card_bank']} {facts['payee_card_mask']}"))
     if facts.get("duplicate_hint"):                        # 重复预约：卡面点明，别静默多建一笔
         rows.append(("⚠️ 重复提示", str(facts["duplicate_hint"])))
     return confirm_card.CardInput(

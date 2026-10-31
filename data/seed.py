@@ -58,6 +58,20 @@ PAYEE_ROWS = (
     ("payee_0004", "张小美", "136****3004", "中国银行", 0, "妈妈,家人", None, None),
     ("payee_0005", "赵六", "135****4005", "农业银行", 0, "朋友", None, None),          # 从未转账 → last_used_ts 为 NULL
 )
+#: 收款人的**多张银行卡**（2026-10-31 用户需求）：id, payee_id, 银行, 尾号, 卡种, 是否默认
+#: 每位 1–3 张、可以不同银行；**每人的第一张是默认卡**（转账不选卡时就用它）。
+PAYEE_CARD_ROWS = (
+    ("pc_0001_a", "payee_0001", "招商银行", "1001", "储蓄卡", 1),
+    ("pc_0001_b", "payee_0001", "工商银行", "1004", "储蓄卡", 0),
+    ("pc_0002_a", "payee_0002", "工商银行", "1002", "储蓄卡", 1),
+    ("pc_0002_b", "payee_0002", "建设银行", "1005", "信用卡", 0),
+    ("pc_0003_a", "payee_0003", "建设银行", "2003", "储蓄卡", 1),
+    ("pc_0003_b", "payee_0003", "农业银行", "2007", "储蓄卡", 0),
+    ("pc_0003_c", "payee_0003", "中国银行", "2009", "信用卡", 0),
+    ("pc_0004_a", "payee_0004", "中国银行", "3004", "储蓄卡", 1),
+    ("pc_0005_a", "payee_0005", "农业银行", "4005", "储蓄卡", 1),
+    ("pc_0005_b", "payee_0005", "交通银行", "4008", "储蓄卡", 0),
+)
 TRANSFER_PAYEES = (("payee_0001", "李四"), ("payee_0002", "李四"), ("payee_0003", "王五"), ("payee_0004", "张小美"))
 #: 理财产品：id, 名称, 风险等级, 期限天, 预期年化（百分数数值，3.20 = 3.20%）, 起购金额（分）
 #: **收益率按 2025–2026 年真实市场水平校准**（2026-10-29）：货基 1.1–1.3%（2025 末中位数 1.23%）、
@@ -306,6 +320,12 @@ def _write(conn: sqlite3.Connection, rows: list[tuple], balances: dict[str, int]
                                               "tags", "whitelist_quota", "last_used_ts", "whitelist_expire"),
                               tuple((p[0], USER_ID, p[1], p[2], p[3], p[4], p[5], p[6],
                                      payee_usage.get(p[0]), p[7]) for p in PAYEE_ROWS))
+    counts["payee_card"] = _insert(conn, "payee_card",
+                                   ("id", "payee_id", "user_id", "bank", "card_no_mask",
+                                    "card_type", "is_default", "created_at"),
+                                   tuple((c[0], c[1], USER_ID, c[2],
+                                          f"6222 **** **** {c[3]}", c[4], c[5], AS_OF.isoformat())
+                                         for c in PAYEE_CARD_ROWS))
     counts["subscription"] = _insert(conn, "subscription", ("id", "user_id", "merchant", "amount", "cycle",
                                                             "next_charge_date", "source_txn_id", "status"),
                                      tuple((s.id, USER_ID, s.merchant, s.amount, s.cycle, s.next_charge_date,

@@ -43,6 +43,7 @@ TABLES: tuple[str, ...] = (
     "wealth_product",
     "holding",
     "payee",
+    "payee_card",                            # 2026-10-31：收款人的多张银行卡（T51 / 选卡转账）
     "audit_log",
     "risk_event",
     "idempotency",

@@ -55,6 +55,17 @@ CREATE TABLE payee (
   blacklist INTEGER NOT NULL DEFAULT 0,           -- 1=黑名单；与 is_whitelist 互斥
   blacklist_reason TEXT                           -- 拉黑原因，可空
 );
+CREATE TABLE payee_card (                       -- 2026-10-31（SPEC-CHANGE 已批）：收款人的多张银行卡
+  id TEXT PRIMARY KEY,                           -- pc_<uuid10>
+  payee_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,                         -- 归属（fail-closed：查询一律带上）
+  bank TEXT NOT NULL,                            -- 银行行名（与 card 表同一套中文叫法）
+  card_no_mask TEXT NOT NULL,                    -- 6222 **** **** 0001（完整号绝不入库 · 铁律 8）
+  card_type TEXT NOT NULL DEFAULT '储蓄卡',       -- 储蓄卡 | 信用卡
+  is_default INTEGER NOT NULL DEFAULT 0,         -- 1=该收款人的默认卡（转账不选卡时用它）
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE audit_log (
   id TEXT PRIMARY KEY, trace_id TEXT NOT NULL, session_id TEXT NOT NULL,
   ts TEXT NOT NULL, actor TEXT NOT NULL,          -- user | agent | system
@@ -88,7 +99,8 @@ CREATE TABLE scheduled_transfer (                 -- F16：定时转账预约（
   txn_id TEXT,                                    -- 成功后回填
   fail_reason TEXT,                               -- 失败原因码（INSUFFICIENT_FUNDS 等）
   repeat_cycle TEXT,                              -- 循环预约：weekly | monthly；NULL = 一次性（T34 设/T35 续期）
-  repeat_until TEXT                               -- 循环结束日（ISO 日期）；NULL = 一直循环（2026-10-24 人类规格「周期结束条件」）
+  repeat_until TEXT,                              -- 循环结束日（ISO 日期）；NULL = 一直循环（2026-10-24 人类规格「周期结束条件」）
+  payee_card_id TEXT                              -- 2026-10-31：预约时选定的收款卡（NULL = 当时的默认卡）
 );
 CREATE TABLE gift_order (                         -- F20 追加：送礼订单（T16 锁款成功后由 T38 落一条）
   id TEXT PRIMARY KEY,                            -- ord_<uuid12>

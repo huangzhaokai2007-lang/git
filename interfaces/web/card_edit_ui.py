@@ -19,7 +19,7 @@ import streamlit as st
 
 import premium_ui
 import time_inputs
-from agent import card_draft, confirm_card, write_flow
+from agent import card_draft, confirm_card, payee_card_flow, write_flow
 
 #: 这些槽位是「时间」，必须用日历选（用户 2026-10-30 反复强调）
 _TIME_FIELDS = {"schedule": "时刻", "date": "日期", "expire": "日期"}
@@ -55,6 +55,9 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         tag = "card"
     with st.container(border=True, key="card-edit-box"):
         premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
+        #: 2026-10-31（用户需求）：转账 / 定时转账可以在卡上选「转到他的哪张卡」。
+        if draft.kind in ("transfer_single", "transfer_scheduled"):
+            _card_picker(executor, session_id, confirmation, tag)
         changed: dict[str, str] = {}
         for field in draft.fields:
             #: 框里显示**姓名**（用户要求）；同名重复解析的问题在 `write_flow.edit` 里收口。
@@ -84,6 +87,37 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
 #: 循环频率选项（label → 周期码；空串 = 一次性，提交时转成「不循环」）
 _REPEAT_OPTIONS = {"（一次性）": "", "每日": "daily", "每周": "weekly", "每月": "monthly"}
 _CYCLE_LABEL = {"daily": "每日", "weekly": "每周", "monthly": "每月"}
+
+
+def _card_picker(executor: ThreadPoolExecutor, session_id: str, confirmation,
+                 tag: str) -> None:
+    """「🏦 选择银行卡」：列出该收款人的全部卡，选一张就重新预检。
+
+    卡列表来自 agent 层（`payee_card_flow.cards_of` → T51），本层不读库、也不造掩码。
+    """
+    filled = dict(getattr(confirmation, "filled", None) or {})
+    payee_id = str(filled.get("payee_id") or "")
+    cards = executor.submit(payee_card_flow.cards_of, payee_id).result()
+    if not cards:
+        return
+    labels = {card["card_id"]: (f"{card['bank']} {card['card_no_mask']}"
+                                + ("　（默认卡）" if card["is_default"] else ""))
+              for card in cards}
+    ids = list(labels)
+    current = str(filled.get("payee_card_id") or ids[0])
+    index = ids.index(current) if current in ids else 0
+    st.caption("🏦 选择银行卡：转到他的哪一张？")
+    picked = st.radio("收款卡", ids, index=index, key=f"payee-card-{tag}",
+                      format_func=lambda card_id: labels[card_id],
+                      label_visibility="collapsed")
+    col_ok, col_tip = st.columns([1, 3], vertical_alignment="center")
+    if col_ok.button("换成这张卡", key=f"payee-card-ok-{tag}", width="stretch",
+                     disabled=picked == current):
+        step = executor.submit(write_flow.edit, session_id, {"payee_card": picked}).result()
+        _record(step, f"（换收款卡：{labels[picked]}）")
+        st.session_state["card-edit-open"] = False
+        st.rerun()
+    col_tip.caption("换卡会重新预检一次；金额、档位、验证码要求都按新卡重算。")
 
 
 def _current_payee_value(executor: ThreadPoolExecutor, session_id: str, original: str) -> str:

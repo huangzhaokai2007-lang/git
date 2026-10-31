@@ -204,6 +204,9 @@ def edit(session_id: str, updates: Mapping) -> Step:
         if value in (None, ""):
             raw.pop(key, None)
             continue
+        if key == "payee_card":                  #: 2026-10-31：换收款卡 → 工具层参数名是 payee_card_id
+            raw["payee_card_id"] = str(value)
+            continue
         raw[key] = str(value)
         for stale in derived.get(key, ()):
             raw.pop(stale, None)
