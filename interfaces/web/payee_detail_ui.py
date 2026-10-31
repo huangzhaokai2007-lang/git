@@ -207,9 +207,13 @@ def _transfer_amount(executor, session_id: str, person: dict, who: dict) -> None
 
 
 def _row_label(person: dict, kind: str) -> str:
-    """整行按钮的文案：姓名 + 脱敏号 + 银行 + 类型（一行内对齐）。"""
-    return (f"**{person['name']}** {person['masked_phone']}"
-            f" {person.get('bank') or '—'} {KIND_CN[kind]}")
+    """整行按钮的文案：姓名 + 脱敏号 + 名单类型。
+
+    2026-11-01（用户实测）：**不再写银行** —— 每位收款人可能有多张卡（不同银行），
+    在列表里单列一个银行会误导；银行改由展开详情按卡列出。
+    """
+    return (f"**{person['name']}** {person['masked_phone']}"
+            f" {KIND_CN[kind]}")
 
 
 def render(executor: ThreadPoolExecutor, session_id: str, people: list[dict], confirmation=None) -> None:

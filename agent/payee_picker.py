@@ -21,16 +21,20 @@ _PENDING: dict[str, dict] = {}
 
 
 def capture(session_id: str, intent: str, slots: dict, candidates: list[dict],
-            *, slot: str = "payee") -> None:
+            *, slot: str = "payee", reason: str = "same_name") -> None:
     """记下「等用户在解析卡里挑一位」的现场（带时间戳，超过 5 分钟自动作废）。
 
     候选在这里按人类规格排序（**最近转账 → 白名单 → 姓名**）—— 只影响**卡面顺序**，
     不改追问文案（那一份由 `payee_clarify` 按工具事实包原序给出）。
+
+    `reason`：`same_name` = 同名多命中取其一；`pick` = 用户**没点名**，候选是全部可转账
+    收款人。界面据此换卡面标题（「找到 N 个同名」vs「先选一位收款人」），行为不变。
     """
     from agent.payee_resolve import order_candidates      # 延迟 import：避免顶层相互引用
     ordered = order_candidates([dict(item) for item in candidates])
     _PENDING[session_id] = {"intent": intent, "slots": dict(slots), "slot": slot,
-                            "candidates": ordered, "at": time.monotonic()}
+                            "candidates": ordered, "reason": str(reason or "same_name"),
+                            "at": time.monotonic()}
 
 
 def pending(session_id: str) -> dict | None:

@@ -5,6 +5,8 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v2 as components
 
+import bank_brand
+
 _FOCUS_JS = '\n'.join(Path(__file__).with_name(name).read_text(encoding='utf-8')
                      for name in ('card_chains.js', 'card_focus.js'))
 
@@ -16,6 +18,7 @@ CSS = """<style>
 .bank-chain-badge {transform-box:fill-box;transform-origin:center}
 .st-key-bank-gallery {position:relative;isolation:isolate}
 .st-key-bank-gallery [class*="st-key-bank-tile-"] {margin-bottom:0}
+.bank-tile-bank {font-size:14px;letter-spacing:.06em;color:#b7b1ff;margin:0 0 6px 2px;font-weight:600}
 .st-key-bank-gallery-details:has(.st-key-detail-close) {animation:bank-details-reveal .5s ease .4s both}
 .st-key-bank-gallery:not([data-focus=""]) [class*="st-key-detail-"] button:hover {animation:none;transform:none}
 @keyframes bank-details-reveal {
@@ -40,10 +43,10 @@ CSS = """<style>
  letter-spacing:.12em;margin:0 0 17px;text-align:left;font-weight:600;
 }
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button::before {
- content:"模拟银行  /  储蓄卡";position:absolute;left:28px;top:24px;
+ content:"储蓄卡";position:absolute;left:28px;top:24px;
  color:#e5edf5;font-size:14px;letter-spacing:.08em;
 }
-[class*="st-key-bank-tile-credit-"] [class*="st-key-detail-"] button::before {content:"模拟银行  /  信用卡"}
+[class*="st-key-bank-tile-credit-"] [class*="st-key-detail-"] button::before {content:"信用卡"}
 [class*="st-key-bank-tile-"] [class*="st-key-detail-"] button::after {
  content:"";position:absolute;left:28px;top:68px;width:40px;height:30px;
  border-radius:7px;border:1px solid #d1b777;
@@ -91,7 +94,35 @@ def deck(items: list[dict], selected: str | None, render_card, revision: int = 0
         st.markdown(f'<span class="bank-gallery-state" data-selected="{escape(selected or "", quote=True)}" data-revision="{revision}"></span>', unsafe_allow_html=True)
         for item in items:
             with st.container(key=f"bank-tile-{item['type']}-{item['card_id']}"):
+                #: 2026-11-01（用户要求）：卡面底色换成该行品牌配色（与转账时卡面同一套），
+                #: 并把**行标放到左侧、芯片挪到右侧**。只覆盖 background / ::before / ::after，
+                #: hover 抬升摇摆、聚焦光晕、详情展开等动画全部保留。
+                bank = item.get("bank")
+                if bank:
+                    a, b, glow = bank_brand._colors(bank)
+                    sel = (f'.st-key-bank-tile-{item["type"]}-{item["card_id"]} '
+                           f'[class*="st-key-detail-"] button')
+                    css = (f'<style>{sel}{{'
+                           f'background:radial-gradient(120% 150% at 10% -10%,{glow} 0%,transparent 42%),'
+                           f'linear-gradient(150deg,{a} 0%,{b} 68%,{a} 100%) !important;}}')
+                    logo = bank_brand._logo_uri(bank)
+                    if logo:
+                        # 行标：左上（取代原来的「储蓄卡/信用卡」文字）；加一层磨砂底，
+                        # 否则同色系行标（红标压红卡、蓝标压蓝卡）会糊进卡面看不清。
+                        css += (f'{sel}::before{{content:"";left:26px;top:22px;width:46px;height:46px;'
+                                f'border-radius:14px;background-color:rgba(255,255,255,.10);'
+                                f'border:1px solid rgba(255,255,255,.16);'
+                                f'background-image:url("{logo}");background-size:30px 30px;'
+                                f'background-position:center;background-repeat:no-repeat;}}')
+                        # 芯片：右下（原来是左上堆叠）
+                        css += (f'{sel}::after{{left:auto;top:auto;right:24px;bottom:20px;}}')
+                    css += '</style>'
+                    st.markdown(css, unsafe_allow_html=True)
                 st.markdown(f'<span class="bank-card-identity" data-card="{escape(item["card_id"], quote=True)}" data-status="{escape(item["status"], quote=True)}"></span>', unsafe_allow_html=True)
+                label_bits = [item.get("bank") or "模拟银行"]
+                if item.get("type_cn"):
+                    label_bits.append(str(item["type_cn"]))
+                st.markdown(f'<div class="bank-tile-bank">{escape(" · ".join(label_bits))}</div>', unsafe_allow_html=True)
                 render_card(item)
     animator = components.component('bank_card_focus', js=_FOCUS_JS)
     animator(key='cards-focus-animation')

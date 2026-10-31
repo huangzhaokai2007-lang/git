@@ -153,6 +153,7 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
     生成，且要**先收齐所有缺槽再一次性问**（「缺人 + 缺金额」两件事不互相盖掉）。
     """
     filled, missing, payee_facts = dict(slots), [], {}
+    pick_all: list[dict] = []                        # 没点名时的「全员候选」（出列表让用户挑人）
     if not filled.get("payee_id"):
         query = _payee_query(filled.get("payee"))
         if query:                                        # 有查询词才走关卡；空 → 留在 missing 用通用追问
@@ -168,7 +169,10 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
                 filled["payee_name"] = person["name"]
                 filled["masked_phone"] = person["masked_phone"]
         else:
+            #: 2026-11-01（用户实测）：只说「转账」时**不许**静默落到某个默认收款人——
+            #: 先拉出收款人列表让人自己选（选完再问金额/哪张卡）。候选形状与解析卡一致。
             missing.append("payee")
+            pick_all = payee_resolve.pickable_people()
     if filled.get("amount_cents") is None:
         cents = yuan_to_cents(filled.get("amount")) if filled.get("amount") is not None else None
         if cents is None:
@@ -187,7 +191,8 @@ def _shape_transfer(slots: Mapping) -> ShapeResult:
             missing.append("payee_card")
     clarify = payee_clarify.ask_for(payee_facts, missing) if payee_facts else ""
     return ShapeResult(filled=filled, missing=missing, clarify=clarify,
-                       candidates=list(payee_facts.get("candidates") or []))
+                       candidates=list(payee_facts.get("candidates") or []) or pick_all,
+                       pick_payee=bool(pick_all))
 
 
 def _prepare_transfer(filled: dict) -> Prepared:

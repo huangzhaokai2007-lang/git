@@ -68,6 +68,10 @@ class ShapeResult:
     #: 收款人**同名多命中**时的候选（`[{id,name,phone}]`）—— 界面据此出「解析卡」让人挑
     #: （设计 §3 关卡 1：「命中多个 → 出解析卡」）。空 = 无需选择。
     candidates: list[dict] = field(default_factory=list)
+    #: 用户**没点名**收款人（只说「转账」）时为 True：候选不是「同名取其一」，而是
+    #: 「全部收款人里挑一位」。界面据此把卡面标题从「找到 N 个同名收款人」换成
+    #: 「先选一位收款人」—— 转账必须先落在某个人身上，不许静默用默认收款人。
+    pick_payee: bool = False
 
 
 @dataclass(frozen=True)

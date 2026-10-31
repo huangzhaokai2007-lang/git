@@ -13,15 +13,18 @@
 
 from __future__ import annotations
 
+import base64
 import html
+from functools import lru_cache
+from pathlib import Path
 
 #: 银行 → (渐变起色, 渐变止色, 高光色)。**深色卡**配色：低饱和、压明度，靠金线提气。
 _GRADIENTS: dict[str, tuple[str, str, str]] = {
     "建设银行": ("#0A1C33", "#123857", "#2E6C9E"),
     "农业银行": ("#0B1F17", "#164434", "#2C7A5A"),
-    "中国银行": ("#2A0E10", "#4A1A1C", "#8C4340"),
-    "工商银行": ("#2B0A0E", "#4C1519", "#8E3A34"),
-    "招商银行": ("#26090A", "#451213", "#8A3A32"),
+    "中国银行": ("#1C080A", "#331012", "#6E2022"),
+    "工商银行": ("#3A0604", "#7C0F0A", "#E0352A"),
+    "招商银行": ("#2A0A0C", "#5A1014", "#B2232E"),
     "交通银行": ("#0A1730", "#152A50", "#2F5C93"),
     "邮储银行": ("#0A1E15", "#12402C", "#2A6E4C"),
     "中信银行": ("#250A0D", "#431518", "#7E3A36"),
@@ -35,25 +38,16 @@ _GRADIENTS: dict[str, tuple[str, str, str]] = {
 }
 _FALLBACK = ("#15161A", "#23252C", "#4A4E5A")
 
-#: 每家一个几何标记（viewBox 0 0 48 48，白色描边；纯几何，不是任何真实行标）
-_GLYPHS: dict[str, str] = {
-    "建设银行": '<path d="M10 30v-9h28v9"/><path d="M14 21V13h20v8"/>',
-    "农业银行": '<path d="M24 10v28"/><path d="M12 20c6-6 18-6 24 0"/><path d="M12 32c6-6 18-6 24 0"/>',
-    "中国银行": '<rect x="12" y="12" width="24" height="24" rx="4"/><rect x="21" y="21" width="6" height="6"/>',
-    "工商银行": '<circle cx="24" cy="24" r="13"/><circle cx="24" cy="24" r="4"/>',
-    "招商银行": '<path d="M12 34L24 12l12 22z"/>',
-    "交通银行": '<rect x="12" y="14" width="24" height="8" rx="4"/><rect x="12" y="26" width="24" height="8" rx="4"/>',
-    "邮储银行": '<path d="M24 11l12 9v12l-12 9-12-9V20z"/>',
-    "中信银行": '<path d="M24 11v26"/><path d="M12 24h24"/>',
-    "浦发银行": '<path d="M12 30c8-14 16-14 24 0"/><circle cx="24" cy="16" r="4"/>',
-    "民生银行": '<circle cx="18" cy="24" r="7"/><circle cx="30" cy="24" r="7"/>',
-    "兴业银行": '<path d="M12 24l12-12 12 12-12 12z"/>',
-    "光大银行": '<circle cx="24" cy="24" r="13"/><path d="M24 11v26"/>',
-    "华夏银行": '<path d="M14 34V14l20 20V14"/>',
-    "广发银行": '<path d="M12 26h24"/><path d="M24 12v8"/><path d="M18 34h12"/>',
-    "平安银行": '<path d="M14 34V20a10 10 0 0120 0v14"/>',
+#: 各行真实品牌主色（用于 logo 圆徽的底色）；卡面渐变仍走 `_GRADIENTS`。
+#: 行标用「品牌色圆 + 行名首字」的**可辨识**近似（真实行标是注册商标，这里只用
+#: 每家最核心的识别要素：工/建/农/中/招/交 配各自主色），离线、无依赖、不侵权。
+_BRAND: dict[str, str] = {
+    "工商银行": "#E60012", "建设银行": "#005BAC", "农业银行": "#319E5A",
+    "中国银行": "#AD1C22", "招商银行": "#D42321", "交通银行": "#0057A0",
+    "邮储银行": "#00884A", "中信银行": "#CC0000", "浦发银行": "#003C8F",
+    "民生银行": "#1E63B9", "兴业银行": "#00427A", "光大银行": "#6A2C91",
+    "华夏银行": "#B02B2C", "广发银行": "#D71920", "平安银行": "#E60012",
 }
-_FALLBACK_GLYPH = '<rect x="13" y="18" width="22" height="15" rx="3"/><path d="M13 24h22"/>'
 
 #: 卡种中文
 _TYPE_CN = {"savings": "储蓄卡", "credit": "信用卡"}
@@ -68,12 +62,72 @@ def _colors(bank: str) -> tuple[str, str, str]:
     return _GRADIENTS.get(str(bank), _FALLBACK)
 
 
+def _badge(bank: str) -> str:
+    """真实行标风格的圆徽：品牌主色圆 + 白色行名首字（离线、无依赖）。"""
+    char = (str(bank or "行"))[:1]
+    color = _BRAND.get(str(bank), "#7A7E86")
+    return (f'<circle cx="24" cy="24" r="15.5" fill="{color}" stroke="#ffffff" stroke-width="1.5"/>'
+            f'<text x="24" y="24" text-anchor="middle" dominant-baseline="central" '
+            f'font-size="18" font-weight="700" fill="#ffffff" stroke="none">{char}</text>')
+
+
 def _glyph(bank: str) -> str:
-    return _GLYPHS.get(str(bank), _FALLBACK_GLYPH)
+    return _badge(bank)
+
+
+#: 真实行徽文件目录（assets/logos/*.svg，取自官方 logo 裁出的圆标）；离线内嵌、无网络依赖。
+_LOGO_DIR = Path(__file__).with_name("assets") / "logos"
+_LOGO_FILES = {"工商银行": "icbc", "建设银行": "ccb", "农业银行": "abc",
+               "中国银行": "boc", "交通银行": "bocm", "招商银行": "cmb"}
+
+
+@lru_cache(maxsize=None)
+def _logo_uri(bank: str) -> str:
+    """银行 → 真实行徽的 base64 data URI；缺文件返回空串（调用方回落兜底徽标）。"""
+    key = _LOGO_FILES.get(str(bank))
+    if not key:
+        return ""
+    try:
+        raw = (_LOGO_DIR / f"{key}.svg").read_bytes()
+    except OSError:
+        return ""
+    return "data:image/svg+xml;base64," + base64.b64encode(raw).decode("ascii")
+
+
+def _logo_html(bank: str) -> str:
+    """卡面 logo 位：有真实行徽就用它（<img>），否则退回「品牌色圆 + 首字」兜底徽标。"""
+    uri = _logo_uri(bank)
+    if uri:
+        return f'<img class="bkcard-logo-img" src="{uri}" alt="">'
+    return (f'<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.6" '
+            f'stroke-linecap="round" stroke-linejoin="round">{_glyph(bank)}</svg>')
 
 
 def type_cn(card: dict) -> str:
     return _TYPE_CN.get(str(card.get("card_type") or ""), str(card.get("card_type") or "银行卡"))
+
+
+#: 本人名下卡 → 银行行的**稳定**分配（演示库 6 张预设卡固定映射到 6 家行）。
+#: 用确定性映射而非真随机：同一张卡每次打开都归同一家行，评委/答辩可预期，
+#: 也避免「随机」导致测试断言漂移。表外卡号按尾部数字散列到 6 家之一。
+_OWN_BANKS = ("招商银行", "建设银行", "工商银行", "中国银行", "农业银行", "交通银行")
+_OWN_BANK_BY_MASK = {
+    "6222 **** **** 0001": "招商银行",
+    "6222 **** **** 0002": "建设银行",
+    "6222 **** **** 0003": "工商银行",
+    "1111 **** **** 1111": "中国银行",
+    "2222 **** **** 2222": "农业银行",
+    "3333 **** **** 3333": "交通银行",
+}
+
+
+def own_card_bank(card: dict) -> str:
+    """本人名下卡的银行行名：预设卡固定映射，其余按卡号尾数稳定散列。"""
+    mask = str(card.get("card_no_mask") or "")
+    if mask in _OWN_BANK_BY_MASK:
+        return _OWN_BANK_BY_MASK[mask]
+    digits = "".join(ch for ch in mask if ch.isdigit())
+    return _OWN_BANKS[int(digits) % len(_OWN_BANKS)] if digits else "模拟银行"
 
 
 def card_html(card: dict, *, holder: str = "") -> str:
@@ -87,8 +141,7 @@ def card_html(card: dict, *, holder: str = "") -> str:
     return (
         f'<div class="bkcard" style="--bk-a:{start};--bk-b:{end};--bk-glow:{glow};">'
         f'  <div class="bkcard-logo">'
-        f'    <svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="2.6" '
-        f'         stroke-linecap="round" stroke-linejoin="round">{_glyph(bank)}</svg>'
+        f'    {_logo_html(bank)}'
         f'  </div>'
         f'  <div class="bkcard-body">'
         f'    <div class="bkcard-bank">{bank_esc}<span class="bkcard-kind">{kind}</span></div>'
@@ -141,6 +194,7 @@ def style_css() -> str:
   backdrop-filter:blur(2px);
 }
 .bkcard-logo svg{width:28px;height:28px}
+.bkcard-logo img{width:30px;height:30px;object-fit:contain;display:block}
 .bkcard-body{flex:1 1 auto;min-width:0;position:relative;z-index:1}
 .bkcard-chip{
   position:absolute;right:20px;bottom:16px;width:28px;height:20px;border-radius:4px;

@@ -361,11 +361,12 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "",
                     error_code=shaped.error_code,
                     reply=templates.tool_error(shaped.error_code, shaped.message))
     if shaped.missing:                                                 # 缺槽 → 追问，不猜
-        if shaped.candidates:                                          # 同名多命中 → 界面出**解析卡**
+        if shaped.candidates:                                          # 同名多命中 / 没点名 → 界面出**解析卡**
             slot = ("payee_ids" if isinstance(slots.get("payee_ids"), (list, tuple))
                     else "payee")
             payee_picker.capture(session_id, intent, dict(slots), shaped.candidates,
-                                 slot=slot)
+                                 slot=slot,
+                                 reason="pick" if getattr(shaped, "pick_payee", False) else "same_name")
         hint = missing_hint(shaped.missing, intent)
         ask = shaped.clarify or hint                   # 描述符优先，否则兜底
         #: 描述符的追问如果**没提到**缺的那几项，就补一句 —— 用户一次知道要补什么，

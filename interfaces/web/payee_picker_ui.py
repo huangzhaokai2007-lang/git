@@ -31,9 +31,15 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
     if not candidates:
         return
     with st.container(border=True):
-        st.markdown(f"##### 🔍 找到 {len(candidates)} 个同名收款人，请选择")
-        st.caption("状态：🔍 解析中（5 分钟内有效，超时自动作废）")
-        st.caption("点「选这位」会带着这个人的 id 继续，不再二次解析。")
+        #: 2026-11-01（用户实测）：只说「转账」没点名时，候选是**全部**收款人 ——
+        #: 标题不能说「N 个同名」，那是同名歧义的说法，会让人以为系统认错了人。
+        if str(pending.get("reason") or "same_name") == "pick":
+            st.markdown("##### 👥 先选一位收款人")
+            st.caption("下面列出您的收款人（黑名单不列）。选完再问金额、再选转账用哪张卡。")
+        else:
+            st.markdown(f"##### 🔍 找到 {len(candidates)} 个同名收款人，请选择")
+            st.caption("状态：🔍 解析中（5 分钟内有效，超时自动作废）")
+            st.caption("点「选这位」会带着这个人的 id 继续，不再二次解析。")
         for item in candidates:
             left, right = st.columns([3, 1], vertical_alignment="center")
             left.markdown(f"**{item['name']}** · `{item['phone']}`")

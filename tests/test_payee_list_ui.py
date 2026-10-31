@@ -54,7 +54,7 @@ def _app(monkeypatch: pytest.MonkeyPatch) -> AppTest:
 
 
 def test_list_renders_one_row_per_person(monkeypatch: pytest.MonkeyPatch) -> None:
-    """每个收款人一行（头像/姓名/脱敏号/银行），行尾都有 ▸。"""
+    """每个收款人一行（姓名/脱敏号/名单类型），行尾都有 ▸。"""
     app = _app(monkeypatch)
     app.chat_input[0].set_value("我的收款人有哪些").run()
     assert not app.exception, app.exception
@@ -63,7 +63,10 @@ def test_list_renders_one_row_per_person(monkeypatch: pytest.MonkeyPatch) -> Non
     row_buttons = [button for button in app.button if "****" in button.label]   # 每行一个按钮
     assert len(row_buttons) == 5, f"应有 5 个整行按钮，实际 {len(row_buttons)}"
     labels = "\n".join(button.label for button in row_buttons)
-    assert "139****1001" in labels and "招商银行" in labels and "李四" in labels
+    assert "139****1001" in labels and "李四" in labels
+    #: 2026-11-01（用户要求）：列表行**不再写银行** —— 每人可能有多张卡，单列一个银行会误导；
+    #: 银行改由展开详情按卡列出。
+    assert "招商银行" not in labels
 
 
 def test_clicking_the_row_expands_the_detail_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
