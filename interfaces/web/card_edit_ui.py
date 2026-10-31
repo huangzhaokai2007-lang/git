@@ -47,12 +47,18 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
         return
     if not draft.fields:
         return
+    #: 2026-10-31 修（用户实测「点重新预检没用 / 该凭证已使用」）：输入框 key 必须带**这张卡的标识**，
+    #: 否则换一张同类型的新卡时，抽屉里还留着上一张卡的文字，预检会把旧值提交给新卡。
+    confirmation = executor.submit(confirm_card.current, session_id).result()
+    tag = str(getattr(confirmation, "trace_id", "") or getattr(confirmation, "credential", ""))[:8]
+    if not tag:
+        tag = "card"
     with st.container(border=True, key="card-edit-box"):
         premium_ui.card_head("✏️ 修改这张确认卡", "改完点下面按钮会重新预检（不是直接改卡）", tone="warn")
         changed: dict[str, str] = {}
         for field in draft.fields:
             #: 框里显示**姓名**（用户要求）；同名重复解析的问题在 `write_flow.edit` 里收口。
-            new = _field(field, draft.kind)
+            new = _field(field, draft.kind, tag=tag)
             if new and new != field.value:
                 changed[field.name] = new
         if draft.kind == "transfer_scheduled":          # 循环频率：一次性 / 每日 / 每周 / 每月
@@ -60,7 +66,7 @@ def render(executor: ThreadPoolExecutor, session_id: str) -> None:
             labels = list(_REPEAT_OPTIONS)
             picked = st.selectbox("循环频率", labels, index=labels.index(_CYCLE_LABEL.get(cycle_now,
                                                                                         "（一次性）")),
-                                  key="edit-repeat")
+                                  key=f"edit-repeat-{tag}")
             picked_code = _REPEAT_OPTIONS[picked]
             if picked_code != (cycle_now or ""):
                 #: 「一次性」在槽位里用「不循环」表达（`repeat_cycle` 认不出 → None = 一次性）
@@ -98,13 +104,17 @@ def _current_cycle(executor: ThreadPoolExecutor, session_id: str) -> str:
     return str(((getattr(confirmation, "filled", None) or {}).get("repeat_cycle") or ""))
 
 
-def _field(field, kind: str, *, default: str | None = None) -> str:
-    """一个字段的输入控件；**时间类字段一律用日历**（schedule 带时刻，date/expire 只选日期）。"""
-    key = f"edit-{kind}-{field.name}"
+def _field(field, kind: str, *, default: str | None = None, tag: str = "") -> str:
+    """一个字段的输入控件；**时间类字段一律用日历**（schedule 带时刻，date/expire 只选日期）。
+
+    `tag` 是这张卡的标识 —— 拼进 key，换卡即换控件，不会把上一张卡的值带过来。
+    """
+    key = f"edit-{kind}-{field.name}-{tag}" if tag else f"edit-{kind}-{field.name}"
     if field.name == "schedule":
-        value, too_early = time_inputs.datetime_field(field.label, key)
+        value, too_early = time_inputs.datetime_field(field.label, key,
+                                                      initial=str(field.value or ""))
         return "" if too_early else value
     if field.name in _TIME_FIELDS:
-        return time_inputs.date_field(field.label, key)
+        return time_inputs.date_field(field.label, key, initial=str(field.value or ""))
     return str(st.text_input(field.label, value=default if default is not None else field.value,
                              key=key) or "").strip()

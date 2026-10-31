@@ -15,23 +15,46 @@ import streamlit as st
 
 
 def date_field(label: str, key: str, *, min_days: int = 0,
-               help_text: str = "") -> str:
-    """纯日期（`YYYY-MM-DD`）；默认不允许选过去。"""
+               help_text: str = "", initial: str = "") -> str:
+    """纯日期（`YYYY-MM-DD`）；默认不允许选过去。
+
+    `initial` 给**卡上当前的值**用（例如改卡时不要把没动过的日期冲成默认值）。
+    """
     today = datetime.date.today()
-    picked = st.date_input(label, value=today + datetime.timedelta(days=max(min_days, 1)),
+    default_day = today + datetime.timedelta(days=max(min_days, 1))
+    if initial:
+        try:
+            parsed = datetime.date.fromisoformat(str(initial)[:10])
+            default_day = max(parsed, today)
+        except ValueError:
+            pass
+    picked = st.date_input(label, value=default_day,
                            min_value=today, key=key, format="YYYY-MM-DD", help=help_text or None)
     return picked.isoformat() if isinstance(picked, datetime.date) else ""
 
 
 def datetime_field(label: str, key: str, *,
-                   default_hour: int = 9) -> tuple[str, bool]:
-    """日期 + 时刻：返回 `(ISO, 是否已过去)`；过去的时刻不该被提交。"""
+                   default_hour: int = 9, initial: str = "") -> tuple[str, bool]:
+    """日期 + 时刻：返回 `(ISO, 是否已过去)`；过去的时刻不该被提交。
+
+    `initial` 给**卡上当前的值**用（形如 `2026-11-01T09:00`）——
+    改卡片时如果用户没动这一项，就不该把它冲成默认的"明天 09:00"。
+    """
     now = datetime.datetime.now()
+    default_day = now.date() + datetime.timedelta(days=1)
+    default_clock = datetime.time(default_hour, 0)
+    if initial:
+        try:
+            parsed = datetime.datetime.fromisoformat(str(initial).replace(" ", "T")[:16])
+            default_day = max(parsed.date(), now.date())
+            default_clock = parsed.time()
+        except ValueError:
+            pass
     col_day, col_time = st.columns(2, vertical_alignment="bottom")
-    picked_day = col_day.date_input(label, value=now.date() + datetime.timedelta(days=1),
+    picked_day = col_day.date_input(label, value=default_day,
                                     min_value=now.date(), key=f"{key}-day",
                                     format="YYYY-MM-DD")
-    picked_time = col_time.time_input("时刻", value=datetime.time(default_hour, 0),
+    picked_time = col_time.time_input("时刻", value=default_clock,
                                       key=f"{key}-clock", step=300,
                                       label_visibility="collapsed")
     moment = datetime.datetime.combine(picked_day, picked_time)

@@ -178,6 +178,10 @@ def edit(session_id: str, updates: Mapping) -> Step:
     spec = write_intents.spec_of(confirmation.intent)
     raw = {k: confirmation.filled.get(k) for k in spec.missing
            if confirmation.filled.get(k) is not None}
+    #: 2026-10-31（用户实测「该凭证已使用，请重新发起转账」）：重检必须**重新签发**凭据，
+    #: 把卡上残留的凭据类键一律摘掉，避免把旧 token 带进下一次预览。
+    for stale_key in [k for k in list(raw) if "token" in str(k) or "credential" in str(k)]:
+        raw.pop(stale_key, None)
     if confirmation.intent == "aa_collect":                           # AA：用**姓名**重解析（id 不认名字匹配）
         names = list(confirmation.filled.get("aa_names") or [])
         if names:
