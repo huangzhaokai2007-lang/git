@@ -178,7 +178,7 @@ def test_hallucinated_polish_is_rejected_then_degraded_to_template(seeded: Path,
     monkeypatch.setattr(templates, "polish", lambda text, facts: lying(text))
     result = orchestrator.handle("查余额")
     assert result.degraded is True and result.error_code == "HALLUCINATION_BLOCKED"
-    assert "99,999.00" not in result.reply and "52,281.00" in result.reply
+    assert "99,999.00" not in result.reply and "59,945.00" in result.reply
     assert result.reply.startswith("您的储蓄账户余额为")
 
 

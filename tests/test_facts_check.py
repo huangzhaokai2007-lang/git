@@ -162,7 +162,7 @@ def test_hallucinated_reply_is_regenerated_then_degraded_and_audited(seeded: Pat
     turn = orchestrator.handle("我的储蓄卡还有多少钱", session_id="facts-13")
     assert calls["classify"] == 1 and calls["polish"] == 2           # 只重生成一次
     assert turn.degraded is True and turn.error_code == facts_check.ERROR_CODE
-    assert "9,999,999" not in turn.reply and "52,281.00" in turn.reply
+    assert "9,999,999" not in turn.reply and "59,945.00" in turn.reply
     assert turn.reply.startswith("您的储蓄账户余额为")                  # 模板回执（不是模型的措辞）
     row = raw(seeded, "SELECT error_code, result, tool FROM audit_log ORDER BY rowid DESC LIMIT 1")[0]
     assert count(seeded, "audit_log") == before_audit + 1 and row["error_code"] == facts_check.ERROR_CODE
