@@ -8,7 +8,7 @@ from tools import card_binding, query
 
 
 def bound():
-    result = card_binding.preview_binding('6222000000000001', '314159', session_id='lock')
+    result = card_binding.preview_binding('6222000000000001', '123456', session_id='lock')
     return card_binding.confirm_binding(result.data['token'], session_id='lock').data['card_id']
 
 

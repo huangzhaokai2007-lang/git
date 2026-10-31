@@ -109,6 +109,8 @@ T_ANALYSIS_HEAD = "{period} 共支出 {total_yuan} 元，环比 {vs_prev_pct}%�
 T_ANALYSIS_NO_PREV = "{period} 共支出 {total_yuan} 元，上一账期没有可比的支出，故不给环比。"
 #: 空结果同样要**点明账期**：不带 period 的话用户不知道查的是哪个月（也就无从判断对不对）。
 T_ANALYSIS_EMPTY = "{period} 没有支出记录，故不给环比。"
+#: 空账期（一个分类都没有）时账单报告「收支明细」下面的一句话（2026-11-01）；界面侧不再画饼图。
+T_REPORT_EMPTY = "本期无交易。"
 T_SPEND_TABLE_HEAD = "| 分类 | 金额（元） | 占比 |"
 T_SPEND_TABLE_SEP = "| --- | --- | --- |"
 

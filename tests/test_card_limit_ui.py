@@ -46,7 +46,7 @@ def test_three_cards_bind_apply_and_records(monkeypatch, seeded):
     for digit in ("1", "2", "3"):
         click(at, "绑定银行卡")
         fill(at, "模拟银行卡号", digit * 16)
-        fill(at, "银行卡密码", digit * 6)
+        fill(at, "银行卡密码", "123456")
         click(at, "验证银行卡")
         click(at, "确认绑定")
     for digit in ("1", "2", "3"):
@@ -92,7 +92,7 @@ def test_temporary_form_wrong_otp_and_cancel_preserve_card(monkeypatch, seeded):
     click(at, "管卡")
     click(at, "绑定银行卡")
     fill(at, "模拟银行卡号", "2222222222222222")
-    fill(at, "银行卡密码", "222222")
+    fill(at, "银行卡密码", "123456")
     click(at, "验证银行卡")
     click(at, "确认绑定")
     click(at, "调整额度")

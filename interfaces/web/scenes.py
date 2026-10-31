@@ -16,7 +16,7 @@ SCENES: tuple[tuple[str, str], ...] = (
     ("调整额度", "调整额度"),
     ("我的理财", "我买了哪些理财"),
     ("推荐理财", "推荐理财产品"),
-    ("风险程度", "我的风险等级是多少"),
+    #: 2026-11-01（用户要求）：摘掉「风险程度」入口（风险测评仍可从对话里触发）。
     ("锁卡", "锁卡"),
     ("挂失补卡", "帮我挂失"),
     ("操作记录", "查看操作记录"),
@@ -24,5 +24,5 @@ SCENES: tuple[tuple[str, str], ...] = (
 
 SCENE_ICONS = tuple(f":material/{name}:" for name in (
     "receipt_long", "group", "autorenew", "credit_card",
-    "tune", "monitoring", "grid_view", "shield_person", "lock", "credit_card_off", "history",
+    "tune", "monitoring", "grid_view", "lock", "credit_card_off", "history",
 ))

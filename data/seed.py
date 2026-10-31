@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 SEED = 20260912                                            # 固定随机种子
 AS_OF = date(2026, 9, 12)                                  # 数据集的"今天"（固定常量，跨天复现）
 DEFAULT_DB_PATH = Path(os.environ.get("DB_PATH") or "var/bank.db")   # 卡 20-C：库住 var/，不混进代码目录 data/
-DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 9, 30), 13
+DATA_START, DATA_END, MONTHS = date(2025, 9, 1), date(2026, 12, 31), 16
+#: 2026-11-01（用户要求）：账期由 13 个月扩到 16 个月（2025-09 ~ 2026-12），保证演示界面里
+#: 选任意一个月（含今年 10/11/12 月）都有分类数据、都能拉出饼图；锚点 AS_OF 仍是 9-12（演示时钟）。
 USER_ID, SAVINGS_ID, CREDIT_ID = "u_zhangsan_0001", "acc_savings_0001", "acc_credit_0001"
 CREDIT_LIMIT = 3_000_000                                   # 信用额度 30,000.00 元（分）
 SALARY = 950_000                                           # 月薪 9,500.00 元（分）
@@ -384,8 +386,16 @@ def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False,
         with transaction(conn):
             counts = _write(conn, rows, balances, payee_usage)
             if bind_cards:
-                from data import card_binding_seed
+                from data import card_binding, card_binding_seed, card_limit_seed
+                from guard import card_credentials
+                #: 绑卡/密码表都是**懒建**的（`agent_card_secret`、`agent_card_binding`），
+                #: 先把 schema 建出来，再补密码、补额度演练卡，最后才绑——否则撞「no such table」/外键。
+                card_binding.ensure_schema(conn)
+                card_binding_seed.provision(conn, card_credentials.hash_pin)
+                card_limit_seed.provision(conn, card_credentials.hash_pin)
                 counts["agent_card_binding"] = card_binding_seed.provision_bindings(conn)
+                #: 演示库：所有卡恢复为未挂失（评委现场不想要一张已挂失的卡挡路）
+                counts["card_normalized"] = card_binding_seed.reset_card_status(conn)
         logger.info("已在 %s 写入合成数据：%s", path, counts)
         return counts
     finally:

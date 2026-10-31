@@ -53,7 +53,8 @@ def test_query_does_not_pop_the_questionnaire_in_the_app(monkeypatch, seeded: Pa
     monkeypatch.setenv("DB_PATH", str(seeded))
     path = Path(__file__).resolve().parents[1] / "interfaces" / "web" / "app.py"
     at = AppTest.from_file(str(path), default_timeout=120).run()
-    next(b for b in at.sidebar.button if b.label == "风险程度").click().run()
+    #: 2026-11-01：侧边栏「风险程度」快捷入口已摘掉，改从对话触发（同一意图、同一路径）
+    at.chat_input[0].set_value("我的风险等级是多少").run()
     assert not at.exception
     assert not at.selectbox                     # 问卷没弹出来
     assert any(b.label == "开始风险测评" for b in at.button)

@@ -263,8 +263,12 @@ def _render_confirm(*, inline: bool = False) -> None:
     _editable = bool(_draft is not None and getattr(_draft, "fields", None))
     #: 2026-10-31（用户要求）：转账/定时转账**没显式选过收款卡** → 确认按钮置灰，
     #: 逼用户先选（选卡卡面见 slot_form_ui）；服务端 _prepare 也会拒绝无卡请求。
+    #: 2026-11-01 修：`Confirmation` 没有 `facts` 字段（extra="forbid"），事实快照在 `evidence` 里 ——
+    #: 之前读 `confirmation.facts` 永远拿到 None，于是**不管选没选卡，确认键一律置灰**（用户实测：
+    #: 选了收款卡也点不动）。这里改读 `evidence`。
+    _card_facts = getattr(confirmation, "evidence", None) or {}
     _card_unsure = (str(getattr(confirmation, "intent", "")) in ("transfer_single", "transfer_scheduled")
-                    and not bool((getattr(confirmation, "facts", None) or {}).get("payee_card_chosen")))
+                    and not bool(_card_facts.get("payee_card_chosen")))
     action = ui.confirm_card(
         confirmation, compact=inline, editable=_editable,
         confirm_disabled=_card_unsure,
@@ -297,30 +301,10 @@ def _refresh_sidebar_balance():
         st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
     return turn
 
-def _render_demo_clock() -> None:
-    """演示时钟开关（侧边栏）：固定白天 12:00，避免 night 因子把演示卡在 L3。
-
-    2026-11-01（用户排练 PPT/答辩）：这是**时间输入**的设定，不是绕过风控 ——
-    L1/L2/L3 判定、OTP、限额、白名单、审计日志一律照旧；关掉开关立刻回到真实时间。
-    """
-    from agent import demo_clock
-
-    switch = st.checkbox("演示时钟（白天 12:00）", value=demo_clock.enabled(),
-                         key="demo-clock-on",
-                         help="仅演示用：把系统时间固定为工作日中午，避免深夜风控把演示"
-                              "卡在「待人工复核」。风控规则未做任何改动。")
-    if switch and not demo_clock.enabled():
-        demo_clock.set_moment()
-    elif not switch and demo_clock.enabled():
-        demo_clock.clear()
-    if demo_clock.enabled():
-        st.caption(f"演示时钟：{demo_clock.label()}（风控规则未改动）")
-
-
 def _sidebar() -> None:
     """侧边栏：账户余额、快捷场景与重置会话。"""
     with st.sidebar:
-        st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="AI Banking Agent"><span aria-hidden="true">AI Banking</span><span aria-hidden="true">Agent</span></div>', unsafe_allow_html=True)
+        st.markdown('<div class="bank-brand" role="heading" aria-level="1" aria-label="Speculator’s Blade"><span aria-hidden="true">Speculator’s</span><span aria-hidden="true">Blade</span></div>', unsafe_allow_html=True)
         st.divider()
         st.markdown("#### 账户余额")
         scope = (st.session_state["session_id"], _agent_executor().submit(card_binding_flow.owner_key).result())
@@ -337,8 +321,6 @@ def _sidebar() -> None:
                 st.error(turn.reply)
             else:
                 st.rerun()
-        st.divider()
-        _render_demo_clock()
         st.divider()
         st.markdown("#### 快捷场景")
         prompt = ui.scenes()
@@ -404,7 +386,7 @@ def _chat_page() -> None:
         st.rerun()
 
 def main() -> None:
-    st.set_page_config(page_title="AI Banking Agent · 模拟环境", page_icon="🏦", layout="wide")
+    st.set_page_config(page_title="Speculator’s Blade · 模拟环境", page_icon="🏦", layout="wide")
     st.markdown(ui.load_css(), unsafe_allow_html=True)
     premium_ui.inject_css()                                 # 卡片入场 / 等宽数字 / 卡头色条
     if not _ensure_db():

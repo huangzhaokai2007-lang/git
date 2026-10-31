@@ -14,7 +14,7 @@ def service():
 
 
 def bind(number):
-    preview = card_binding.preview_binding(number, number[:6], session_id="f06")
+    preview = card_binding.preview_binding(number, "123456", session_id="f06")
     assert preview.ok
     result = card_binding.confirm_binding(preview.data["token"], session_id="f06")
     assert result.ok
@@ -22,10 +22,15 @@ def bind(number):
 
 
 @pytest.mark.parametrize("digit", ["1", "2", "3"])
-def test_demo_cards_accept_distinct_pins_and_reject_old_pin(seeded, digit):
+def test_demo_cards_accept_shared_pin_and_reject_old_pin(seeded, digit):
+    """2026-11-01（用户要求）：所有演示卡密码统一 123456（与短信验证码同值）。
+
+    原先每张卡一个「卡号前 6 位」密码（111111/222222/333333），现已作废 ——
+    这里钉两件事：统一密码能绑、旧密码不再被接受。
+    """
     number = digit * 16
-    assert not card_binding.preview_binding(number, "000000", session_id="pins").ok
-    assert card_binding.preview_binding(number, digit * 6, session_id="pins").ok
+    assert not card_binding.preview_binding(number, digit * 6, session_id="pins").ok
+    assert card_binding.preview_binding(number, "123456", session_id="pins").ok
 
 
 def test_existing_demo_pin_migration_preserves_binding_and_application(seeded):
@@ -46,7 +51,7 @@ def test_existing_demo_pin_migration_preserves_binding_and_application(seeded):
         conn.execute("DELETE FROM agent_card_limit_demo_pin")
         card_limit_seed.provision(conn, card_credentials.hash_pin)
     assert not card_binding.preview_binding("2" * 16, "000000", session_id="migration").ok
-    assert card_binding.preview_binding("2" * 16, "222222", session_id="migration").data["already_bound"]
+    assert card_binding.preview_binding("2" * 16, "123456", session_id="migration").data["already_bound"]
     assert raw(seeded, "SELECT * FROM card WHERE id=?", (card,)) == before
     assert service().records()["data"] == history
     secret = raw(seeded, "SELECT * FROM agent_card_secret WHERE card_id=?", (card,))
@@ -130,7 +135,7 @@ def test_temporary_expiry_restores_fixed_and_available(seeded, monkeypatch):
 
 def test_savings_fixed_disallowed_and_daily_enforced_on_transfer(seeded):
     flow = service()
-    p = card_binding.preview_binding("6222000000000001", "314159", session_id="f06")
+    p = card_binding.preview_binding("6222000000000001", "123456", session_id="f06")
     card_binding.confirm_binding(p.data["token"], session_id="f06")
     card = p.data["card_id"]
     assert not flow.preview(card, "fixed", "30000", None, "f06")["ok"]
@@ -238,7 +243,7 @@ def test_normal_balance_query_and_card_detail_refresh_expiry(seeded, monkeypatch
     flow = service()
     now = datetime(2026, 10, 10, 12)
     monkeypatch.setattr(card_limit, "_now", lambda: now)
-    preview = card_binding.preview_binding("6222000000000002", "271828", session_id="f06")
+    preview = card_binding.preview_binding("6222000000000002", "123456", session_id="f06")
     card_binding.confirm_binding(preview.data["token"], session_id="f06")
     card = preview.data["card_id"]
     before = query.get_balance("credit").data["available"]
