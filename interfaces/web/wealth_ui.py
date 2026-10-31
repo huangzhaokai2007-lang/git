@@ -261,6 +261,20 @@ def _card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: st
             ask(f"买 {item.get('name')} {int(amount)} 元")
 
 
+def _profit_color(value: object) -> str:
+    """A 股口径：赚了红、亏了绿。零值按灰色处理，避免「+0.00% 却是红的」。"""
+    text = str(value or "").replace(",", "").replace("+", "")
+    try:
+        number = float(text.rstrip("%"))
+    except ValueError:
+        return "#94a3b8"
+    if number > 0:
+        return "#c0392b"
+    if number < 0:
+        return "#2e8b57"
+    return "#94a3b8"
+
+
 def render_holdings(turn: Mapping[str, Any], *, ask: Callable[[str], None], key_prefix: str,
                     daily_loader: Callable[[str, str], Mapping[str, Any]] | None = None) -> None:
     """持仓页：**合计 + 每只一张卡（K 线 / 还能带来多少 / 赎回）**。
@@ -289,6 +303,15 @@ def render_holdings(turn: Mapping[str, Any], *, ask: Callable[[str], None], key_
         f"<span style='font-size:.78rem;color:#94a3b8;margin-left:.4rem;'>"
         f"{html.escape(str(facts.get('total_count', len(items))))} 只</span></div>",
         unsafe_allow_html=True)
+    #: 合计累计收益：颜色按 A 股口径（红盈绿亏），数字来自工具层，界面只上色。
+    total_profit = str(facts.get("cum_profit_total_yuan") or "")
+    if total_profit:
+        st.markdown(
+            "<div style='display:flex;align-items:baseline;gap:.4rem;margin:.1rem 0 .55rem;'>"
+            f"<span style='font-size:1.15rem;font-weight:700;color:{_profit_color(total_profit)};'>"
+            f"{html.escape(total_profit)} 元</span>"
+            "<span style='font-size:.75rem;color:#94a3b8;'>累计收益</span></div>",
+            unsafe_allow_html=True)
 
     cols = st.columns(min(len(items), 2))
     for index, item in enumerate(items):
@@ -307,7 +330,16 @@ def _holding_card(item: Mapping[str, Any], *, ask: Callable[[str], None], key_pr
             f"<span style='font-size:1.55rem;font-weight:700;line-height:1;'>"
             f"{html.escape(str(item.get('amount_yuan')))}</span>"
             "<span style='font-size:.75rem;color:#94a3b8;'>持有金额（元）</span></div>"
-            "<div style='font-size:.8rem;color:#94a3b8;'>"
+            #: **累计收益**：用户最想看的数字，放在持有金额正下方、加粗上色。
+            #: 正负号和颜色都由工具层的 `cum_is_profit` 决定，界面不判断业务含义。
+            + (f"<div style='display:flex;align-items:baseline;gap:.35rem;margin:.05rem 0 .1rem;'>"
+               f"<span style='font-size:1.05rem;font-weight:700;color:{_profit_color(item.get('cum_profit_yuan'))};'>"
+               f"{html.escape(str(item.get('cum_profit_yuan')))} 元</span>"
+               f"<span style='font-size:.75rem;color:{_profit_color(item.get('cum_profit_yuan'))};'>"
+               f"{html.escape(str(item.get('cum_profit_pct')))}</span>"
+               "<span style='font-size:.7rem;color:#94a3b8;'>累计收益</span></div>"
+               if item.get("cum_profit_yuan") else "")
+            + "<div style='font-size:.8rem;color:#94a3b8;'>"
             f"年化 {html.escape(str(item.get('yield')))} · "
             f"买入 {html.escape(str(item.get('purchase_date')))} · "
             f"{html.escape(_term_text(item))}</div>",

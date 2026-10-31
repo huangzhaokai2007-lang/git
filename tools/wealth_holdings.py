@@ -18,7 +18,8 @@ from data import dao
 from data.seed import AS_OF
 from tools._query_common import ToolError, _dao_reject, _fail, _money_facts, _ok, current_user_id
 from tools import _wealth_products
-from tools._wealth_risk import RISK_LABELS, _rank, _yield_text, require_assessment
+from tools._wealth_risk import (RISK_LABELS, RISK_SWING, _product_candles, _rank,
+                                _yield_text, require_assessment)
 from tools.schemas import ErrorCode, ToolResult
 
 TOOL = "list_holdings"
@@ -51,6 +52,40 @@ def _income_facts(amount_cents: int, expected_yield: float, term_days: int,
     to_maturity = annual * remaining / 365
     return {**facts, "maturity_date": maturity.isoformat(), "remaining_days": remaining,
             "to_maturity_income_yuan": f"{to_maturity:,.2f}"}
+
+
+def _cumulative_facts(product_id: str, amount_cents: int, expected_yield: float,
+                       risk_level: str, purchase_date: str) -> dict:
+    """**累计收益**：拿买入那天的净值和今天的净值比，再乘本金。
+
+    净值序列用的是推荐卡同一条（`_wealth_risk._product_candles`），
+    所以「持仓页说你赚了多少」和「推荐页画的曲线」不会互相打脸。
+
+    口径与限制（都写进回执，不藏）：
+    - 买入净值取「买入日当天或之前最近的一根月 K」—— 演示数据是月频，不是逐日；
+    - 不含申赎费用，不含分红再投；
+    - 结果是模拟，但和 K 线图同源，**不会出现「图涨了、收益却是负的」**。
+    """
+    swing = RISK_SWING.get(risk_level, 0.0)
+    candles = _product_candles(product_id, expected_yield + swing, -swing)
+    if not candles:
+        return {"cum_profit_yuan": "0.00", "cum_profit_pct": "+0.00%",
+                "cum_is_profit": True, "nav_purchase": 0, "nav_current": 0}
+
+    entry = None
+    for row in candles:                       # 最后一根「不晚于买入日」的月 K
+        if row["period"] <= purchase_date[:7]:
+            entry = row
+        else:
+            break
+    entry = entry or candles[0]
+    nav_purchase = int(entry["close"])
+    nav_current = int(candles[-1]["close"])
+    pct = (nav_current - nav_purchase) / nav_purchase * 100 if nav_purchase else 0.0
+    profit = amount_cents / 100 * pct / 100
+    return {"cum_profit_yuan": f"{profit:+,.2f}", "cum_profit_pct": f"{pct:+.2f}%",
+            "cum_is_profit": pct >= 0, "nav_purchase": nav_purchase,
+            "nav_current": nav_current}
 
 
 def _rows(user_id: str) -> list[dict]:
@@ -119,16 +154,25 @@ def list_holdings() -> ToolResult:
               "purchase_date": row["purchase_date"],
               **_money_facts(int(row["amount"]), "amount"),
               **_income_facts(int(row["amount"]), float(row["expected_yield"]),
-                              int(row["term_days"] or 0), row["purchase_date"])}
+                              int(row["term_days"] or 0), row["purchase_date"]),
+              **_cumulative_facts(row["product_id"], int(row["amount"]),
+                                  float(row["expected_yield"]), row["risk_level"],
+                                  row["purchase_date"])}
              for row in rows]
     total = sum(int(row["amount"]) for row in rows)
-    facts = {"items": items, "total_count": len(items), **_money_facts(total, "total_amount")}
+    total_profit = sum(float(item["cum_profit_yuan"].replace(",", "")) for item in items)
+    facts = {"items": items, "total_count": len(items), **_money_facts(total, "total_amount"),
+             #: 合计累计收益（元，带符号）—— 持仓页顶部和回执都用它，别在界面加总。
+             "cum_profit_total_yuan": f"{total_profit:+,.2f}"}
     data = {"items": [{key: item[key] for key in FIELDS + ("amount", "amount_yuan")}
                       for item in items],
             "total_count": len(items), "total_amount": total}
     if not items:
         message = "您目前没有持有中的理财产品。"
     else:
-        message = (f"您目前持有 {len(items)} 只理财产品，合计 {facts['total_amount_yuan']} 元："
-                   + "；".join(f"{item['name']} {item['amount_yuan']} 元" for item in items))
+        message = (f"您目前持有 {len(items)} 只理财产品，合计 {facts['total_amount_yuan']} 元，"
+                   f"累计收益 {facts['cum_profit_total_yuan']} 元。"
+                   + "；".join(f"{item['name']} 持有 {item['amount_yuan']} 元，"
+                              f"累计 {item['cum_profit_yuan']} 元（{item['cum_profit_pct']}）"
+                              for item in items))
     return _ok(data, facts, message)
