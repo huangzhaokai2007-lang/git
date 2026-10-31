@@ -4,6 +4,12 @@ from agent import classifier, confirm_card, llm, scene_context
 from tests.test_card_binding_ui import app, click
 from tests.conftest import raw
 
+
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
 @pytest.mark.parametrize('otp', [False, True])
 def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp):
     monkeypatch.setattr(llm, 'chat_json', lambda *a, **kw: (_ for _ in ()).throw(llm.LLMUnavailable('offline')))
@@ -14,10 +20,10 @@ def test_cancel_restores_bill_in_confirm_and_otp(monkeypatch, seeded, otp):
     original = at.session_state['workspace-result']['turn']['trace_id']
     balances = raw(seeded, 'SELECT id,balance FROM account ORDER BY id')
     at.chat_input[0].set_value('给王五转100元').run()
-    _cards = [button for button in at.button if "6222" in button.label]
+    _cards = [button for button in at.button if _is_pick(button)]
     if _cards:                      # 2026-10-31：转账先出「选择银行卡」卡面
         _cards[0].click().run()
-    _cards = [button for button in at.button if "6222" in button.label]
+    _cards = [button for button in at.button if _is_pick(button)]
     if _cards:                      # 2026-10-31：转账先出「选择银行卡」卡面
         _cards[0].click().run()
     session = at.session_state['session_id']

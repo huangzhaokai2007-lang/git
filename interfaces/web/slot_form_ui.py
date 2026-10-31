@@ -21,6 +21,7 @@ import streamlit as st
 
 from agent import pending_slots, write_flow
 
+import bank_brand
 import premium_ui
 import time_inputs
 
@@ -88,17 +89,19 @@ def _card_picker(executor: ThreadPoolExecutor, session_id: str, item: dict,
     payee_id = str(slots.get("payee_id") or "")
     cards = executor.submit(payee_card_flow.cards_of, payee_id).result()
     name = str(slots.get("payee_name") or "")
+    st.markdown(bank_brand.style_css(), unsafe_allow_html=True)
     with st.container(border=True, key="payee-card-picker"):
         premium_ui.card_head("🏦 选择收款人的银行卡",
                              f"{name} 有 {len(cards)} 张卡，请指定这次转到哪一张" if cards
                              else "这位收款人还没有登记银行卡", tone="warn")
         if not cards:
-            st.caption("先到「收款人」里给他补一张卡，或换一位收款人。")
+            st.caption("先把这位收款人的银行卡登记上，或者换一位收款人。")
             return
         for card in cards:
             label = f"{card['bank']} {card['card_no_mask']}"
-            if st.button(label, key=f"pick-card-{card['card_id']}", width="stretch",
-                         type="primary"):
+            #: 2026-10-31：卡面用**银行卡片**样式（品牌渐变 + 内联 SVG 标 + 掩码 + 卡种）。
+            st.markdown(bank_brand.card_html(card, holder=name), unsafe_allow_html=True)
+            if st.button("选择这张卡", key=f"pickcard-{card['card_id']}", width="stretch"):
                 turn = executor.submit(pending_slots.submit_form, session_id,
                                        {"payee_card": card["card_id"]}).result()
                 import forms

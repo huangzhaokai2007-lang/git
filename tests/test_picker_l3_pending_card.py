@@ -24,9 +24,15 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
+
 def _pick_card_if_asked(app) -> None:
     """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
-    cards = [button for button in app.button if "6222" in button.label]
+    cards = [button for button in app.button if _is_pick(button)]
     if cards:
         cards[0].click().run()
 
@@ -54,7 +60,7 @@ def test_l3_pending_card_appears_for_picker_path(monkeypatch: pytest.MonkeyPatch
     picks[1].click().run()
 
     #: 2026-10-31：转账先出「选择银行卡」卡面 → 点第一张再继续
-    _cards = [button for button in app.button if "6222" in button.label]
+    _cards = [button for button in app.button if _is_pick(button)]
     if _cards:
         _cards[0].click().run()
     assert not app.exception, app.exception

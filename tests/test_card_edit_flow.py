@@ -29,6 +29,12 @@ from data import payee_dao
 from tests.conftest import raw
 from tools import payee
 
+
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
 UID = "u_zhangsan_0001"
 SESSION = "sess-edit"
 WANGWU, ZHANG = "王五", "张小美"

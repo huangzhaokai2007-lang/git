@@ -3,6 +3,12 @@ import pytest
 from agent import confirm_card, orchestrator
 from tests.test_card_binding_ui import app, bind, click, CARD
 
+
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
 def test_same_card_shortcut_keeps_existing_detail_and_history(monkeypatch, seeded):
     at = app(monkeypatch, seeded)
     click(at, '管卡')
@@ -25,7 +31,7 @@ def test_switch_from_card_details_to_transfer_has_single_business_view(monkeypat
     click(at, '6222 **** **** 0001')
     click(at, '临时锁卡')
     at.chat_input[0].set_value('给王五转100元').run()
-    _cards = [button for button in at.button if "6222" in button.label]
+    _cards = [button for button in at.button if _is_pick(button)]
     if _cards:                      # 2026-10-31：转账先出「选择银行卡」卡面
         _cards[0].click().run()
     assert not at.exception

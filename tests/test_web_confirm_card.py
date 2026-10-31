@@ -38,16 +38,22 @@ if str(REPO / "scripts") not in sys.path:
 import demo                                                       # noqa: E402
 
 
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
+
 def _pick_card_if_asked(app) -> None:
     """2026-10-31：转账/定时转账现在先出「选择收款人的银行卡」卡面 —— 点第一张再继续。"""
-    cards = [button for button in app.button if "6222" in button.label]
+    cards = [button for button in app.button if _is_pick(button)]
     if cards:
         cards[0].click().run()
 
 
 def _pick_first_card(app) -> None:
     """2026-10-31：转账必须选收款卡 —— 点卡面上第一张银行卡再继续。"""
-    candidates = [button for button in app.button if "6222" in button.label]
+    candidates = [button for button in app.button if _is_pick(button)]
     if candidates:
         candidates[0].click().run()
 
@@ -103,7 +109,7 @@ def test_transfer_confirm_card_renders(monkeypatch: pytest.MonkeyPatch, clock: o
     at = _say(_app(monkeypatch, {"intent": "transfer_single", "confidence": 0.95,
                                  "slots": {"payee": "王五", "amount": "100.00"}}, clock),
               "给王五转 100 元")
-    cards = [button for button in at.button if "6222" in button.label]
+    cards = [button for button in at.button if _is_pick(button)]
     assert cards, "应先出选择银行卡卡面"
     cards[0].click().run()
     assert "转账确认卡" in _markdown(at)
@@ -121,7 +127,7 @@ def test_transfer_otp_card_renders(monkeypatch: pytest.MonkeyPatch, clock: objec
                                  "slots": {"payee": "张小美", "amount": "100.00"}}, clock),   # 非白名单 → L2
               "给张小美转 100 元")
     #: 2026-10-31：先选收款卡，再点确认
-    cards = [button for button in at.button if "6222" in button.label]
+    cards = [button for button in at.button if _is_pick(button)]
     assert cards, "应先出选择银行卡卡面"
     cards[0].click().run()
     confirm = next(b for b in at.button if str(getattr(b, "key", "")) == "confirm-ok")

@@ -23,6 +23,12 @@ if str(REPO / "scripts") not in sys.path:
 
 import demo                                                       # noqa: E402
 
+
+def _is_pick(widget) -> bool:
+    """选卡按钮：新版是「选择这张卡」，收款人卡列表里的是「银行名 + 6222 掩码」。"""
+    label = str(getattr(widget, "label", ""))
+    return "6222" in label or "选择这张卡" in label
+
 def _premium_css():
     """按文件加载（**不要**把 interfaces/web 加进 sys.path —— 会遮蔽 `app/` 包）。"""
     spec = importlib.util.spec_from_file_location("premium_css", REPO / "interfaces/web/premium_css.py")
@@ -153,7 +159,7 @@ def test_transfer_amount_opens_beside_payee_without_generic_slot_card(monkeypatc
 
     next(t for t in app.text_input if t.label == '转账金额（元）').set_value('100')
     next(b for b in app.button if b.label == '核对转账').click().run()
-    cards = [b for b in app.button if "6222" in b.label]
+    cards = [b for b in app.button if _is_pick(b)]
     assert cards, "应出「选择收款人的银行卡」卡面"
     cards[0].click().run()
     assert not app.exception
