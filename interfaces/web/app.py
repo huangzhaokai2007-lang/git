@@ -38,11 +38,33 @@ GREETING = "您好 请问我能为您提供什么帮助"
 HISTORY_TURNS = 4
 # ---------------- 启动引导（只碰环境变量与 data/ 层自己的 CLI） ----------------
 
+def _probe_db(db: Path) -> bool:
+    """探一下这个库能不能用（子进程里开一次：结构漂移/损坏都会非 0 退出）。
+
+    为什么用子进程：界面层只准调 `agent/`，不直接 import `data/`（分层铁律）。
+    """
+    code = ("import sys; sys.path.insert(0, '.');"
+            "from data.db import init_db; init_db(sys.argv[1])")
+    done = subprocess.run([sys.executable, "-c", code, str(db)], cwd=ROOT,
+                          capture_output=True, text=True, encoding="utf-8", errors="replace")
+    return done.returncode == 0
+
+
 def _ensure_db() -> bool:
-    """确保合成库存在；缺了就调 `python -m data.seed` 生成（界面不 import data/、不写 SQL）。"""
+    """确保合成库可用：缺了 → 生成；**结构漂移（旧库 + 新 schema）→ 自动重建**。
+
+    2026-10-31（用户实测「朋友刷新 main 也看不到新内容」）：云端实例里躺着一份旧结构的
+    `bank.db`，而旧版只判断"文件存在就返回 True" → 之后每次渲染都撞 SchemaDriftError，
+    页面直接报错，于是"仓库新、网站旧"。现在先探测，失败就重建（合成数据，重置无损）。
+    """
     db = Path(os.environ["DB_PATH"])
     if db.exists() and db.stat().st_size > 0:
-        return True
+        if _probe_db(db):
+            return True
+        with st.spinner("检测到数据库结构与新版本不一致，正在重建合成数据（演示数据会重置）…"):
+            subprocess.run([sys.executable, "-m", "data.seed", "--reset"], cwd=ROOT,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+        return _probe_db(db)
     with st.spinner("首次启动：生成合成数据（`python -m data.seed`）…"):
         done = subprocess.run([sys.executable, "-m", "data.seed"], cwd=ROOT,
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
@@ -52,6 +74,7 @@ def _ensure_db() -> bool:
         return False
     st.success("合成数据已生成。")
     return True
+
 
 def _init_state() -> None:
     """会话态：对话、轨迹、余额回显、追问轮次（跨 rerun 保留）。"""
