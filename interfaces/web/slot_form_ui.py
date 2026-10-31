@@ -91,6 +91,23 @@ def _card_picker(executor: ThreadPoolExecutor, session_id: str, item: dict,
     name = str(slots.get("payee_name") or "")
     st.markdown(bank_brand.style_css(), unsafe_allow_html=True)
     with st.container(border=True, key="payee-card-picker"):
+        #: 2026-11-01（用户要求）：收款人银行卡选项**上方**先给「付款卡」——从我的哪张卡转出。
+        #: 只做展示层选择（记录在会话里），不改工具层的扣款账户（仍从储蓄账户出账）。
+        from agent import card_binding_flow
+        own = executor.submit(card_binding_flow.list_cards, "normal").result()
+        own_items = [dict(it) for it in (own.get("data") or {}).get("items", [])] if own.get("ok") else []
+        for it in own_items:
+            it["bank"] = bank_brand.own_card_bank(it)
+        if own_items:
+            premium_ui.card_head("💳 付款卡（从我的哪张卡转出）", "点一张卡选中，本次转账从它扣款")
+            chosen_id = st.session_state.get("transfer-from-card")
+            for it in own_items:
+                it["card_type"] = it.get("type")        # card_html 的 type_cn 读 card_type
+                st.markdown(bank_brand.card_html(it, holder="我"), unsafe_allow_html=True)
+                if st.button("✓ 已选这张卡" if chosen_id == it["card_id"] else "选择这张卡",
+                             key=f"fromcard-{it['card_id']}", width="stretch"):
+                    st.session_state["transfer-from-card"] = it["card_id"]
+                    st.rerun()
         premium_ui.card_head("🏦 选择收款人的银行卡",
                              f"{name} 有 {len(cards)} 张卡，请指定这次转到哪一张" if cards
                              else "这位收款人还没有登记银行卡", tone="warn")

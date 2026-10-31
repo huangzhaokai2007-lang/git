@@ -73,8 +73,36 @@ OFFLINE_RULES: tuple[tuple[tuple[str, ...], str, dict], ...] = (
      {"contact": "张小美", "date": "2026-11-01", "budget": 500,
       "platform": "京东", "address": "上海市浦东新区张江路 100 号",
       "order_no": "GO-DEMO-20261026"}),
-    (("转",), "transfer_single", {"payee": "张小美", "amount": 100}),
+    #: 2026-11-01（用户实测）：只说「转账」时**不再**预填「张小美/100 元」—— 那会让人以为
+    #: 系统自己挑了收款人，界面直接跳到「选她的银行卡」。留空槽位，先出**收款人列表**让人选，
+    #: 再问金额。台词里点了名的（「给王五转 100 元」）照旧走真实解析。
+    (("转",), "transfer_single", {}),
 )
+#: 转账话术里「谁」与「多少」的两条抽取式（替身用，非业务实现）。
+#: 只认「给/向 X 转|汇|打」，不认「帮我转账」—— 那会把「我」当成收款人。
+_PAYEE_IN_TEXT = re.compile(r"(?:给|向)\s*([\u4e00-\u9fa5A-Za-z]{1,8}?)\s*(?:转|汇|打)")
+_AMOUNT_IN_TEXT = re.compile(r"转\s*(\d+(?:\.\d+)?)")
+
+
+def transfer_slots_from_text(text: str) -> dict:
+    """从话里抽转账的 `payee` / `amount`（替身"抽槽位"，真实模型本该做这件事）。
+
+    为什么补这一条：此前替身对「转」这条**写死**了「张小美 / 100 元」—— 台词里点了名也照样
+    用张小美（「给王五转100元」被解析成张小美），网页上还直接跳到「选张小美的银行卡」，
+    用户当场问"这个页面不应该在此时出现"。现在只从话里抽：抽不到就留空，
+    由编排层追问 —— 网页会先拉出**收款人列表**让人自己选。
+    """
+    raw = _strip_date_context(str(text or ""))
+    out: dict = {}
+    person = _PAYEE_IN_TEXT.search(raw)
+    if person:
+        out["payee"] = person.group(1)
+    amount = _AMOUNT_IN_TEXT.search(raw)
+    if amount:
+        out["amount"] = float(amount.group(1))
+    return out
+
+
 #: 相对时间词（替身"抽槽位"用；归一化仍由 `agent/period.py` 做，替身不重复判断）
 PERIOD_WORDS = ("上个月", "上月", "本月", "这个月", "上上个月")
 
@@ -372,6 +400,8 @@ def offline_verdict(text: str) -> tuple[str, dict]:
                     filled.pop("period", None)
             if intent == "txn_query":                    # F02 要的日期槽位（替身抽，非业务实现）
                 filled.update(dates_from_text(text))
+            if intent == "transfer_single":              # 转账的「谁 / 多少」同样从话里抽
+                filled.update(transfer_slots_from_text(text))
             return intent, filled
 
     #: 一个关键词都没命中，**但话里给得出来时间区间** → 用户要的几乎肯定是流水

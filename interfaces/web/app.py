@@ -62,11 +62,11 @@ def _ensure_db() -> bool:
         if _probe_db(db):
             return True
         with st.spinner("检测到数据库结构与新版本不一致，正在重建合成数据（演示数据会重置）…"):
-            subprocess.run([sys.executable, "-m", "data.seed", "--reset"], cwd=ROOT,
+            subprocess.run([sys.executable, "-m", "data.seed", "--reset", "--bind-cards"], cwd=ROOT,
                            capture_output=True, text=True, encoding="utf-8", errors="replace")
         return _probe_db(db)
     with st.spinner("首次启动：生成合成数据（`python -m data.seed`）…"):
-        done = subprocess.run([sys.executable, "-m", "data.seed"], cwd=ROOT,
+        done = subprocess.run([sys.executable, "-m", "data.seed", "--bind-cards"], cwd=ROOT,
                               capture_output=True, text=True, encoding="utf-8", errors="replace")
     if done.returncode != 0:
         st.error("合成数据生成失败，请先在仓库根目录跑 `uv run python -m data.seed`：\n\n"

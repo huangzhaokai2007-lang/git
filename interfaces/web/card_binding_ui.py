@@ -9,6 +9,7 @@ from agent import card_binding_flow as flow, scene_flow
 import card_limit_ui as limits_ui
 import card_lock_ui as locks_ui
 import card_gallery_ui as gallery_ui
+import bank_brand
 
 FILTERS = {"全部": None, "正常": "normal", "已锁定": "locked", "已挂失": "lost"}
 
@@ -206,6 +207,10 @@ def _render_cards(executor: ThreadPoolExecutor, session_id: str) -> None:
         st.error(result["message"])
         return
     items = result["data"]["items"]
+    #: 2026-11-01（用户要求）：本人卡也要显示不同银行行名（此前统一写死「模拟银行」）。
+    #: 只挂在展示层 items 上，不进 data.items 的冻结契约，也不碰 schema。
+    for it in items:
+        it["bank"] = bank_brand.own_card_bank(it)
     if not items:
         st.info("您还未绑定银行卡。" if selected_filter == "全部" else "没有该状态的已绑定银行卡。")
     else:

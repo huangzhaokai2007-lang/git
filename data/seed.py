@@ -349,8 +349,15 @@ def _write(conn: sqlite3.Connection, rows: list[tuple], balances: dict[str, int]
     return counts
 
 
-def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False) -> dict[str, int]:
-    """生成全套合成数据，返回各表写入行数；目标库非空时抛 `ValueError`（覆盖请传 reset=True）。"""
+def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False,
+             bind_cards: bool = False) -> dict[str, int]:
+    """生成全套合成数据，返回各表写入行数；目标库非空时抛 `ValueError`（覆盖请传 reset=True）。
+
+    `bind_cards=True`：额外把 6 张预设卡预绑到演示用户（`agent_card_binding`），
+    让评委第一次打开网页就能在「管卡」看到卡、转账时能选付款卡。默认 False ——
+    测试夹具（`seeded` / `demo.build_temp_db`）走共享的 `generate()`，不预绑，
+    以免影响「空绑定 → 绑卡」这条用例基线。
+    """
     path = Path(db_path)
     conn = reset_db(path) if reset else init_db(path)
     try:
@@ -376,6 +383,9 @@ def generate(db_path: str | Path = DEFAULT_DB_PATH, *, reset: bool = False) -> d
         rows, balances = _finalize(drafts)
         with transaction(conn):
             counts = _write(conn, rows, balances, payee_usage)
+            if bind_cards:
+                from data import card_binding_seed
+                counts["agent_card_binding"] = card_binding_seed.provision_bindings(conn)
         logger.info("已在 %s 写入合成数据：%s", path, counts)
         return counts
     finally:
@@ -386,11 +396,12 @@ def main(argv: list[str] | None = None) -> int:
     """CLI：`uv run python -m data.seed --reset`。"""
     parser = argparse.ArgumentParser(prog="python -m data.seed", description="生成 2025-09~2026-09 的合成银行数据")
     parser.add_argument("--reset", action="store_true", help="先清库再生成（覆盖已有数据）")
+    parser.add_argument("--bind-cards", action="store_true", help="额外把 6 张预设卡预绑到演示用户（网页演示用）")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH), help="库文件路径，默认取环境变量 DB_PATH")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
     try:
-        counts = generate(args.db, reset=args.reset)
+        counts = generate(args.db, reset=args.reset, bind_cards=args.bind_cards)
     except (ValueError, sqlite3.Error) as exc:
         logger.error("生成失败：%s", exc)
         return 2

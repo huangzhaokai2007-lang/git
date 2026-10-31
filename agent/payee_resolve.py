@@ -237,6 +237,17 @@ def list_people() -> list[dict]:
     return _people()
 
 
+def pickable_people() -> list[dict]:
+    """「没点名要转给谁」时的候选：全部**可转账**的收款人（黑名单除外）。
+
+    只给 `{id, name, phone}` 三个键 —— 与 `resolve_or_explain` 的候选同一形状，
+    界面沿用解析卡的渲染，不必为新场景再写一套。黑名单**不列**：它转不了，
+    列出来只会让人白点一次。
+    """
+    return [{"id": p["payee_id"], "name": p["name"], "phone": p["masked_phone"]}
+            for p in _people() if not p.get("blacklist")]
+
+
 def order_candidates(payees: list[dict]) -> list[dict]:
     """候选排序（人类规格「最近转账优先、常用优先、白名单优先」）。
 
