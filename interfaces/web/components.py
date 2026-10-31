@@ -237,7 +237,9 @@ def _evidence(confirmation: Any) -> None:
 
 def confirm_card(confirmation: Any, *, compact: bool = False,
                  edit_panel: Callable[[], None] | None = None,
-                 editable: bool = True) -> str | None:
+                 editable: bool = True,
+                 confirm_disabled: bool = False,
+                 disabled_hint: str = "") -> str | None:
     '确认卡**独立组件**（卡 16 第 2 条）：金额 / 卡面主对象 / 权限档(风险等级) / 确认 / 取消。'
     if compact:
         st.markdown('**核对修改**')
@@ -248,7 +250,10 @@ def confirm_card(confirmation: Any, *, compact: bool = False,
                 st.markdown(line)
         st.caption('确认后需要输入短信验证码。' if confirmation.requires_otp else '确认后提交执行。')
         left, middle, right = st.columns(3)
-        if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch'):
+        if confirm_disabled and disabled_hint:
+            st.caption(disabled_hint)
+        if left.button('✅ 确认', type='primary', key='confirm-ok', width='stretch',
+                       disabled=confirm_disabled):
             return 'confirm'
         if middle.button('✖ 取消', key='confirm-cancel', width='stretch'):
             return 'cancel'

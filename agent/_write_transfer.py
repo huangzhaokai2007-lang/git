@@ -211,7 +211,10 @@ def _prepare_transfer(filled: dict) -> Prepared:
     tier, quota_note = payee_risk.apply_quota(person or {}, filled["amount_cents"],
                                               str(preview.facts.get("tier") or "L2"),
                                               factors=preview.facts.get("factors") or [])
+    #: 2026-10-31：`payee_card_chosen` = 用户**显式选过**卡（false = 走的是工具层默认卡）；
+    #: 网页据此把「确认」置灰，逼用户先选卡。
     return Prepared(ok=True, facts={**preview.facts, "tier": tier, "payee_phone": masked,
+                                    "payee_card_chosen": bool(filled.get("payee_card_id")),
                                     "quota_note": quota_note},
                     credential=str(preview.data["preview_token"]))
 
@@ -273,6 +276,8 @@ def _prepare_scheduled(filled: dict) -> Prepared:
                                               str(preview.facts.get("tier") or "L2"),
                                               factors=preview.facts.get("factors") or [])
     facts = {**preview.facts, "tier": tier, "payee_phone": masked,
+             #: 2026-10-31：用户是否**显式选过**卡（网页据此把「确认」置灰）
+             "payee_card_chosen": bool(filled.get("payee_card_id")),
              "schedule": str(filled["schedule"]), "quota_note": quota_note}
     #: 2026-10-30（用户实测「产生了 bug」）：同收款人 + 同金额 + **同一天**已经有一笔待执行预约时，
     #: 卡面给一行警示（不阻止 —— 可能你就是要再建一笔），避免"悄悄多出一笔"。

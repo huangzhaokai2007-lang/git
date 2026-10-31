@@ -258,8 +258,15 @@ def _render_confirm(*, inline: bool = False) -> None:
 
     _draft = _agent_executor().submit(card_draft.draft_of, st.session_state["session_id"]).result()
     _editable = bool(_draft is not None and getattr(_draft, "fields", None))
+    #: 2026-10-31（用户要求）：转账/定时转账**没显式选过收款卡** → 确认按钮置灰，
+    #: 逼用户先选（选卡卡面见 slot_form_ui）；服务端 _prepare 也会拒绝无卡请求。
+    _card_unsure = (str(getattr(confirmation, "intent", "")) in ("transfer_single", "transfer_scheduled")
+                    and not bool((getattr(confirmation, "facts", None) or {}).get("payee_card_chosen")))
     action = ui.confirm_card(
         confirmation, compact=inline, editable=_editable,
+        confirm_disabled=_card_unsure,
+        disabled_hint="请先选择收款人的银行卡（在下方「🏦 选择收款人的银行卡」里点一张）"
+        if _card_unsure else "",
         edit_panel=lambda: card_edit_ui.render(_agent_executor(), st.session_state["session_id"]))
     if action == "confirm":
         _confirm_submit("确认", inline=inline)

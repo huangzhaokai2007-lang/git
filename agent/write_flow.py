@@ -340,6 +340,13 @@ def start(intent: str, slots: Mapping, session_id: str, *, trace_id: str = "",
     """新起一笔写操作：SLOT_FILL → PRECHECK（定档）→ CONFIRM_CARD / PENDING_REVIEW。"""
     #: 2026-10-31：上一步停在"选收款卡"、用户却改说了**另一笔**（同意图的新请求）——
     #: 旧的选卡登记要作废，否则会拿旧草稿去预检，报「原草稿已失效」。
+    #: 2026-10-31：上一笔转账还挂着确认卡（草稿态）时，用户改说了**另一笔** ——
+    #: 旧卡直接作废，避免后面 revoke 撞「原草稿已失效」。验证码阶段不动（用户可能只是想核对）。
+    _inflight = confirm_card.current(session_id)
+    if (_inflight is not None and str(getattr(_inflight, "stage", "")) == "confirm"
+            and intent in ("transfer_single", "transfer_scheduled")
+            and str(getattr(_inflight, "intent", "")) == intent):
+        confirm_card.clear(session_id)
     _stale = pending_slots.peek(session_id)
     if (_stale and _stale.get("intent") == intent
             and list(_stale.get("missing") or []) == ["payee_card"]):

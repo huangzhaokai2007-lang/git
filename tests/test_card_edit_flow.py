@@ -208,3 +208,20 @@ def test_edit_aa_amounts_changes_the_total(wired, monkeypatch) -> None:
     edited = write_flow.edit(SESSION, {"amounts": "王五 300 元、张小美 200 元"})
     assert "500.00" in edited.reply                                     # 总额 = 合计
     assert "300.00" in edited.reply
+
+
+def test_new_transfer_discards_the_inflight_draft(wired, monkeypatch) -> None:
+    _fake(monkeypatch, [(WANGWU, "100"), (ZHANG, "200")])
+    orchestrator.handle(f"给{WANGWU}转 100 元", session_id=SESSION)
+    first = write_flow.start("transfer_single", {"payee": WANGWU, "amount": "100",
+                                                 "payee_card_id": CARD_ID}, SESSION)
+    assert "CONFIRM_CARD" in first.states
+    assert confirm_card.current(SESSION) is not None
+
+    # 用户改说另一笔（新请求，不是改卡）
+    second = orchestrator.handle(f"给{ZHANG}转 200 元", session_id=SESSION)
+    assert "原草稿已失效" not in (second.reply or ""), second.reply
+    done = write_flow.start("transfer_single", {"payee": ZHANG, "amount": "200",
+                                                "payee_card_id": "pc_0004_a"}, SESSION)
+    assert "CONFIRM_CARD" in done.states
+    assert ZHANG in done.reply and "200.00" in done.reply
