@@ -175,8 +175,9 @@ def _time(text: str, context: dict) -> dict | None:
 
 def _navigation(text: str, context: dict) -> dict | None:
     actions = {'算了': 'cancel', '算了吧': 'cancel', '取消刚才那个': 'cancel',
+               '取消': 'cancel', '不办了': 'cancel', '先不办了': 'cancel', '取消操作': 'cancel',
                '重新来': 'reset', '重新开始': 'reset', '返回刚才的列表': 'back',
-               '返回列表': 'back', '回到列表': 'back', '再试一次': 'retry', '重试': 'retry'}
+               '返回列表': 'back', '回到列表': 'back', '再试一次': 'retry', '重试': 'retry', '再试一下': 'retry'}
     if text not in actions:
         return None
     intent = context.get('intent')

@@ -45,12 +45,12 @@ _UNSUPPORTED = ("这个我确实帮不上忙，抱歉 🙏",
 def reply_for(text: str, *, intent: str = "smalltalk") -> str:
     """给一句回应：**一句热络/婉拒 + 一句业务引导**（不含任何业务数字，守铁律 2）。"""
     lowered = str(text or "").strip().lower()
-    for keywords, greeting, nudge in _RULES:
-        if any(word in lowered for word in keywords):
-            return f"{greeting}\n\n{nudge}"
     if intent == "out_of_scope":
         greeting, nudge = _UNSUPPORTED
         return f"{greeting}\n\n{nudge}"
+    for keywords, greeting, nudge in _RULES:
+        if any(word in lowered for word in keywords):
+            return f"{greeting}\n\n{nudge}"
     greeting, nudge = _FALLBACK
     return f"{greeting}\n\n{nudge}"
 

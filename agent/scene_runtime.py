@@ -1,8 +1,21 @@
 """Contextual understanding and safe draft navigation around the existing state machine."""
 import re
+import logging
+from collections.abc import Callable
 
 from agent import classifier, confirm_card, scene_context, scene_language, write_flow
 from tools import _scene_reads
+from tools.schemas import ToolResult
+
+
+def call_read(call: Callable, slots: dict) -> ToolResult:
+    """Keep unexpected read failures recoverable; never wrap or replay write calls."""
+    try:
+        return call(slots)
+    except Exception:
+        logging.getLogger(__name__).exception('Read query failed')
+        return ToolResult(ok=False, error_code='SERVICE_UNAVAILABLE',
+                          message='查询服务暂时不可用，请稍后重试。')
 
 
 def plan(ctx, text: str):
@@ -55,9 +68,16 @@ def response(ctx):
     if decision.get('ask') and not decision.get('read_request'):
         return write_flow.Step(intent=ctx.intent, states=['CLARIFY'], reply=decision['ask'], ask=decision['ask'])
     if action in ('cancel', 'reset'):
+        from agent import pending_slots
+        pending_slots.clear(ctx.session_id)
         scene_context.reset(ctx.session_id)
         return write_flow.Step(intent='smalltalk', states=['PRECHECK'], reply='已关闭当前草稿；已经提交的业务不受影响。', ask='scene_reset')
     if action == 'retry':
+        failed = scene_context.snapshot(ctx.session_id).get('failed_read')
+        if failed:
+            ctx.intent, ctx.slots = failed['intent'], dict(failed['slots'])
+            ctx.scene_request = failed.get('read_request')
+            return None
         return write_flow.Step(intent=ctx.intent, states=['CLARIFY'], reply='请先核对上次办理结果；如需重新办理，请明确说明业务和对象，我会重新生成确认。', ask='请明确要重新办理的业务。')
     if action == 'back':
         state = scene_context.snapshot(ctx.session_id)
@@ -88,7 +108,7 @@ def amend_inflight(text: str, session: str):
         step = write_flow.start(decision['intent'], decision['slots'], session)
         scene_context.remember_write(session, decision['intent'], decision['slots'], status=step.result, reply=step.reply)
         return step
-    if text.strip() in ('重新来', '重新开始', '算了', '算了吧', '取消刚才那个'):
+    if decision and decision.get('action') in ('cancel', 'reset'):
         from tools._scene_drafts import revoke
         revoke(current.credential_kind, current.credential)
         confirm_card.clear(session)
@@ -106,6 +126,13 @@ def route(ctx):
 
 def remember(ctx, status: str, reply: str) -> None:
     result = getattr(ctx, 'read_result', None)
+    from agent.orchestrator import READ_INTENTS
+    failed = None
+    if status == 'error' and ctx.intent in READ_INTENTS and ctx.tool_calls:
+        failed = {'intent': ctx.intent, 'slots': dict(ctx.slots),
+                  'read_request': getattr(ctx, 'scene_request', None)}
+    if failed or status == 'success' or ctx.intent in write_flow.WRITE_INTENTS:
+        scene_context.update(ctx.session_id, failed_read=failed)
     if status == 'success' and result is not None:
         views = scene_context.snapshot(ctx.session_id).get('views', [])
         scene_context.remember_result(ctx.session_id, ctx.intent, ctx.slots, result, getattr(ctx, 'scene_request', None))

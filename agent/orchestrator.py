@@ -225,14 +225,20 @@ def _handle(text: str, *, history: list[str] | None = None, clarify_round: int =
             ctx.trace_id = in_flight.trace_id
         return _apply(ctx, write_flow.resume(ctx.session_id, text, classify=lambda t: (intent_resolver or classifier.classify)(_with_date_context(t), history)))
     ctx.enter("CLASSIFY")
-    verdict = (scene_runtime.plan(ctx, text)
+    from agent import conversation_language
+    verdict = (conversation_language.understand(text, ctx.session_id) or scene_runtime.plan(ctx, text)
+               or conversation_language.colloquial(text)
                or (intent_resolver or classifier.classify)(_with_date_context(text), history))
     corrected = classifier.correct_misroute(text, verdict.intent)   # 明显误判 → 纠正
     if corrected is not None:
         verdict = corrected
     #: 2026-10-27：追问后的这一句按分类结果合并回原意图（详见 `pending_slots.resume`）。
+    previous_pending = pending_slots.peek(ctx.session_id)
+    verdict = pending_slots.read_answer(ctx.session_id, verdict) or verdict
     if (answered := pending_slots.resume(ctx.session_id, text, verdict,
                                          trace_id=ctx.trace_id)) is not None:
+        if previous_pending and len(answered.missing) < len(previous_pending['missing']):
+            ctx.clarify_round = 0
         return _apply(ctx, answered)
     ctx.intent, ctx.confidence = verdict.intent, verdict.confidence
     ctx.slots = dict(verdict.slots)
@@ -290,6 +296,7 @@ def _read_flow(ctx: _Ctx, *, card_reader: Callable[[dict], ToolResult] | None = 
     ctx.enter("SLOT_FILL")
     ctx.slots, ctx.missing = (ctx.slots, []) if getattr(ctx, "scene_request", None) else _fill_slots(ctx.intent, ctx.slots)
     if ctx.missing:
+        pending_slots.remember(ctx.session_id, ctx.intent, ctx.slots, ctx.missing)
         return _clarify(ctx, templates.clarify_missing(ctx.missing, ctx.intent), reason="missing_slots")
     ctx.enter("PRECHECK")
     if _precheck(ctx.intent) != READ_TIER or ctx.intent not in TOOL_ROUTES:
@@ -299,10 +306,10 @@ def _read_flow(ctx: _Ctx, *, card_reader: Callable[[dict], ToolResult] | None = 
         name, call = "list_bound_cards", card_reader
     ctx.enter("EXECUTE")
     ctx.tool_calls.append(name)
-    result = call(ctx.slots)
+    result = scene_runtime.call_read(call, ctx.slots)
     if not result.ok:
         code = _code(result)
-        return _finish(ctx, templates.tool_error(code, result.message), result="error",
+        return _finish(ctx, templates.tool_error(code, result.message) + '\n可回复“重试”，按原查询范围再查一次。', result="error",
                        tool=name, error_code=code)
     ctx.enter("VERIFY_NUMBERS")
     ctx.read_result = result
