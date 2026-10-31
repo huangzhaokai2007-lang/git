@@ -326,8 +326,11 @@ def _sidebar() -> None:
             st.rerun()
 
 def _chat_page() -> None:
-    #: 网页里群收款要先出**可编辑的发起卡**（用户 2026-10-31），点「发起群收款」才出确认卡
-    write_flow.set_aa_edit_first(True)
+    #: 网页里群收款要先出**可编辑的发起卡**（用户 2026-10-31），点「发起群收款」才出确认卡。
+    #: 用 getattr 兜一下：万一部署时序错开（app 新、agent 旧），也不至于整页红屏。
+    _enable_edit_first = getattr(write_flow, "set_aa_edit_first", None)
+    if callable(_enable_edit_first):
+        _enable_edit_first(True)
     workspace_ui.notifications(_agent_executor(), st.session_state['session_id'], _follow_up)
     workspace_ui.transcript(st.session_state['messages'], _agent_executor(),
                             st.session_state['session_id'], _follow_up)
