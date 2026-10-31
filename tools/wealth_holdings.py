@@ -12,7 +12,10 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from data import dao
+from data.seed import AS_OF
 from tools._query_common import ToolError, _dao_reject, _fail, _money_facts, _ok, current_user_id
 from tools import _wealth_products
 from tools._wealth_risk import RISK_LABELS, _rank, _yield_text, require_assessment
@@ -24,6 +27,30 @@ TIER = "L0"
 
 #: 一行持仓的字段（编排层渲染与事实包共用，避免两处各写一份键名）
 FIELDS = ("holding_id", "product_id", "name", "risk_level", "yield", "term_days", "purchase_date")
+
+
+def _income_facts(amount_cents: int, expected_yield: float, term_days: int,
+                  purchase_date: str) -> dict:
+    """持仓的收益预估（**全部在工具层算**，界面只排版 —— 铁律 2）。
+
+    - `annual_income_yuan`：按当前持有金额放满一年的收益；
+    - `maturity_date` / `remaining_days`：到期日与剩余天数（活期无到期日）；
+    - `to_maturity_income_yuan`：从现在持有到期的预估收益（活期为空）。
+
+    口径写死在这里，别在界面再乘一遍：金额 × 年化 ÷ 100 × 剩余天数 ÷ 365。
+    演示数据没有复利、没有费用，回执里已注明「模拟」。
+    """
+    amount_yuan = amount_cents / 100
+    annual = amount_yuan * expected_yield / 100
+    facts = {"annual_income_yuan": f"{annual:,.2f}"}
+    if term_days <= 0:                                  # 活期：没有到期日
+        return {**facts, "maturity_date": "", "remaining_days": 0,
+                "to_maturity_income_yuan": ""}
+    maturity = date.fromisoformat(purchase_date) + timedelta(days=term_days)
+    remaining = max(0, (maturity - AS_OF).days)
+    to_maturity = annual * remaining / 365
+    return {**facts, "maturity_date": maturity.isoformat(), "remaining_days": remaining,
+            "to_maturity_income_yuan": f"{to_maturity:,.2f}"}
 
 
 def _rows(user_id: str) -> list[dict]:
@@ -90,7 +117,10 @@ def list_holdings() -> ToolResult:
               "name": row["name"], "risk_level": row["risk_level"],
               "yield": _yield_text(row["expected_yield"]), "term_days": row["term_days"],
               "purchase_date": row["purchase_date"],
-              **_money_facts(int(row["amount"]), "amount")} for row in rows]
+              **_money_facts(int(row["amount"]), "amount"),
+              **_income_facts(int(row["amount"]), float(row["expected_yield"]),
+                              int(row["term_days"] or 0), row["purchase_date"])}
+             for row in rows]
     total = sum(int(row["amount"]) for row in rows)
     facts = {"items": items, "total_count": len(items), **_money_facts(total, "total_amount")}
     data = {"items": [{key: item[key] for key in FIELDS + ("amount", "amount_yuan")}

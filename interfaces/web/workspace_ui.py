@@ -168,10 +168,12 @@ def result(executor, session: str, ask, detail_loader) -> None:
         else:
             st.info(turn.get('reply') or '当前没有可推荐的产品。')
     elif scene == 'wealth_holdings':
-        st.markdown(turn.get('reply') or '当前没有查询结果。')
-        #: 持仓页原来只有一段文字，没有任何动作 —— 用户想赎回无从下手（实测确认）。
-        wealth_ui.render_holdings_actions(
-            turn, ask=ask, key_prefix='workspace-hold-' + str(turn.get('trace_id')))
+        #: 持仓页和推荐页同一套卡片：金额大字 + K 线 + 还能带来多少 + 赎回。
+        #: **回执原文不再上屏** —— 卡片已经把名称/金额/年化/买入日列全，再打一遍就是两份数据。
+        wealth_ui.render_holdings(
+            turn, ask=ask, key_prefix='workspace-hold-' + str(turn.get('trace_id')),
+            daily_loader=lambda pid, gran='monthly': executor.submit(
+                wealth_daily.load, session, pid, gran).result())
     elif scene == 'risk_assess':
         st.markdown(turn.get('reply') or '当前没有查询结果。')
         risk_ui.render_turn(turn, ask=ask, key_prefix='workspace-risk-' + str(turn.get('trace_id')))
