@@ -107,7 +107,7 @@ def test_balance_and_details_use_the_bound_account(seeded):
     before = raw(seeded, "SELECT * FROM account")
     assert bind().ok
     item = api().list_bound_cards().data["items"][0]
-    assert item["balance_yuan"] == "59,945.00"
+    assert item["balance_yuan"] == "52,281.00"
     assert api().card_detail(CARD).data["balance_yuan"] == item["balance_yuan"]
     assert not api().card_detail("card_credit_0002").ok
     assert raw(seeded, "SELECT * FROM account") == before

@@ -43,7 +43,7 @@ NORMAL = frozenset({m for b in MONTHLY_BATCHES for m in b.merchants} | {s.mercha
                    | {name for _, name in TRANSFER_PAYEES} | {"示例科技有限公司", "信用卡还款"})
 PHONE_MASK = re.compile(r"^\d{3}\*{4}\d{4}$")
 LONG_DIGITS = re.compile(r"\d{12,}")
-TXN_COUNT = 792                                    # 16 个账期月：16×49 + 12 植入 = 796，锚点末月(2026-09)未过完扣 4 条
+TXN_COUNT = 645                                    # 13 个账期月：13×49 + 12 植入 = 649，末月未过完扣 4 条
 
 
 @pytest.fixture(scope="module")
@@ -97,7 +97,7 @@ def test_cli_is_reproducible_across_processes(tmp_path: Path) -> None:
     for path in (first, second):
         result = run_cli(path, "--reset")
         assert result.returncode == 0, result.stderr
-        assert "792" in result.stderr                       # 日志里回报条数
+        assert "645" in result.stderr                       # 日志里回报条数
     assert dump(first) == dump(second)
 
 
@@ -182,7 +182,7 @@ def test_txn_count_months_and_categories(conn: sqlite3.Connection) -> None:
     txns = rows(conn, "txn")
     assert len(txns) == TXN_COUNT
     months = {t["ts"][:7] for t in txns}
-    assert months == {f"{y}-{m:02d}" for y, m in ((2025, m) for m in range(9, 13))} | {f"2026-{m:02d}" for m in range(1, 13)}
+    assert months == {f"{y}-{m:02d}" for y, m in ((2025, m) for m in range(9, 13))} | {f"2026-{m:02d}" for m in range(1, 10)}
     assert all(CATEGORIES >= {t["category"]} and CHANNELS >= {t["channel"]} for t in txns)
     assert {t["category"] for t in txns} == CATEGORIES                     # 7 类都出现过
     assert {t["channel"] for t in txns} == CHANNELS

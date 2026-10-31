@@ -21,7 +21,7 @@ def test_facts_expose_balance_and_affordable_flags(seeded: Path) -> None:
     result = wealth.recommend_wealth("R5")
     assert result.ok
     facts = result.facts
-    assert facts["available_yuan"] == "59,945.00" and facts["available"] == 5_994_500
+    assert facts["available_yuan"] == "52,281.00" and facts["available"] == 5_228_100
 
     by_id = {item["product_id"]: item for item in facts["items"]}
     assert by_id["prod_r5_growth"]["min_amount_yuan"] == "100,000.00"

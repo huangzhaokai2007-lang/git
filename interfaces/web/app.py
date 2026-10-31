@@ -301,6 +301,26 @@ def _refresh_sidebar_balance():
         st.session_state["balance"] = [{"text": turn.reply, "facts": turn.facts}]
     return turn
 
+def _render_demo_clock() -> None:
+    """演示时钟开关（侧边栏）：固定白天 12:00，避免 night 因子把演示卡在 L3。
+
+    2026-11-01（用户排练 PPT/答辩）：这是**时间输入**的设定，不是绕过风控 ——
+    L1/L2/L3 判定、OTP、限额、白名单、审计日志一律照旧；关掉开关立刻回到真实时间。
+    """
+    from agent import demo_clock
+
+    switch = st.checkbox("演示时钟（白天 12:00）", value=demo_clock.enabled(),
+                         key="demo-clock-on",
+                         help="仅演示用：把系统时间固定为工作日中午，避免深夜风控把演示"
+                              "卡在「待人工复核」。风控规则未做任何改动。")
+    if switch and not demo_clock.enabled():
+        demo_clock.set_moment()
+    elif not switch and demo_clock.enabled():
+        demo_clock.clear()
+    if demo_clock.enabled():
+        st.caption(f"演示时钟：{demo_clock.label()}（风控规则未改动）")
+
+
 def _sidebar() -> None:
     """侧边栏：账户余额、快捷场景与重置会话。"""
     with st.sidebar:
@@ -321,6 +341,8 @@ def _sidebar() -> None:
                 st.error(turn.reply)
             else:
                 st.rerun()
+        st.divider()
+        _render_demo_clock()
         st.divider()
         st.markdown("#### 快捷场景")
         prompt = ui.scenes()
