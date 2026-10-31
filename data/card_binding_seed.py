@@ -5,10 +5,12 @@ import sqlite3
 from typing import Callable
 
 # 明确公开的测试夹具，绝不可用于真实银行卡或部署认证。
+#: 2026-11-01（用户要求）：**所有卡的密码统一 123456**，与短信验证码同值 ——
+#: 评委现场只需要记一个数字。仍只是合成夹具，不涉及任何真实卡。
 DEMO_CREDENTIALS = (
-    ("card_savings_0001", "6222000000000001", "314159"),
-    ("card_credit_0002", "6222000000000002", "271828"),
-    ("card_savings_0003", "6222000000000003", "161803"),
+    ("card_savings_0001", "6222000000000001", "123456"),
+    ("card_credit_0002", "6222000000000002", "123456"),
+    ("card_savings_0003", "6222000000000003", "123456"),
 )
 
 #: 演示库预绑的本人名下卡（评委一进来就能在「管卡」看到、转账时能选付款卡）。
@@ -42,9 +44,24 @@ def provision_bindings(conn: sqlite3.Connection, *, user_id: str = "u_zhangsan_0
     at = _time.time()
     added = 0
     for card_id in BOUND_CARD_IDS:
+        #: 卡不存在就跳过（额度演练卡要等 card_limit_seed 建好）——否则撞 card(id) 外键。
+        if conn.execute("SELECT 1 FROM card WHERE id=?", (card_id,)).fetchone() is None:
+            continue
         cur = conn.execute(
             "INSERT OR IGNORE INTO agent_card_binding(user_id, card_id, bound_at) VALUES (?,?,?)",
             (user_id, card_id, at))
         added += cur.rowcount
     return added
+
+
+def reset_card_status(conn: sqlite3.Connection, *, user_id: str = "u_zhangsan_0001") -> int:
+    """演示库：把本人名下所有卡恢复成 `normal`（未挂失/未锁定）。
+
+    2026-11-01（用户要求）：评委现场不希望一进来就有张「已挂失」的卡挡路。
+    只在**演示种子**（`data.seed --bind-cards`）里调，测试夹具走普通 `generate()`，
+    仍保留 seed 自带的 lost 卡，避免影响挂失/解挂那批用例的基线。
+    """
+    cur = conn.execute(
+        "UPDATE card SET status='normal' WHERE user_id=? AND status<>'normal'", (user_id,))
+    return cur.rowcount
 

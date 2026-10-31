@@ -12,7 +12,7 @@ from data.seed import USER_ID
 from tests.conftest import FOREIGN_USER, raw
 from tools._query_common import set_current_user
 
-NUMBER, PIN, CARD = "6222000000000001", "314159", "card_savings_0001"
+NUMBER, PIN, CARD = "6222000000000001", "123456", "card_savings_0001"
 SESSION = "binding-test"
 
 
@@ -124,7 +124,7 @@ def test_filter_and_total_count_apply_to_bound_cards_only(seeded):
 def test_card_number_requires_fresh_password_and_bound_ownership(foreign):
     assert not api().reveal_card_number(CARD, PIN, session_id=SESSION).ok
     assert bind().ok
-    assert not api().reveal_card_number(CARD, "271828", session_id=SESSION).ok
+    assert not api().reveal_card_number(CARD, "000000", session_id=SESSION).ok
     result = api().reveal_card_number(CARD, PIN, session_id=SESSION)
     assert result.ok and result.data == {"card_no": NUMBER}
     assert NUMBER not in json.dumps(result.facts)

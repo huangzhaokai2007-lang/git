@@ -12,7 +12,8 @@ DEMO_CARDS = (
     ("card_limit_rejected", "3333333333333333", "rejected"),
 )
 INITIAL_CREDIT = 2_000_000
-DEMO_PINS = {"card_limit_pending": "111111", "card_limit_approved": "222222", "card_limit_rejected": "333333"}
+#: 2026-11-01（用户要求）：调额演练卡的密码同样统一 123456（与短信验证码同值）。
+DEMO_PINS = {"card_limit_pending": "123456", "card_limit_approved": "123456", "card_limit_rejected": "123456"}
 MAX_CREDIT = 10_000_000
 MAX_DAILY = 10_000_000
 

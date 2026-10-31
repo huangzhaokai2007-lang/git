@@ -53,7 +53,8 @@ def test_risk_shortcut_keeps_assessment_entry_in_current_workspace(monkeypatch, 
         reply='您还没有完成风险测评。', facts={'assessed': False, 'query': True})
     monkeypatch.setattr(card_binding_flow, 'handle', lambda *a, **kw: source)
     at = app(monkeypatch, seeded)
-    click(at, '风险程度')
+    #: 2026-11-01：侧边栏入口摘掉后，场景从对话触发
+    at.chat_input[0].set_value('我的风险等级是多少').run()
     assert at.session_state['workspace-result']['scene'] == 'risk_assess'
     assert any(button.label == '开始风险测评' for button in at.button)
     assert not any(form.key == 'risk-form' for form in at.get('form'))

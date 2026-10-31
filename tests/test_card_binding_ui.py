@@ -10,7 +10,7 @@ from streamlit.testing.v1 import AppTest
 from tests.conftest import raw
 
 APP = Path(__file__).resolve().parents[1] / "interfaces/web/app.py"
-NUMBER, PIN, CARD = "6222000000000001", "314159", "card_savings_0001"
+NUMBER, PIN, CARD = "6222000000000001", "123456", "card_savings_0001"
 
 
 def without_sidebar_refresh(monkeypatch):
