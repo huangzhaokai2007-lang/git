@@ -45,13 +45,37 @@ def click_shortcut(at, label):
     assert not at.exception
 
 
-def pick_bill_range(at, start="2026-08-01", end="2026-08-31"):
-    """账单场景的新前提：先选时间段再点「生成账单报告」，报告正文/图表才会出现。
+def _data_month() -> tuple[str, str]:
+    """合成数据里**有数据**的那个月（取 `data.seed.AS_OF`，跨天也只增不减）。"""
+    from datetime import date
 
-    直接预置 `bill-range` 表示「用户已经在时间段小框里选过一轮」——否则页面只显示
-    时间段选择区块，报告正文被有意藏起来（legacy_bill_ui 2026-10-29）。
+    try:
+        from data.seed import AS_OF as anchor
+    except Exception:                                    # 兜底：与 seed 常量保持一致
+        anchor = date(2026, 9, 12)
+    first = anchor.replace(day=1)
+    nxt = (first.replace(day=28) + __import__("datetime").timedelta(days=4)).replace(day=1)
+    return first.isoformat(), (nxt - __import__("datetime").timedelta(days=1)).isoformat()
+
+
+def pick_bill_range(at, start="", end=""):
+    """打开账单场景，并把时间段设成**有数据的那个月**（驱动真实控件）。
+
+    2026-11-01 修：账单默认区间是「上个月」，合成数据只到 2026-09-12 —— 默认月没数据，
+    报告会是 0.00 且没有饼图。所以这里按数据锚点选月，而不是跟着墙钟走。
     """
-    at.session_state[BILL_RANGE] = (start, end)
+    import datetime as _dt
+
+    if not any((getattr(box, "key", "") or "") == "bill-range-start" for box in at.date_input):
+        click_shortcut(at, "看账单")
+    lo, hi = (start or _data_month()[0]), (end or _data_month()[1])
+    for box in at.date_input:
+        if (box.key or "") == "bill-range-start":
+            box.set_value(_dt.date.fromisoformat(lo))
+        elif (box.key or "") == "bill-range-end":
+            box.set_value(_dt.date.fromisoformat(hi))
+    at.run()
+    at.session_state[BILL_RANGE] = (lo, hi)
 
 
 @pytest.mark.parametrize(('label', 'intent'), [
@@ -93,7 +117,6 @@ def test_bill_workspace_does_not_follow_another_shortcut(monkeypatch, seeded):
     offline(monkeypatch)
     at = app(monkeypatch, seeded)
     pick_bill_range(at)
-    click_shortcut(at, '看账单')
     assert not pies(at)
     click(at, '生成账单报告')
     assert len(pies(at)) == 1
@@ -121,6 +144,9 @@ def test_session_reset_restores_a_fresh_chat_workspace(monkeypatch, seeded):
     # 新行为：报告先不露面，只给时间段选择；点「生成账单报告」后正文与图表才出现。
     assert not pies(at)
     assert any('选好时间段后' in item.value for item in at.caption)
+    #: 2026-11-01：默认「上个月」在合成数据里没有流水（数据锚点 2026-09-12），
+    #: 按真实用户路径把区间拨到**有数据的那个月**，再生成。
+    pick_bill_range(at)
     click(at, '生成账单报告')
     assert not at.exception
     # Comment 10：收支明细并排两张饼（左支出、右收入），不再是单张支出饼。

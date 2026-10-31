@@ -201,8 +201,11 @@ def _cancel(confirmation) -> None:
 
 def _render_pending() -> None:
     """L3 待复核：登记仍在 agent 层，撤销也走 agent 层（界面只显示与转发）。"""
-    pending_id = st.session_state.get("pending_id")
     last = st.session_state["messages"][-1]
+    #: 2026-10-31：走「选收款卡 → 提交」这条路时，pending_id 只在 turn 里，
+    #: 会话态没被写上 → L3 待复核卡不出来（用户看起来没反应）。两处都兜一下。
+    pending_id = (st.session_state.get("pending_id")
+                  or (last.get("turn") or {}).get("pending_id"))
     if not pending_id or last.get("turn") is None or last["turn"].get("pending_id") != pending_id:
         return
     if ui.pending_card(last["text"]):
